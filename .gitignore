@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Editor
+.vscode/*
+!.vscode/settings.json
+
+# Claude Code local (machine-specific) settings — keep shared settings.json only
+.claude/settings.local.json
+
+# Remember system (session memory) — keep local, not in repo
+.remember/tmp/
+.remember/logs/
+
+# Common dev artifacts (for future projects in projects/)
+node_modules/
+__pycache__/
+*.pyc
+.env
+.venv/
+venv/
+dist/
+build/
