@@ -5,6 +5,13 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-30
 
+### First project chosen + spec drafted — "Co-Live Terminal"
+
+- Decided the first build: a **co-live, single-owner Claude Code session** that a **desk client** and the **glasses** attach to as co-equal live clients — work at the desk, leave and interact freely from the G2+R1 (free-form, not just yes/no), return and pick up the same live session; works off-Wi-Fi via Tailscale.
+- Architecture approved: fork `even-terminal` (already a single-owner multi-client SSE server) as the Session Core/Client Hub; reuse the **unmodified Even app** as the glasses client; build a **net-new desk client** that becomes the user's primary workspace (full native-parity is its definition of done).
+- Sequencing **B**: prove the end-to-end away-from-desk loop first on a functional desk client, then close parity to "no regression." Effort stays **High** through spec+plan; **switch to ultracode at execution**.
+- Spec: `docs/superpowers/specs/2026-05-30-colive-terminal-design.md` (awaiting user review → then writing-plans).
+
 ### Terminal Mode — live hardware probe (🧪 first firsthand ground truth)
 
 - Goal: before designing the "monitor my desk Claude Code session from the glasses, anywhere" feature, burn down assumptions against the real bridge + G2 + R1.
