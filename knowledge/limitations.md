@@ -17,7 +17,10 @@ Known limits that span domains, and the biggest unknowns we want to resolve. Per
 - **One shared, slow BLE link.** All bridge calls (render/audio/IMU/storage) share it and must be serialized; image frames cost ~0.5–2 s; a flaky hop can hang ~30 s. _(sdk-app-dev)_
 - **No camera, no speaker** on the G2 by design. _(hardware)_
 - **Closed companion app + closed store internals.** Even mobile app is closed-source; no published review SLA, revenue-share model, or installed-base figures. Gadgetbridge supports only G1, not G2/R1. _(terminal-mode, sdk-app-dev, ecosystem)_
-- **Terminal Mode bridge security is weak by default.** `0.0.0.0` bind, bearer token in plaintext `?token=`/logs/tunnels, no TLS, only temporary pinggy/bore tunnels for remote. _(terminal-mode)_
+- **Terminal Mode bridge security is weak by default.** `0.0.0.0` bind, bearer token in plaintext `?token=`/logs/tunnels, no TLS, only temporary pinggy/bore tunnels for remote. _(terminal-mode)_ 🧪 Note: secure off-WiFi remote is a built-in **Tailscale** mode (`EVEN_HOST_MODE=tailscale`), still on the one shared bearer token.
+- 🧪 **Terminal Mode can only *observe*, not *control*, a session it didn't start.** A desk-TUI session is listable + status-pollable + readable, but the bridge can't stream it live or route its permission/question prompts to the ring (those live in the TUI process). Marrying "your live desk session" with "ring-answerable + live HUD" is the open engineering problem. _(terminal-mode)_
+- 🧪 **Stock bridge auto-approves edits/writes/safe-bash** (`acceptEdits` hard-coded); the ring only sees mutating Bash, KillShell/Config/Mcp/RemoteTrigger, and AskUserQuestion. "Approve every change from the ring" requires a fork. _(terminal-mode)_
+- 🧪 **Our own `.claude` hooks execute inside bridge-driven sessions** and leak onto the HUD (capture-reminder Stop hook). _(terminal-mode)_
 - **Pre-1.0 SDK (0.0.x).** APIs and limits may change between minor versions. _(sdk-app-dev)_
 
 ## Top open questions
@@ -33,7 +36,8 @@ Known limits that span domains, and the biggest unknowns we want to resolve. Per
 ## Things WE can verify firsthand (🧪 candidates — we own a G2 + R1)
 
 These open questions are resolvable by our own testing once we start building — promote to 🧪 when proven:
-- On-device native Terminal Mode rendering/gestures/dashboard behavior.
+- ✅→🧪 **(2026-05-30, done)** Terminal Mode ring gesture (tap=allow), permission round-trip, SSE event vocabulary, desk-session observability, dictation=raw-STT, model-display gotcha. See `terminal-mode/overview.md`.
+- *Still open:* exact on-glasses HUD layout/pagination/char-budget of the **native app** rendering (we saw content, not pixel geometry); dashboard-suppression behavior.
 - Real BLE audio/IMU throughput and the authoritative image-container max on current firmware.
 - `setLocalStorage` quota/persistence behavior.
 - Whether the phone holds two connections to L/R peripherals (BLE central capture).

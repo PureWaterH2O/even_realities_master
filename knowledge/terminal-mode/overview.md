@@ -10,6 +10,27 @@ overall_confidence: ✅
 > Confidence legend: 🧪 self-verified · ✅ verified · 🟡 community-claim · 🔴 unverified · ❌ disproven
 > Source ids `[sN]` resolve in `../../research/2026-05-30-initial-survey/sources.md`.
 
+## 🧪 Verified firsthand — live hardware probe (2026-05-30)
+
+We ran the genuine `even-terminal@0.7.9` bridge against the user's real G2 + R1 + Even app and watched the
+on-wire traffic. Full audit trail: [`../../research/2026-05-30-terminal-mode-live-probe/findings.md`](../../research/2026-05-30-terminal-mode-live-probe/findings.md). Headlines (all 🧪):
+
+- **The bridge surfaces & renders your *desk-TUI* sessions on the glasses** — it reads the shared
+  `~/.claude/projects/*.jsonl` store (`listSessions`/`getSessionMessages` + `findSessionFile`). Monitoring a
+  desk session needs **zero engineering**. BUT it's **observe-only**: list + status (10 s poll) + last-10 history
+  on open; **no live streaming and no ring-answerable prompts** for a session the bridge isn't itself driving.
+  (Live SSE + ring permissions only exist for **bridge-driven** sessions.) ← this gap is the core design problem.
+- **App behavior:** on connect → `GET /api/info`,`/api/sessions`,`/api/update-check`; then **polls `/api/sessions`
+  every ~10 s with no `cwd`** (list spans *all* projects); on open → SSE `/api/events?sessionId=` + `/sessions/:id/history?limit=10`.
+- **Live SSE vocabulary** (bridge-driven): `user_prompt`, `status`(`busy|think_start|think_end|text_start|text_end|idle`),
+  `tool_start`, `tool_end{summary,detail}`, `text_delta` (streamed text; **thinking is NOT streamed**),
+  `running_stats`, `result{costUsd…}`, `permission_request`, `permission_result`, plus `notification`,`task_progress`,`user_question`.
+- **Ring round-trip works:** single **tap = `allow`** (`POST /api/permission-response{decision}` → `permission_result` → tool runs; verified a real file was created). Permission **60 s default-DENY**, AskUserQuestion **120 s default-SKIP**.
+- **Dictation = raw speech-to-text** ("touch /tmp/x" → "touch slash temp slash x"); the agent must infer intent.
+  **Natural-language instructions beat dictating exact syntax.**
+- **Our own `.claude` hooks run inside bridge sessions** (`settingSources:["user","project"]`) — the capture-reminder
+  Stop hook leaked "nothing to capture" onto the HUD. Design around it.
+
 ## Summary
 
 **Terminal Mode** is an official, built-in G2 feature (shipped in the Even Realities app **v2.2.0**, live ~late Apr 2026; **Codex** support added in **v2.2.1**; multi-session streaming in **v2.2.2**). It turns the glasses into an ambient control surface for AI coding agents: the agent's running output "tail" appears in the green HUD, status is glanceable (Thinking / Listening / Executing), and you respond hands-free with the R1 ring (tap = approve, hold = dictate). The host side is the official npm CLI **`@evenrealities/even-terminal`** (current 0.7.9), a local Express + SSE bridge (default port 3456, bearer-token auth) that drives **Claude** via `@anthropic-ai/claude-agent-sdk` and **Codex** via `codex app-server` JSON-RPC. Note: this is unrelated to the Even **Hub** "terminal"/CLI naming, which is just their Claude Code dev tooling.
@@ -37,9 +58,13 @@ The agents downloaded v0.7.9 and confirmed its integrity hash matched npm's publ
 
 - ✅ **Local Express HTTP server, default port 3456, bearer-token auth, SSE stream** to the glasses app (`GET /api/events`, 15s heartbeat, 500-msg/session ring buffer). Endpoints: `/api/prompt`, `/permission-response`, `/question-response`, `/interrupt`, `/status`, `/messages`, `/sessions`, `/info`. _[s107][s108]_
 - ✅ **Two providers:** `claude` (default) via `@anthropic-ai/claude-agent-sdk`, and `codex` via `codex app-server` JSON-RPC over WebSocket (port 8765). _[s107][s108]_
-- ✅ **Claude path hard-codes `model: 'claude-opus-4-6'`, `permissionMode: 'acceptEdits'`, `maxTurns: 50`** (dist/claude/session.js:241/248/268), with **no env/CLI/config override**. `allowedTools` = Read/Edit/Glob/Grep/Agent/WebSearch/WebFetch/TaskOutput/ExitPlanMode/ListMcpResources/ReadMcpResource — so Edit auto-applies (acceptEdits) while non-allowlisted tools (e.g. Bash) still route to the ring. _[s107][s109][s113][s114]_
-  - 🟡 **Stale model pin:** `claude-opus-4-6` is now two generations behind (Opus 4.7 and 4.8 have shipped). A worthwhile contribution/fork target. → see `../../ideas/backlog.md`.
-- ✅ **Permission prompts → ring options Yes / [Yes-always] / No; default-DENY after 60s.** `AskUserQuestion` → default-SKIP after 120s (session.js:471/418; Codex mirrors at 60s/120s). _An earlier adversarial verdict "refuted" this — but it had audited third-party forks, not the official package; the official source confirms it exactly._ _[s107][s108][s109]_
+- 🧪 **Claude path hard-codes `model: 'claude-opus-4-6'`, `permissionMode: 'acceptEdits'`, `maxTurns: 50`** (dist/claude/session.js). These three have **no override**. _But correcting our earlier "no env/CLI/config override" overreach:_ `PORT`, `BRIDGE_TOKEN`, `PROJECT_DIR`, `EVEN_HOST_MODE` (incl. `tailscale`), `EVEN_TERMINAL_NAME`, and `EVEN_TERMINAL_EXPOSE_PROVIDER` **are** env-configurable. _[s107] + 2026-05-30 probe_
+  - 🟡 **Stale model pin:** `claude-opus-4-6` is two generations behind (4.7/4.8 shipped). Fork/contribution target. → `../../ideas/backlog.md`.
+  - 🧪 **Model-display gotcha:** `GET /api/info` reports the model from your **recent session transcripts** (showed "Opus 4.8"), *not* the pinned model the bridge actually runs. **App shows 4.8; bridge runs 4.6.**
+- 🧪 **Permission model (CORRECTED — earlier doc was wrong that "non-allowlisted Bash routes to the ring").** What actually reaches the ring is narrow:
+  - **Auto-approved silently:** `allowedTools` (Read/Edit/Glob/Grep/Agent/WebSearch/WebFetch/TaskOutput/ExitPlanMode/ListMcpResources/ReadMcpResource), all `Write`/`Edit` (via `acceptEdits`), **read-only Bash on a hard-coded safelist** (`ls cat head tail wc pwd echo printf date whoami which type file stat du df env uname id  git status|log|diff|branch|show|remote|rev-parse`), `TodoWrite`, `TaskUpdate`, and a **catch-all `allow`** for anything else.
+  - **Reaches the ring:** non-safelisted/mutating **Bash**; `KillShell`/`Config`/`Mcp`/`RemoteTrigger`; and `AskUserQuestion`. Options **Yes / [Yes, and always allow…] / No**; permission **60 s default-DENY**, question **120 s default-SKIP**. Single tap = `allow` (verified). _[s107] + 2026-05-30 probe_
+    - ⚠️ Consequence for "approve everything from the ring": **you can't**, with the stock bridge — edits/writes/safe-bash apply silently because `acceptEdits` is hard-coded. Tighter ring control is a **fork lever**.
 - ✅ **Tool calls condensed to one-liners** for the small display: `Bash <~50-char desc>`, `Grep "<~25-char>"`, `Agent <~40-char>`; permission detail fields sliced to ~200 chars. This is the de-facto HUD text budget. _[s107][s108]_
 
 ## Native vs third-party-bridge behavior (important distinction)
@@ -73,3 +98,4 @@ The agents downloaded v0.7.9 and confirmed its integrity hash matched npm's publ
 ## Change log
 
 - 2026-05-30: created from initial multi-agent survey (run `wf_302a9f4e-3e2`). Bridge internals verified against the integrity-checked npm tarball.
+- 2026-05-30: **live hardware probe** (real G2+R1+app vs genuine 0.7.9 bridge). Promoted bridge internals to 🧪. **Corrected** two claims: (1) "no env/CLI/config override" → only model/permissionMode/maxTurns are fixed; PORT/BRIDGE_TOKEN/PROJECT_DIR/EVEN_HOST_MODE etc. are configurable; (2) "non-allowlisted Bash routes to the ring" → only *mutating* Bash + KillShell/Config/Mcp/RemoteTrigger + AskUserQuestion do; reads/edits/writes/safe-bash auto-approve. Added: desk-TUI sessions are listable/observable but not live-interactable; full SSE vocabulary; model-display gotcha; dictation=raw STT; our hooks leak into bridge sessions. Audit trail: `../../research/2026-05-30-terminal-mode-live-probe/findings.md`.

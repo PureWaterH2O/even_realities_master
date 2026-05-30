@@ -5,6 +5,16 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-30
 
+### Terminal Mode — live hardware probe (🧪 first firsthand ground truth)
+
+- Goal: before designing the "monitor my desk Claude Code session from the glasses, anywhere" feature, burn down assumptions against the real bridge + G2 + R1.
+- Ran genuine `even-terminal@0.7.9` on the Mac, connected the user's real glasses/ring/app over LAN, observed all on-wire traffic (`VERBOSE=1`) while the user reported on-device behavior.
+- **Confirmed firsthand:** bridge **lists & renders the user's desk-TUI sessions** on the glasses (reads shared `~/.claude/projects/*.jsonl`) — but **observe-only** (no live stream / no ring prompts for sessions it doesn't drive); full live SSE vocabulary for **bridge-driven** sessions; **single ring tap = allow** (verified a file got created); permission 60 s default-DENY / question 120 s default-SKIP.
+- **Corrected the knowledge base:** (1) only `model`/`permissionMode`/`maxTurns` are hard-coded — `PORT`/`BRIDGE_TOKEN`/`PROJECT_DIR`/`EVEN_HOST_MODE`(incl. **tailscale**)/expose-provider are env-configurable; (2) the ring only sees *mutating* Bash + KillShell/Config/Mcp/RemoteTrigger + AskUserQuestion — reads/edits/writes/safe-bash auto-approve (`acceptEdits` hard-coded).
+- **New findings:** `/api/info` shows the *recent-transcript* model ("Opus 4.8") while bridge sessions actually run **4.6**; **dictation is raw speech-to-text** (spoken paths/punctuation come through literally → natural language beats exact syntax); **our own `.claude` hooks run inside bridge sessions** and leak onto the HUD; off-WiFi remote = built-in **Tailscale** flag, not engineering.
+- **The crux for the desk-session vision** is now pinned: marry a *live desk-TUI session* with *bridge-driven live SSE + ring-answerable prompts* (the bridge can observe the former and drive the latter, but not both at once). Audit trail: `research/2026-05-30-terminal-mode-live-probe/findings.md`.
+- **Next:** return to Option-A design with this ground truth; decide how to bridge observe↔control for the user's seamless same-session goal.
+
 ### Phase 1 research sweep — COMPLETE & distilled
 
 - Sweep `wf_302a9f4e-3e2` returned: **80 agents, ~2.9M tokens, 1,649 tool calls, ~38 min**, **207 unique sources, 142 findings** across 5 domains (terminal-mode 35, sdk-app-dev 37, firmware-ble 43, hardware 12, ecosystem 15) + 8 critic gaps filled.
