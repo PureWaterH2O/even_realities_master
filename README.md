@@ -29,5 +29,6 @@ Facts get **promoted** (🟡/🔴 → ✅/🧪) or **killed** (→ ❌) as our o
 
 ## Status
 
-Setup phase. Design spec: `docs/superpowers/specs/2026-05-30-even-realities-knowledge-base-design.md`.
-Next: scaffold the structure + Claude infrastructure, then run the Phase 1 research sweep.
+**Phase 1 research sweep complete** (2026-05-30). 207 sources, 142 findings distilled into
+`knowledge/` across all five domains. See `PROGRESS.md` for the log and `ideas/backlog.md`
+for candidate first projects. Raw audit trail: `research/2026-05-30-initial-survey/`.
