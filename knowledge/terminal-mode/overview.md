@@ -30,6 +30,12 @@ on-wire traffic. Full audit trail: [`../../research/2026-05-30-terminal-mode-liv
   **Natural-language instructions beat dictating exact syntax.**
 - **Our own `.claude` hooks run inside bridge sessions** (`settingSources:["user","project"]`) — the capture-reminder
   Stop hook leaked "nothing to capture" onto the HUD. Design around it.
+- **Replying to an existing session from the glasses `resume`s it and APPENDS IN PLACE** (same session id; verified
+  39→53 lines), headless on 4.6, streaming live to the glasses; **no desk window** (use `claude --resume <id>` to see it).
+  ⚠️ So pointing the glasses at a session **also live in a desk TUI = two writers on one transcript → collision risk.**
+  Naive "literal same live session" needs a **single coordinating owner**, not two independent processes.
+- **An *observed* session does not update live on the glasses** — you must exit→reopen to refresh content (only the
+  10 s status poll is live). Live streaming exists **only** for sessions the bridge itself drives.
 
 ## Summary
 

@@ -97,6 +97,29 @@ Spoken "touch /tmp/even_ring_test.txt" arrived as **`"touch slash temp slash eve
 spoken punctuation/paths are literal words; Claude spent significant thinking tokens inferring the real command.
 → **Natural-language intent works far better than dictating exact shell/code syntax.**
 
+## 🧪 Replying to an existing session (the "two clients, one session" probe)
+
+User opened the idle desk session `fa400d3b` ("Understand Claude background processing") on the glasses and
+sent **"I am sending this message from my glasses."** Observed:
+
+- **`resume` APPENDS IN PLACE** — `fa400d3b.jsonl` went **39 → 53 lines, SAME session id** (no fork/new id).
+  The bridge ran `query({resume:"fa400d3b"})` as a **headless process** on `claude-opus-4-6` ($0.07), appended
+  the turn to that session's transcript, **streamed the reply live to the glasses** (SSE now flows because the
+  bridge is driving it), then exited.
+- **No desk view exists** for it — the resume is headless. To see it at the desk you'd `claude --resume fa400d3b`.
+- **Critical consequence:** because resume appends *in place* to the same jsonl, pointing the glasses at a session
+  that is **also live in a desk TUI** = **two processes writing one transcript → collision/interleave risk.** So
+  the naive "literal same live session, stock TUI + glasses both live" is **unsafe without a single coordinating owner.**
+  (We deliberately did NOT test this against the live conversation `7b2f7e58` for this reason.)
+
+## 🧪 Observed (non-bridge-driven) sessions do NOT update live on the glasses
+
+User had this live conversation (`7b2f7e58`) open on the glasses while only typing on the computer. The HUD did
+**not** update as new messages arrived; to see new content the user had to **exit the session → open another →
+return** (forcing a fresh `/sessions/:id/history` fetch). The 10 s `/api/sessions` poll updates **status only**,
+not displayed content. → Monitoring a desk session you didn't start = **manual refresh, no live tail.** (Live
+streaming only exists once the bridge itself is driving the session.)
+
 ## Housekeeping
 
 - The bridge writes `even-terminal-<timestamp>.log` into its **cwd** (this repo) — added `even-terminal-*.log`

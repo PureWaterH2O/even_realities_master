@@ -21,6 +21,8 @@ Known limits that span domains, and the biggest unknowns we want to resolve. Per
 - 🧪 **Terminal Mode can only *observe*, not *control*, a session it didn't start.** A desk-TUI session is listable + status-pollable + readable, but the bridge can't stream it live or route its permission/question prompts to the ring (those live in the TUI process). Marrying "your live desk session" with "ring-answerable + live HUD" is the open engineering problem. _(terminal-mode)_
 - 🧪 **Stock bridge auto-approves edits/writes/safe-bash** (`acceptEdits` hard-coded); the ring only sees mutating Bash, KillShell/Config/Mcp/RemoteTrigger, and AskUserQuestion. "Approve every change from the ring" requires a fork. _(terminal-mode)_
 - 🧪 **Our own `.claude` hooks execute inside bridge-driven sessions** and leak onto the HUD (capture-reminder Stop hook). _(terminal-mode)_
+- 🧪 **Replying to a session from the glasses `resume`s & appends in place** (same id), headless on 4.6 — so glasses + a live desk TUI on the same session = two writers → collision risk. Literal same-live-session needs one coordinating owner. _(terminal-mode)_
+- 🧪 **Observed sessions don't live-update on the glasses** (exit→reopen to refresh; only status polls). _(terminal-mode)_
 - **Pre-1.0 SDK (0.0.x).** APIs and limits may change between minor versions. _(sdk-app-dev)_
 
 ## Top open questions
