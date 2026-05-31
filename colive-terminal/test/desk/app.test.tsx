@@ -224,6 +224,73 @@ describe('desk App', () => {
     expect(fake.permissions).toEqual([{ sessionId: 's1', decision: 'allow', toolUseId: 'tu-9' }])
   })
 
+  it('dismisses the inline permission prompt when a REMOTE client (glasses) answers (broadcast permission_result)', async () => {
+    // Co-live: a ring tap on the glasses resolves the permission in the broker,
+    // which broadcasts a single permission_result to ALL subscribers (desk +
+    // glasses). The desk never calls respondPermission in this case — the
+    // broadcast permission_result is the client-agnostic dismiss signal.
+    const fake = makeFakeHub()
+    const { lastFrame } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'permission_request',
+      toolName: 'Write',
+      description: 'Write a file',
+      detail: '/tmp/notes.txt',
+      toolUseId: 'tu-1',
+      options: [
+        { text: 'Yes', key: 'allow' },
+        { text: 'No', key: 'deny' },
+      ],
+      suggestions: [],
+    })
+    await flush()
+    // The inline prompt renders.
+    const shown = lastFrame() ?? ''
+    expect(shown).toContain('Write')
+    expect(shown).toContain('/tmp/notes.txt')
+    expect(shown).toContain('Yes')
+    expect(shown).toContain('No')
+
+    // The GLASSES answered: the broker broadcasts the terminal permission_result
+    // WITHOUT any desk keypress (no respondPermission call from the desk).
+    fake.emit({ type: 'permission_result', toolName: 'Write', summary: 'Write allow', decision: 'allow' })
+    await flush()
+
+    // The desk prompt must now be DISMISSED.
+    const after = lastFrame() ?? ''
+    expect(after).not.toContain('/tmp/notes.txt')
+    expect(after).not.toMatch(/\[1\] Yes/)
+    expect(after).not.toMatch(/\[2\] No/)
+    // The desk never POSTed a decision (the glasses did).
+    expect(fake.permissions).toHaveLength(0)
+  })
+
+  it('dismisses the inline question prompt when a REMOTE client answers (permission_result decision:answered)', async () => {
+    // A resolved AskUserQuestion emits permission_result with decision:"answered"
+    // (see PermissionBroker.resolveQuestion). The same broadcast dismisses the
+    // desk question prompt regardless of which client answered.
+    const fake = makeFakeHub()
+    const { lastFrame } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'user_question',
+      question: 'Which file?',
+      toolUseId: 'q-1',
+      options: ['foo.ts', 'bar.ts'],
+    })
+    await flush()
+    expect(lastFrame() ?? '').toContain('Which file?')
+
+    // The glasses answered — broker broadcasts permission_result decision:answered.
+    fake.emit({ type: 'permission_result', toolName: 'AskUserQuestion', summary: 'AskUserQuestion answered', decision: 'answered' })
+    await flush()
+
+    const after = lastFrame() ?? ''
+    expect(after).not.toContain('Which file?')
+    expect(fake.questions).toHaveLength(0)
+  })
+
   it('renders an inline question prompt and posts the chosen option', async () => {
     const fake = makeFakeHub()
     const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)

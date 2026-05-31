@@ -240,6 +240,18 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       return
     }
     if (event.type === 'permission_result') {
+      // The broker broadcasts exactly ONE terminal permission_result to ALL
+      // co-live clients (desk + glasses) whenever ANY client answers a pending
+      // permission/question — its documented purpose is to let clients dismiss
+      // the rendered prompt. So this is the CLIENT-AGNOSTIC dismiss signal:
+      // clear the pending UI here regardless of who answered. This is what makes
+      // a REMOTE (glasses) answer dismiss the desk prompt — the desk never calls
+      // respondPermission in that case, so the local-path clear never fires.
+      // (A resolved question settles via permission_result decision:"answered",
+      // per PermissionBroker.resolveQuestion, so this covers questions too.)
+      // The local-answer path still works: it clears optimistically AND this
+      // confirms it; clearing an already-undefined pending is a harmless no-op.
+      setPending(undefined)
       dispatch({ type: 'note', text: `permission ${event.decision}: ${event.summary}` })
       return
     }
