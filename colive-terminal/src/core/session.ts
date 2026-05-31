@@ -111,6 +111,8 @@ export class ClaudeSession {
 
   /** True while a turn is being driven. */
   private _busy = false
+  /** Guards against emitting more than one terminal `status: idle` per turn. */
+  private idleEmitted = false
 
   /**
    * Pending prompts queued while busy (FIFO). Each carries its own `resolve` so
@@ -281,6 +283,7 @@ export class ClaudeSession {
     this._busy = true
     this.emit({ type: 'user_prompt', text })
     this.emit({ type: 'status', state: 'busy' })
+    this.idleEmitted = false
 
     const abortController = new AbortController()
     this.currentAbort = abortController
@@ -323,7 +326,19 @@ export class ClaudeSession {
       // error or interrupt before init), release whenIdentified() so the manager
       // does not wait forever. No-op once already settled by the init message.
       this.settleIdentified()
+      // Reliable turn-over signal. In string-prompt mode the SDK does NOT send a
+      // session_state_changed:idle — the stream just ends here — so emit the
+      // terminal `status: idle` the Even app needs to clear "thinking…" (deduped
+      // against a session_state_changed:idle that may already have emitted it).
+      this.emitIdle()
     }
+  }
+
+  /** Emit the terminal `status: idle` at most once per turn. */
+  private emitIdle(): void {
+    if (this.idleEmitted) return
+    this.idleEmitted = true
+    this.emit({ type: 'status', state: 'idle' })
   }
 
   /** Start the periodic `running_stats` heartbeat for the in-flight turn. */
@@ -397,7 +412,7 @@ export class ClaudeSession {
     }
     if (subtype === 'session_state_changed') {
       if (message.state === 'idle') {
-        this.emit({ type: 'status', state: 'idle' })
+        this.emitIdle()
       }
       return
     }

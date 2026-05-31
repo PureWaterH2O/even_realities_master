@@ -104,6 +104,28 @@ function happyTurnMessages(sessionId = 'sess-abc') {
 }
 
 describe('ClaudeSession — event normalization', () => {
+  it('emits a terminal status:idle exactly once at turn end (string-prompt mode)', async () => {
+    // 🧪 Hardware finding: the Even app clears "thinking…" on status:idle. In
+    // string-prompt mode the SDK sends no session_state_changed:idle, so the
+    // stream just ends — the turn driver must still emit the terminal idle.
+    const emitted: CoLiveEvent[] = []
+    const { fn } = fakeQuery([happyTurnMessages('sess-idle')])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('hi')
+
+    const idles = emitted.filter((e) => e.type === 'status' && e.state === 'idle')
+    expect(idles).toHaveLength(1)
+    // idle is the FINAL event (after result), so the HUD reliably clears.
+    expect(emitted.at(-1)).toEqual({ type: 'status', state: 'idle' })
+  })
+
   it('maps an SDK happy turn to the normalized event sequence', async () => {
     const emitted: CoLiveEvent[] = []
     const { fn, calls } = fakeQuery([happyTurnMessages('sess-xyz')])
