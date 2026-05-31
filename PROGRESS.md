@@ -15,6 +15,7 @@ built, what we decided. Newest entries on top.
 - **Incidental 🧪:** ~20 s/turn `SessionStart`-hook latency (our global hooks) → Core must control `settingSources`; app subscribes SSE only when a session is viewed (first-turn race); terse dictated prompts trigger autonomous multi-step work (needs guardrails); `/api/interrupt` stops runaways; multi-phone BLE contention can steal the glasses.
 - **Decision: GO.** M1 inputs locked (own Core, configurable model/permission/hooks, slash interceptor, realpath cwd, client-owned SSE timing, full-history endpoint; long-idle backgrounding + Tailscale deferred to M2).
 - **Next:** write the **M1 implementation plan** (+ likely desk-client sub-spec). Effort: High for the plan, **ultracode** when coding M1.
+- **M1 plan written:** `docs/superpowers/plans/2026-05-30-colive-terminal-m1.md` — reimplement a protocol-compatible Session Core (own config: model/permission/settingSources) + Client Hub (Even-app contract) + thin desk client (ink TUI); 4 phases ending in the end-to-end loop acceptance. Build happens in a **fresh ultracode chat on a feature branch** via subagent-driven-development; hardware-acceptance tasks pause for the user + glasses.
 
 ### First project chosen + spec drafted — "Co-Live Terminal"
 
