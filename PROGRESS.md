@@ -5,6 +5,13 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-31
 
+### Co-Live Terminal — ✅ M1 COMPLETE: end-to-end loop hardware-validated + merged to `main` (`a6412d0`)
+
+- 🧪 **M1 definition of done MET on real G2 + R1.** The full co-live loop runs: kick off a task at the thin desk client → live on the glasses HUD → dictate a **free-form** follow-up from the glasses → it enters the **same** session → response on **both** → continue at the desk. Hardware-confirmed across this session: allow + **deny** permission paths (model recovers gracefully on deny), **Esc-interrupt**, `/clear`→new session, and **bidirectional permission-prompt dismissal** (answer on the desk OR the glasses ring → prompt clears on both).
+- **Shipped:** Session Core (single writer + serialized input + normalized event fan-out) + Even-app-compatible Client Hub (HTTP+SSE, bearer auth, ring buffer/replay) + thin ink desk client (`colive serve` / `colive desk`). **216 automated tests, typecheck clean**, incl. an in-process e2e that drives the real Core+Hub with the real desk client. Merged `feat/colive-terminal-m1` → `main` (no-ff merge `a6412d0`), pushed to origin; tests re-verified green on the merged result.
+- **Deferred (→ M2/M3):** Tailscale remote + long-idle reconnect/replay-resume (M2); full native parity (M3); desk single-slot concurrent-permission disambiguation; fast-`202`; filter internal sessions; `bin:{colive}` for real install. ⚠️ Note: `git push` reported 6 GitHub-flagged dependency vulnerabilities (4 high, 2 moderate) on the repo's default branch — worth a `npm audit` pass (not introduced by this merge specifically; pre-existing across the workspace).
+- Full build detail: `projects/colive-terminal/` (status/notes/log) and `knowledge/terminal-mode/overview.md`.
+
 ### Co-Live Terminal — M1 Phase 4.2 hardware UAT: full loop runs 🧪 + fixed desk-prompt-stuck bug (`9a232c8`)
 
 - 🧪 **First real desk + glasses hardware run of the full M1 loop — almost everything worked:** kick off at the desk → live on the glasses HUD → free-form follow-up dictated from the glasses → response on BOTH → permission ring tap. One co-live UI bug found: a permission answered FROM THE GLASSES (ring tap) correctly continued the conversation but left the inline permission prompt **stuck on the desk terminal** (a local desk answer dismissed fine; only the remote answer didn't).

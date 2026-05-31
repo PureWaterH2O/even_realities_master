@@ -5,7 +5,7 @@ Status board for everything we're building. Each active project has a folder
 
 | Project | Slug | Status | Started | Last update |
 |---------|------|--------|---------|-------------|
-| Co-Live Terminal | `colive-terminal` | 🟨 in progress (M1: Phases 0–3 ✅ + 4.1 e2e ✅, 216 tests; HW loop ran 🧪, fixed desk-prompt-stuck bug — re-test then 4.3 finish) | 2026-05-30 | 2026-05-31 |
+| Co-Live Terminal | `colive-terminal` | ✅ M1 done — end-to-end loop hardware-validated & merged to `main` (216 tests); M2 (Tailscale remote / reconnect) + M3 (native parity) next | 2026-05-30 | 2026-05-31 |
 
 Status key: 💡 idea · 🟦 planned · 🟨 in progress · ✅ done · 🟥 blocked · ⬛ abandoned
 

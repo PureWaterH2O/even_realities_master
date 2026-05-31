@@ -1,6 +1,17 @@
 # Co-Live Terminal — Status
 
-**Current state:** 🟨 in progress — M1 (end-to-end loop). **Phases 0–3 done; permission UAT signed off.**
+**Current state:** ✅ **M1 COMPLETE** — end-to-end co-live loop hardware-validated (real G2 + R1) and
+**merged to `main`** (merge `a6412d0`; 216 tests, typecheck clean). Hardware UAT signed off: allow + deny
+permissions, Esc-interrupt, `/clear`→new session, free-form glasses follow-up into the same session,
+and bidirectional permission-prompt dismissal. **Next milestones:** M2 (Tailscale remote + long-idle
+reconnect/replay-resume) and M3 (full native parity — see plan's deferred scope). Deferred follow-ups
+carried forward: fast-`202`, filter internal sessions from the list, per-poll perf, desk single-slot
+concurrent-permission disambiguation, `bin:{colive}` before any real install/distribution.
+
+---
+_History below is the M1 build log._
+
+**Current state (M1 build):** 🟨 in progress — M1 (end-to-end loop). **Phases 0–3 done; permission UAT signed off.**
 **Phase:** **Phases 0–3 ✅ COMPLETE.** Phases 0–2 hardware-validated (continuous multi-turn co-live from
 the glasses, model `claude-opus-4-8`, live HUD; ring permissions single/sequential/**concurrent** — a full
 create→read→delete loop: 6 requests → 6 allow → 0 timeout). **Phase 3 (thin desk client) built via the
