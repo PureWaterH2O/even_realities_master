@@ -42,6 +42,39 @@ so they can graduate into `knowledge/`.
 - **`colive serve` boots end-to-end** (controller smoke-test over real HTTP): auth via bearer header
   AND `?token`; `/api/info` shape correct (`model=claude-opus-4-8`, `version=0.1.0`, `provider=claude`).
 
+## Phase 2 HARDWARE ACCEPTANCE — 🧪 findings (2026-05-31, real G2 + Even app)
+
+**Result: PASS.** Real Even app connected; ran a continuous multi-turn conversation from the
+glasses on one live session (model `claude-opus-4-8`; first turn ~4.3s SDK cold-start, then
+~15ms to `202`; HUD streams live; "thinking" clears between turns).
+
+- 🧪 **App connect probe = a single `GET /api/sessions?provider=claude`** (ua `Dart/3.8 (dart:io)`
+  — native HTTP, NOT a WebView, so CORS is not actually required). It then polls that every ~1s
+  and fetches `GET /api/sessions/:id/history?limit=10` when a session is opened. It did NOT hit
+  `/api/info` during the probe.
+- 🧪 **4 protocol bugs found + fixed** (diffed live vs native `even-terminal` 0.7.9):
+  1. `/api/sessions` `timestamp` must be an **ISO-8601 string**, not epoch-ms int (Dart parser
+     rejected the host → "failed to probe and save"). Also no-cwd ⇒ span all projects. (`a5c82e7`)
+  2. Permissive **CORS + `OPTIONS`** added for stock parity (not the real blocker). (`d0af84a`)
+  3. **Terminal `status: idle` SSE frame** was never emitted in string-prompt mode → HUD hung
+     "thinking" forever. Now emitted at turn end via `emitIdle()`. (`8e20fa1`)
+  4. **`ai-title`** last-line read as `busy` for 120s → polled `/api/sessions` showed "thinking".
+     Now `ai-title` ⇒ idle. (`bebdc02`)
+- Diagnostic aid: `COLIVE_LOG_REQUESTS=1` env enables `[req]` wire logging in the Hub.
+
+### Remaining follow-ups (not blockers; address during Phase 3/4 or polish)
+- **Ring-permission hardware check still TODO** (the one un-done Phase-2 acceptance item) — send a
+  tool-triggering prompt (e.g. "create a file /tmp/colive-hello.txt containing hi"), expect a ring
+  permission prompt, tap = allow → tool runs. Our broker + `permission_request`/`permission_result`
+  events are built & unit-tested; just need the on-glasses confirm.
+- **fast-`202`:** `POST /api/prompt` for a NEW session blocks ~4s resolving the real session id
+  (awaits the stream init). Consider returning `202` immediately so the app subscribes during the
+  turn (avoids the first-turn race where it subscribes after the turn ends).
+- **Filter internal sessions:** the list shows the user's `remember` background agents + the very
+  agent session driving this build. Consider filtering non-interactive/internal sessions.
+- **Per-poll perf:** each `/api/sessions` poll ≈120ms (no-cwd ⇒ status-classify ~100 sessions via
+  file reads), every ~1s. Consider a default cap / cheaper status.
+
 ## Known-minor items (deferred; from Phase 2 quality reviews)
 - SseHub `sessions` Map grows unbounded (no eviction of idle empty sessions) — fine for single-user M1;
   revisit for a long-lived server.
