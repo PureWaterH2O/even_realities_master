@@ -25,6 +25,30 @@ so they can graduate into `knowledge/`.
   Mitigation: distil the SDK surface into `colive-terminal/docs/sdk-reference.md` and forbid
   reading `node_modules` type files. Self-contained tasks never hit this; SDK/fs tasks did.
 
+## Phase 2 (Client Hub) findings (2026-05-31)
+
+- 🧪 **Even-app connect QR = the stock `even-terminal` URL**:
+  `http://<host>:<port>?token=<token>&defaultProvider=claude` (verified from `even-terminal`'s
+  `common.js` `URLSearchParams({token, defaultProvider})` + the 2026-05-30 live probe). `buildQrPayload`
+  in `hub/server.ts` emits exactly this. The Phase 2 implementer had guessed `colive://…` (format was
+  flagged unverified in its brief) — corrected to the verified format so the glasses can scan-connect.
+- **Permission/question response toolUseId mapping.** The Even app POSTs
+  `/api/permission-response {sessionId, decision}` with **no** toolUseId, but the Core broker keys by
+  toolUseId. The Hub tracks the latest **pending** permission/question toolUseId per session (from the
+  `permission_request`/`user_question` events it broadcasts) and maps the sessionId-only response to it;
+  the desk client may send an explicit `toolUseId` (preferred). `allowAlways` → `allow` for the broker.
+- **SSE framing.** `:ok\n\n` preamble; `id: N\ndata: <json>\n\n` frames (per-session monotonic N);
+  `:heartbeat\n\n` every 15s; ring buffer 500; `needReplay` replays buffered frames before live.
+- **`colive serve` boots end-to-end** (controller smoke-test over real HTTP): auth via bearer header
+  AND `?token`; `/api/info` shape correct (`model=claude-opus-4-8`, `version=0.1.0`, `provider=claude`).
+
+## Known-minor items (deferred; from Phase 2 quality reviews)
+- SseHub `sessions` Map grows unbounded (no eviction of idle empty sessions) — fine for single-user M1;
+  revisit for a long-lived server.
+- `SseHub.close()` does not `res.end()` open SSE clients — the server graceful-shutdown path should end
+  subscribed clients, else shutdown could hang on open connections.
+- No `bin` field yet (run via `npm run dev` / `tsx`); add `bin: {colive}` before any real install/distribution.
+
 ## Known-minor items (deferred; from Phase 1 quality reviews)
 
 - `session.ts` is 640 lines (turn driver + heavy JSDoc) — consider extracting the

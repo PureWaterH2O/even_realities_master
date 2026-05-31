@@ -5,6 +5,16 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-31
 
+### Co-Live Terminal — M1 Phase 2 (Client Hub) COMPLETE 🧪
+
+- **Phase 2 (Client Hub) — DONE; 153 tests green, typecheck clean; `colive serve` boots end-to-end** (controller smoke-test over real HTTP: 401 without token; 200 + correct `/api/info` via bearer header AND `?token`; `/api/sessions` shape). Four modules:
+  - `hub/sse.ts` — per-session SSE: ring buffer (500), `:ok` preamble, `id:/data:` frames, 15s heartbeat, `needReplay` replay; tolerates empty/unknown sessions; broadcast never throws (drops dead clients).
+  - `hub/routes.ts` — every Even-app endpoint + bearer auth (header or `?token`, constant-time); maps the app's **sessionId-only** permission/question responses to the **latest pending `toolUseId`** (tracked from broadcasts) and `allowAlways`→`allow`.
+  - `hub/server.ts` — `createApp(deps)` (testable) + `startServer(config)` (listens, banner + QR).
+  - `index.ts` — `colive serve [--model --permission-mode --host --port --project-dir]`.
+- **🧪 Fixed the QR connect-URL** to the verified Even-app format `http://<host>:<port>?token=<token>&defaultProvider=claude` (implementer had guessed a `colive://` scheme; our M0 research already had the real format from `even-terminal`'s `common.js`).
+- **Next: Task 2.3 hardware-acceptance pause** — connect the real Even app to `colive serve` (confirm live stream, no ~20s first-turn delay, model = `claude-opus-4-8`, ring permission). Then Phase 3 (desk client) + Phase 4 (the loop).
+
 ### Co-Live Terminal — M1 build: Phase 0 + Phase 1 (Session Core) COMPLETE 🧪
 
 - Building M1 in a fresh ultracode chat on `feat/colive-terminal-m1` via **subagent-driven-development**, each task run as a workflow pipeline: TDD implementer → spec-compliance review → code-quality review (+ fix loops).
