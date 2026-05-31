@@ -150,6 +150,17 @@ export class ClaudeSession {
   /** Turn start time (clock.now()) for the `running_stats.durationMs`. */
   private turnStartedAt = 0
 
+  /**
+   * Resolves the moment this session's real id is known — captured from the
+   * `init` message — or, failing that, when the in-flight turn ends without one
+   * (e.g. an immediate stream error). This is the REAL signal the manager awaits
+   * to learn the sessionId; the `init` message emits no event of its own and the
+   * SDK's first turn can lag by many seconds, so a microtask spin cannot surface
+   * it. Created lazily by {@link whenIdentified}; settled at most once.
+   */
+  private identifiedSignal: Promise<void> | undefined
+  private resolveIdentified: (() => void) | undefined
+
   /** Best-known token totals this turn, fed from any usage we observe. */
   private inputTokens = 0
   private outputTokens = 0
@@ -177,6 +188,37 @@ export class ClaudeSession {
   /** True while a turn is in flight. */
   get busy(): boolean {
     return this._busy
+  }
+
+  /**
+   * A promise that resolves when this session's real id is known (captured from
+   * the `init` message) OR the in-flight turn has ended without ever surfacing
+   * one. This is the signal the manager awaits to learn the sessionId of a fresh
+   * session: it is driven by real stream progress, not a busy-spin, so it spans
+   * the SDK's real (possibly multi-second) first-turn latency. Resolves
+   * immediately if the id is already known.
+   */
+  whenIdentified(): Promise<void> {
+    if (this._sessionId !== undefined) return Promise.resolve()
+    if (this.identifiedSignal === undefined) {
+      this.identifiedSignal = new Promise<void>((resolve) => {
+        this.resolveIdentified = resolve
+      })
+    }
+    return this.identifiedSignal
+  }
+
+  /** Settle the {@link whenIdentified} signal (id captured, or turn ended). Idempotent. */
+  private settleIdentified(): void {
+    if (this.resolveIdentified !== undefined) {
+      this.resolveIdentified()
+      this.resolveIdentified = undefined
+    }
+    // Pre-resolve any future whenIdentified() call for a turn that ended without
+    // an id: a resolved promise is cheap and matches "the wait is over".
+    if (this.identifiedSignal === undefined) {
+      this.identifiedSignal = Promise.resolve()
+    }
   }
 
   /**
@@ -277,6 +319,10 @@ export class ClaudeSession {
       this.stopStatsTimer()
       this.currentAbort = undefined
       this._busy = false
+      // If the turn ended without ever surfacing an id (e.g. an immediate stream
+      // error or interrupt before init), release whenIdentified() so the manager
+      // does not wait forever. No-op once already settled by the init message.
+      this.settleIdentified()
     }
   }
 
@@ -342,7 +388,11 @@ export class ClaudeSession {
     const subtype = message.subtype
     if (subtype === 'init') {
       const id = message.session_id
-      if (typeof id === 'string') this._sessionId = id
+      if (typeof id === 'string') {
+        this._sessionId = id
+        // The id is now known — wake any manager awaiting whenIdentified().
+        this.settleIdentified()
+      }
       return
     }
     if (subtype === 'session_state_changed') {

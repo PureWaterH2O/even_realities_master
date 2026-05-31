@@ -238,29 +238,19 @@ export class SessionManager {
     void session.run(text)
 
     // Resolve with the real id as soon as the session learns it (from `init`).
-    // Re-key the entry here too: the `init` message only captures the id inside
-    // the session (it emits no event), so the first event-driven reconcile can
-    // lag — reconcile eagerly so getStatus/resume/interrupt find it by real id.
-    await this.waitForSessionId(session)
+    // whenIdentified() is a REAL signal driven by stream progress — it resolves
+    // when the `init` message captures the id (which emits no event, so it is the
+    // only way to surface it), or when the turn ends without one. It therefore
+    // spans the SDK's real (possibly multi-second) first-turn latency; a
+    // microtask spin would exit long before a delayed `init` lands and fabricate
+    // a local: id. Re-key eagerly here so getStatus/resume/interrupt find the
+    // session by its real id before any further event arrives.
+    await session.whenIdentified()
     this.reconcileId(entry)
     // If the turn ended without ever surfacing an id (e.g. an immediate stream
     // error), flush whatever buffered under the local id so nothing is lost.
     if (!entry.idResolved) this.flushUnderLocalId(entry)
     return entry.currentId
-  }
-
-  /**
-   * Wait until the session has captured its id (learned from the `init` message)
-   * or the turn has ended without one. The stream yields `init` early, so this
-   * settles within a few microtasks; the bounded spin is a safety valve, and the
-   * `!busy` exit means an immediate-error turn (no id) returns rather than hangs.
-   */
-  private async waitForSessionId(session: ClaudeSession): Promise<void> {
-    for (let i = 0; i < 1000; i++) {
-      if (session.sessionId !== undefined) return
-      if (!session.busy) return // turn ended without ever surfacing an id
-      await Promise.resolve()
-    }
   }
 
   /**

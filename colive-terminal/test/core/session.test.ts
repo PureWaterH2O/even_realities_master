@@ -1011,3 +1011,87 @@ describe('ClaudeSession — interrupt', () => {
     expect(session.busy).toBe(false)
   })
 })
+
+describe('ClaudeSession — whenIdentified signal (real id-learning signal)', () => {
+  it('resolves whenIdentified only after a macrotask-delayed init captures the id', async () => {
+    // The id-learning signal must be driven by real stream progress, not a
+    // microtask spin: here init lands only after a setTimeout tick. Until then
+    // whenIdentified() must NOT resolve, and sessionId must be undefined.
+    let resolved = false
+    const fn = (() =>
+      (async function* () {
+        await new Promise((r) => setTimeout(r, 5))
+        yield { type: 'system', subtype: 'init', session_id: 'late-id' }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'late-id',
+          result: '',
+          total_cost_usd: 0,
+          num_turns: 1,
+          duration_ms: 1,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        }
+      })()) as unknown as QueryFn
+
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: () => {},
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+
+    const identified = session.whenIdentified().then(() => {
+      resolved = true
+    })
+    void session.run('go')
+
+    // Drain only the microtask queue: a busy-spin would have "resolved" here.
+    for (let i = 0; i < 50; i++) await Promise.resolve()
+    expect(resolved).toBe(false)
+    expect(session.sessionId).toBeUndefined()
+
+    // Now allow the macrotask (the delayed init) to land.
+    await identified
+    expect(resolved).toBe(true)
+    expect(session.sessionId).toBe('late-id')
+  })
+
+  it('resolves whenIdentified when a turn ends WITHOUT ever surfacing an id', async () => {
+    // An immediate stream error before any init: the signal must still resolve
+    // (the wait is over) so the manager does not hang, even though no id exists.
+    const fn = (() =>
+      (async function* () {
+        throw new Error('boom before init')
+        // eslint-disable-next-line no-unreachable
+        yield {}
+      })()) as unknown as QueryFn
+
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: () => {},
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+
+    const identified = session.whenIdentified()
+    await session.run('go')
+    await expect(identified).resolves.toBeUndefined()
+    expect(session.sessionId).toBeUndefined()
+  })
+
+  it('resolves immediately when the id is already known (e.g. a resumed session)', async () => {
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: () => {},
+      canUseTool: stubCanUseTool,
+      query: fakeQuery([]).fn,
+    })
+    // start() with a resume id sets sessionId before any turn runs.
+    await session.start('resumed-id', realpathSync(tmpdir()))
+    expect(session.sessionId).toBe('resumed-id')
+    await expect(session.whenIdentified()).resolves.toBeUndefined()
+  })
+})

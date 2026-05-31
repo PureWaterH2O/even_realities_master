@@ -42,6 +42,11 @@ async function drain(): Promise<void> {
   for (let i = 0; i < 30; i++) await Promise.resolve()
 }
 
+/** Await a real macrotask (a setTimeout tick), past the microtask queue. */
+function macrotask(ms = 0): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
 /** A short scripted "happy turn" surfacing `sessionId` via the init message. */
 function happyTurn(sessionId: string, text = '') {
   return [
@@ -131,6 +136,123 @@ describe('SessionManager — fan-out tagged with sessionId', () => {
     await drain()
     // no new events arrived after unsubscribing
     expect(seen.length).toBe(countAfterFirst)
+  })
+})
+
+describe('SessionManager — delayed init (real SDK timing, not mock timing)', () => {
+  it('learns the REAL id when init arrives a macrotask later; never leaks a local: id', async () => {
+    // Regression for the id-learning busy-spin bug: the SDK can lag many seconds
+    // before the `init` message arrives, and `init` emits NO event of its own.
+    // Here init is yielded only AFTER a real setTimeout tick — past every
+    // microtask. A microtask busy-spin exits before this lands and fabricates a
+    // `local:<uuid>` id; the real signal (whenIdentified) must wait for it.
+    const tagged: TaggedEvent[] = []
+    const fn = ((args: { prompt: unknown; options?: any }) => {
+      const text = String(args.prompt)
+      return (async function* () {
+        // Delay the init past the microtask queue (the real first-turn lag).
+        await new Promise((r) => setTimeout(r, 5))
+        yield { type: 'system', subtype: 'init', session_id: 'REAL-ID' }
+        yield {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'text' },
+          },
+        }
+        yield {
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text },
+          },
+        }
+        yield { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'REAL-ID',
+          result: text,
+          total_cost_usd: 0,
+          num_turns: 1,
+          duration_ms: 1,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        }
+      })()
+    }) as unknown as QueryFn
+
+    const mgr = new SessionManager({ config: makeConfig(), query: fn })
+    mgr.subscribe((e) => tagged.push(e))
+
+    // prompt() must resolve with the REAL id, not a fabricated local: placeholder.
+    const id = await mgr.prompt(undefined, 'hello', makeConfig().projectDir)
+    expect(id).toBe('REAL-ID')
+
+    // getStatus / respond / interrupt all key by the real id (the map re-keyed).
+    expect(mgr.getStatus('REAL-ID')).not.toBe('unknown')
+    expect(() => mgr.respondPermission('REAL-ID', 'tu', 'allow')).not.toThrow()
+    expect(() => mgr.interrupt('REAL-ID')).not.toThrow()
+
+    // let the turn run to completion (it spans real macrotasks now)
+    await macrotask(10)
+    await drain()
+
+    // EVERY event a subscriber saw carries the real id; no local: id ever leaked.
+    expect(tagged.length).toBeGreaterThan(0)
+    for (const t of tagged) {
+      expect(t.sessionId).toBe('REAL-ID')
+      expect(t.sessionId.startsWith('local:')).toBe(false)
+    }
+    // the pre-init prompt echo is tagged with the real id (buffered until init).
+    expect(tagged[0]).toEqual({
+      sessionId: 'REAL-ID',
+      event: { type: 'user_prompt', text: 'hello' },
+    })
+    // the turn completed under the real id.
+    expect(mgr.getStatus('REAL-ID')).toBe('idle')
+    const types = tagged.map((t) => t.event.type)
+    expect(types).toContain('result')
+  })
+
+  it('re-keys to the real id even when init is delayed, so resume passes the real id', async () => {
+    // A second prompt at the learned id must resume that transcript — proving the
+    // map was re-keyed to the real id (not stranded under a local: placeholder).
+    const resumeArgs: (string | undefined)[] = []
+    let turn = 0
+    const fn = ((args: { prompt: unknown; options?: any }) => {
+      const idx = turn
+      turn += 1
+      resumeArgs.push(args.options?.resume)
+      return (async function* () {
+        if (idx === 0) await new Promise((r) => setTimeout(r, 5))
+        yield { type: 'system', subtype: 'init', session_id: 'DELAYED-ID' }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: 'DELAYED-ID',
+          result: '',
+          total_cost_usd: 0,
+          num_turns: 1,
+          duration_ms: 1,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        }
+      })()
+    }) as unknown as QueryFn
+
+    const mgr = new SessionManager({ config: makeConfig(), query: fn })
+    const id = await mgr.prompt(undefined, 'first', makeConfig().projectDir)
+    expect(id).toBe('DELAYED-ID')
+    await macrotask(10)
+    await drain()
+    expect(mgr.getStatus('DELAYED-ID')).toBe('idle')
+
+    const again = await mgr.prompt(id, 'second', makeConfig().projectDir)
+    expect(again).toBe('DELAYED-ID')
+    await drain()
+    // the second turn resumed the REAL id (not a local: placeholder).
+    expect(resumeArgs[1]).toBe('DELAYED-ID')
   })
 })
 
