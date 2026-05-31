@@ -11,12 +11,17 @@
  * by editing core):
  *
  *   1. The Even app POSTs /api/permission-response (and /api/question-response)
- *      with {sessionId, decision} and NO toolUseId, but the Core broker needs a
- *      toolUseId. The {@link PendingTracker} watches the same fan-out the SSE hub
- *      consumes and records the latest pending toolUseId per session from
- *      permission_request / user_question events, clearing it on the matching
- *      permission_result / answer. A sessionId-only response maps to that pending
- *      id; an explicit body toolUseId (our desk client sends one) wins.
+ *      with {sessionId, decision} and NO toolUseId. We forward the body's
+ *      toolUseId when present (the desk client sends the explicit id it is
+ *      answering) or '' otherwise. The Core broker settles the OLDEST pending
+ *      request for that session on an empty id (FIFO, mirroring native
+ *      even-terminal's shift()), which is what lets CONCURRENT permission
+ *      requests — e.g. the model firing several parallel tool calls — be answered
+ *      in order rather than all-but-one stranding to a 60s timeout. (We do NOT
+ *      track pending ids at this layer: a single "latest" slot cannot represent
+ *      concurrent requests, and a Hub-side queue desyncs when an explicit id
+ *      resolves out of order. The broker owns its pending set, so it is the one
+ *      correct place to do the FIFO resolve.)
  *   2. Wire decision values are allow|allowAlways|deny. `allowAlways` is a
  *      client-side "remember + allow"; the broker only knows allow/deny, so it is
  *      normalized to 'allow' before respondPermission.
@@ -77,51 +82,6 @@ export interface RouteDeps {
   config: RoutesConfig
 }
 
-/**
- * Tracks the latest unresolved permission / question toolUseId per session, fed
- * by the manager fan-out. A sessionId-only client response maps to the recorded
- * id (integration note 1). Permission and question ids are tracked separately so
- * a pending permission and a pending question on the same session don't clobber
- * each other.
- */
-export class PendingTracker {
-  private readonly permission = new Map<string, string>()
-  private readonly question = new Map<string, string>()
-
-  /** Update tracking from one fan-out event. Tolerant of an empty sessionId. */
-  observe(sessionId: string, event: CoLiveEvent): void {
-    switch (event.type) {
-      case 'permission_request':
-        this.permission.set(sessionId, event.toolUseId)
-        break
-      case 'user_question':
-        this.question.set(sessionId, event.toolUseId)
-        break
-      case 'permission_result':
-        // The turn's permission settled; drop the pending id for this session.
-        this.permission.delete(sessionId)
-        break
-      default:
-        break
-    }
-  }
-
-  /** The latest pending permission toolUseId for a session, or undefined. */
-  pendingPermission(sessionId: string): string | undefined {
-    return this.permission.get(sessionId)
-  }
-
-  /** The latest pending question toolUseId for a session, or undefined. */
-  pendingQuestion(sessionId: string): string | undefined {
-    return this.question.get(sessionId)
-  }
-
-  /** Forget a session's pending question (called once it's answered). */
-  clearQuestion(sessionId: string): void {
-    this.question.delete(sessionId)
-  }
-}
-
 /** Pull the bearer token from the Authorization header or the ?token query param. */
 function extractToken(req: Request): string | undefined {
   const header = req.headers.authorization
@@ -180,14 +140,13 @@ function toWireSession(s: NormalizedSession): Omit<NormalizedSession, 'timestamp
 }
 
 /**
- * Build the authenticated /api Router and the {@link PendingTracker} that feeds
- * its toolUseId mapping. The caller is responsible for subscribing the tracker
- * to the manager fan-out (createApp does this), so the tracker is returned here
- * rather than wired internally — keeping this function free of side effects.
+ * Build the authenticated /api Router wiring every protocol endpoint to the
+ * injected Core / SSE / store. No hidden state: permission/question responses
+ * forward the body's toolUseId (or '') straight to the broker, which owns the
+ * FIFO resolution (see integration note 1).
  */
-export function mountRoutes(deps: RouteDeps): { router: Router; pending: PendingTracker } {
+export function mountRoutes(deps: RouteDeps): Router {
   const { manager, sseHub, store, config } = deps
-  const pending = new PendingTracker()
   const router = Router()
 
   router.use(makeAuthMiddleware(config.token))
@@ -267,31 +226,24 @@ export function mountRoutes(deps: RouteDeps): { router: Router; pending: Pending
   })
 
   // POST /api/permission-response {sessionId, decision, toolUseId?}
+  // Forward the explicit toolUseId (desk client) or '' (Even app's sessionId-only
+  // path → broker settles the oldest pending request, FIFO). See note 1.
   router.post('/permission-response', (req, res) => {
     const body = req.body as { sessionId?: unknown; decision?: unknown; toolUseId?: unknown }
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
     const decision = normalizeDecision(body.decision)
-    // Prefer an explicit body toolUseId (our desk client sends it); else map the
-    // sessionId to the tracked pending id (the Even-app path).
-    const toolUseId =
-      typeof body.toolUseId === 'string' && body.toolUseId.length > 0
-        ? body.toolUseId
-        : (pending.pendingPermission(sessionId) ?? '')
+    const toolUseId = typeof body.toolUseId === 'string' ? body.toolUseId : ''
     manager.respondPermission(sessionId, toolUseId, decision)
     res.json({ ok: true })
   })
 
-  // POST /api/question-response {sessionId, answer, toolUseId?}
+  // POST /api/question-response {sessionId, answer, toolUseId?}  (same FIFO rule)
   router.post('/question-response', (req, res) => {
     const body = req.body as { sessionId?: unknown; answer?: unknown; toolUseId?: unknown }
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
     const answer = typeof body.answer === 'string' ? body.answer : ''
-    const toolUseId =
-      typeof body.toolUseId === 'string' && body.toolUseId.length > 0
-        ? body.toolUseId
-        : (pending.pendingQuestion(sessionId) ?? '')
+    const toolUseId = typeof body.toolUseId === 'string' ? body.toolUseId : ''
     manager.respondQuestion(sessionId, toolUseId, answer)
-    pending.clearQuestion(sessionId)
     res.json({ ok: true })
   })
 
@@ -327,7 +279,7 @@ export function mountRoutes(deps: RouteDeps): { router: Router; pending: Pending
     res.json({ updateAvailable: false })
   })
 
-  return { router, pending }
+  return router
 }
 
 /** Truthy test for SSE replay flags: "true"/"1"/"yes" (case-insensitive) or present. */

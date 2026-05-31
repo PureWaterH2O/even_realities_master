@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import type { Express } from 'express'
-import type { CoLiveEvent } from '../../src/core/events'
 import type { TaggedEvent } from '../../src/core/sessionManager'
 import type { NormalizedSession, TranscriptEntry } from '../../src/core/store'
 import type { SseHub } from '../../src/hub/sse'
@@ -21,10 +20,6 @@ function makeFakeManager() {
     subscribe(cb: (t: TaggedEvent) => void): () => void {
       subscribers.add(cb)
       return () => subscribers.delete(cb)
-    },
-    /** Test helper: push a tagged event through the fan-out. */
-    emit(sessionId: string, event: CoLiveEvent): void {
-      for (const cb of [...subscribers]) cb({ sessionId, event })
     },
   }
 }
@@ -247,84 +242,14 @@ describe('GET /api/sessions/:id/transcript and /history', () => {
   })
 })
 
+// The Hub does NOT track pending toolUseIds: it forwards the body toolUseId (or
+// '') straight to the broker, which settles the OLDEST pending request on an
+// empty id (FIFO — so concurrent permission requests all resolve). That FIFO
+// behaviour is covered in test/core/permissions.test.ts; here we assert only the
+// Hub's forwarding contract.
 describe('POST /api/permission-response', () => {
-  it('maps a sessionId-only body to the tracked pending toolUseId', async () => {
+  it('forwards a sessionId-only body with an empty toolUseId (Even-app path)', async () => {
     const { app, manager } = makeApp()
-    // The hub learns the pending toolUseId from a broadcast permission_request.
-    manager.emit('sess1', {
-      type: 'permission_request',
-      toolName: 'Bash',
-      description: 'run',
-      detail: '',
-      toolUseId: 'tu-42',
-      options: [],
-      suggestions: [],
-    })
-    await request(app)
-      .post('/api/permission-response')
-      .set('Authorization', `Bearer ${TOKEN}`)
-      .send({ sessionId: 'sess1', decision: 'allow' })
-      .expect(200)
-    expect(manager.respondPermission).toHaveBeenCalledWith('sess1', 'tu-42', 'allow')
-  })
-
-  it('maps allowAlways -> allow', async () => {
-    const { app, manager } = makeApp()
-    manager.emit('sess1', {
-      type: 'permission_request',
-      toolName: 'Bash',
-      description: 'run',
-      detail: '',
-      toolUseId: 'tu-99',
-      options: [],
-      suggestions: [],
-    })
-    await request(app)
-      .post('/api/permission-response')
-      .set('Authorization', `Bearer ${TOKEN}`)
-      .send({ sessionId: 'sess1', decision: 'allowAlways' })
-      .expect(200)
-    expect(manager.respondPermission).toHaveBeenCalledWith('sess1', 'tu-99', 'allow')
-  })
-
-  it('prefers an explicit toolUseId from the body when present', async () => {
-    const { app, manager } = makeApp()
-    manager.emit('sess1', {
-      type: 'permission_request',
-      toolName: 'Bash',
-      description: 'run',
-      detail: '',
-      toolUseId: 'tracked',
-      options: [],
-      suggestions: [],
-    })
-    await request(app)
-      .post('/api/permission-response')
-      .set('Authorization', `Bearer ${TOKEN}`)
-      .send({ sessionId: 'sess1', decision: 'deny', toolUseId: 'explicit' })
-      .expect(200)
-    expect(manager.respondPermission).toHaveBeenCalledWith('sess1', 'explicit', 'deny')
-  })
-
-  it('clears the pending toolUseId on permission_result', async () => {
-    const { app, manager } = makeApp()
-    manager.emit('sess1', {
-      type: 'permission_request',
-      toolName: 'Bash',
-      description: 'run',
-      detail: '',
-      toolUseId: 'tu-1',
-      options: [],
-      suggestions: [],
-    })
-    manager.emit('sess1', {
-      type: 'permission_result',
-      toolName: 'Bash',
-      summary: 'ran',
-      decision: 'allow',
-    })
-    // No pending id now: a sessionId-only response has nothing to map to and
-    // calls respondPermission with an empty toolUseId (a harmless no-op in core).
     await request(app)
       .post('/api/permission-response')
       .set('Authorization', `Bearer ${TOKEN}`)
@@ -332,33 +257,51 @@ describe('POST /api/permission-response', () => {
       .expect(200)
     expect(manager.respondPermission).toHaveBeenCalledWith('sess1', '', 'allow')
   })
+
+  it('normalizes allowAlways -> allow', async () => {
+    const { app, manager } = makeApp()
+    await request(app)
+      .post('/api/permission-response')
+      .set('Authorization', `Bearer ${TOKEN}`)
+      .send({ sessionId: 'sess1', decision: 'allowAlways' })
+      .expect(200)
+    expect(manager.respondPermission).toHaveBeenCalledWith('sess1', '', 'allow')
+  })
+
+  it('normalizes a deny/unknown decision to deny', async () => {
+    const { app, manager } = makeApp()
+    await request(app)
+      .post('/api/permission-response')
+      .set('Authorization', `Bearer ${TOKEN}`)
+      .send({ sessionId: 'sess1', decision: 'deny' })
+      .expect(200)
+    expect(manager.respondPermission).toHaveBeenCalledWith('sess1', '', 'deny')
+  })
+
+  it('forwards an explicit body toolUseId when present (desk-client path)', async () => {
+    const { app, manager } = makeApp()
+    await request(app)
+      .post('/api/permission-response')
+      .set('Authorization', `Bearer ${TOKEN}`)
+      .send({ sessionId: 'sess1', decision: 'deny', toolUseId: 'explicit' })
+      .expect(200)
+    expect(manager.respondPermission).toHaveBeenCalledWith('sess1', 'explicit', 'deny')
+  })
 })
 
 describe('POST /api/question-response', () => {
-  it('maps a sessionId-only body to the tracked pending question toolUseId', async () => {
+  it('forwards a sessionId-only body with an empty toolUseId (Even-app path)', async () => {
     const { app, manager } = makeApp()
-    manager.emit('sess1', {
-      type: 'user_question',
-      question: 'pick one',
-      toolUseId: 'q-7',
-      options: ['a', 'b'],
-    })
     await request(app)
       .post('/api/question-response')
       .set('Authorization', `Bearer ${TOKEN}`)
       .send({ sessionId: 'sess1', answer: 'a' })
       .expect(200)
-    expect(manager.respondQuestion).toHaveBeenCalledWith('sess1', 'q-7', 'a')
+    expect(manager.respondQuestion).toHaveBeenCalledWith('sess1', '', 'a')
   })
 
-  it('prefers an explicit toolUseId from the body when present', async () => {
+  it('forwards an explicit body toolUseId when present (desk-client path)', async () => {
     const { app, manager } = makeApp()
-    manager.emit('sess1', {
-      type: 'user_question',
-      question: 'pick one',
-      toolUseId: 'tracked',
-      options: [],
-    })
     await request(app)
       .post('/api/question-response')
       .set('Authorization', `Bearer ${TOKEN}`)

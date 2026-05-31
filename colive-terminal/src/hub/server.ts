@@ -6,9 +6,9 @@
  *   - {@link createApp}: builds the configured Express app from INJECTED deps
  *     (manager, sseHub, store, config) and returns it WITHOUT listening, so
  *     supertest can drive it against fakes — no real model, server, or socket.
- *     It also subscribes the {@link PendingTracker} to the manager fan-out (the
- *     same fan-out the SSE hub consumes) so a sessionId-only permission/question
- *     response can be mapped to the latest pending toolUseId (integration note 1).
+ *     Permission/question responses forward the body toolUseId (or '') to the
+ *     broker, which owns the FIFO resolution of concurrent requests — so there is
+ *     no Hub-side pending-id tracking to wire up (integration note 1 in routes).
  *
  *   - {@link startServer}: the production wiring — builds a real SessionManager +
  *     SseHub + store facade, bridges `manager.subscribe -> sseHub.broadcast`,
@@ -36,9 +36,9 @@ export interface AppDeps {
 }
 
 /**
- * Build the configured Express app: JSON body parsing, the authenticated /api
- * router, and the manager-fanout -> PendingTracker subscription. Does NOT call
- * listen — the caller (startServer / a test) owns the lifecycle.
+ * Build the configured Express app: JSON body parsing, CORS/preflight, optional
+ * request logging, and the authenticated /api router. Does NOT call listen — the
+ * caller (startServer / a test) owns the lifecycle.
  */
 export function createApp(deps: AppDeps): Express {
   const app = express()
@@ -81,18 +81,7 @@ export function createApp(deps: AppDeps): Express {
 
   app.use(express.json())
 
-  const { router, pending } = mountRoutes(deps)
-
-  // Feed the toolUseId tracker from the SAME fan-out the SSE hub consumes. This
-  // must never throw (the manager fan-out has no per-subscriber try/catch), and
-  // it tolerates the empty session key a slash-rejected prompt produces.
-  deps.manager.subscribe(({ sessionId, event }) => {
-    try {
-      pending.observe(sessionId, event)
-    } catch {
-      // A tracking failure must never break the fan-out for the SSE hub.
-    }
-  })
+  const router = mountRoutes(deps)
 
   app.use('/api', router)
 

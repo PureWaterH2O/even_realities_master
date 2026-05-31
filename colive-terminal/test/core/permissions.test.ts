@@ -151,6 +151,52 @@ describe('PermissionBroker.canUseTool — normal tool', () => {
   })
 })
 
+describe('PermissionBroker — concurrent permissions resolve FIFO on a sessionId-only response', () => {
+  it('an empty toolUseId settles the OLDEST pending request, in order (native shift())', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+
+    // The model fires three tool calls at once (e.g. 3 parallel Reads): three
+    // permission_requests are pending simultaneously, each a distinct toolUseId.
+    const a = broker.canUseTool('Read', { file_path: 'a' }, makeOpts({ toolUseID: 'tu-a' }))
+    const b = broker.canUseTool('Read', { file_path: 'b' }, makeOpts({ toolUseID: 'tu-b' }))
+    const c = broker.canUseTool('Read', { file_path: 'c' }, makeOpts({ toolUseID: 'tu-c' }))
+    expect(events.filter((e) => e.type === 'permission_request')).toHaveLength(3)
+
+    // The Even app POSTs {sessionId, decision} with NO toolUseId. Each such
+    // response settles the oldest still-pending request — so all three resolve,
+    // instead of two stranding to a 60s timeout.
+    broker.resolvePermission('', 'allow') // -> tu-a (oldest)
+    await expect(a).resolves.toEqual({ behavior: 'allow', updatedInput: { file_path: 'a' } })
+
+    broker.resolvePermission('', 'allow') // -> tu-b
+    await expect(b).resolves.toEqual({ behavior: 'allow', updatedInput: { file_path: 'b' } })
+
+    broker.resolvePermission('', 'deny') // -> tu-c
+    expect((await c).behavior).toBe('deny')
+  })
+
+  it('an explicit toolUseId targets that exact request (desk-client path), not the oldest', async () => {
+    const { emit } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const a = broker.canUseTool('Read', { file_path: 'a' }, makeOpts({ toolUseID: 'tu-a' }))
+    const b = broker.canUseTool('Read', { file_path: 'b' }, makeOpts({ toolUseID: 'tu-b' }))
+
+    broker.resolvePermission('tu-b', 'allow') // explicit: the 2nd, not the oldest
+    await expect(b).resolves.toEqual({ behavior: 'allow', updatedInput: { file_path: 'b' } })
+
+    broker.resolvePermission('', 'allow') // oldest remaining = tu-a
+    await expect(a).resolves.toEqual({ behavior: 'allow', updatedInput: { file_path: 'a' } })
+  })
+
+  it('a sessionId-only response with nothing pending is a safe no-op', () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    expect(() => broker.resolvePermission('', 'allow')).not.toThrow()
+    expect(events).toEqual([])
+  })
+})
+
 describe('PermissionBroker.canUseTool — timeout', () => {
   beforeEach(() => {
     vi.useFakeTimers()

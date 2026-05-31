@@ -179,9 +179,10 @@ export class PermissionBroker {
    * else resolves `{behavior:'deny'}`. No-op if unknown/already settled.
    */
   resolvePermission(toolUseId: string, decision: PermissionDecision): void {
-    const pending = this.pendingPermissions.get(toolUseId)
-    if (pending === undefined) return
-    this.pendingPermissions.delete(toolUseId)
+    const key = pickPendingKey(this.pendingPermissions, toolUseId)
+    if (key === undefined) return
+    const pending = this.pendingPermissions.get(key)!
+    this.pendingPermissions.delete(key)
     pending.cleanup()
     clearTimeout(pending.timer)
     const result = toDecisionResult(decision, 'denied by client', pending.input ?? {})
@@ -194,9 +195,10 @@ export class PermissionBroker {
    * manager on `/api/question-response`. No-op if unknown/already settled.
    */
   resolveQuestion(toolUseId: string, answer: string): void {
-    const pending = this.pendingQuestions.get(toolUseId)
-    if (pending === undefined) return
-    this.pendingQuestions.delete(toolUseId)
+    const key = pickPendingKey(this.pendingQuestions, toolUseId)
+    if (key === undefined) return
+    const pending = this.pendingQuestions.get(key)!
+    this.pendingQuestions.delete(key)
     pending.cleanup()
     clearTimeout(pending.timer)
     this.emitResult(pending.toolName, 'answered')
@@ -317,6 +319,25 @@ export class PermissionBroker {
       this.emit({ type: 'user_question', question, toolUseId, options })
     })
   }
+}
+
+/**
+ * Pick which pending await a client response settles.
+ *
+ * 🧪 An exact `toolUseId` match wins — the desk client sends the explicit id it
+ * is responding to. Otherwise (the Even app's path: it POSTs
+ * `{sessionId, decision}` with NO toolUseId, so the Hub forwards `''`) settle
+ * the OLDEST pending entry: a `Map` preserves insertion order, so the first key
+ * is the oldest request. This mirrors native even-terminal's FIFO `shift()` and
+ * is what makes CONCURRENT permission requests (e.g. the model firing several
+ * parallel tool calls) answerable — each sessionId-only response settles the
+ * next-oldest, instead of all responses collapsing onto a single tracked id and
+ * the rest stranding to a 60s timeout.
+ */
+function pickPendingKey<T>(pendings: Map<string, T>, toolUseId: string): string | undefined {
+  if (pendings.has(toolUseId)) return toolUseId
+  const oldest = pendings.keys().next()
+  return oldest.done ? undefined : oldest.value
 }
 
 /**
