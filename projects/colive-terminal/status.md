@@ -11,11 +11,18 @@ in `index.ts`. **211 tests; typecheck clean — both independently re-verified b
 agent self-report). +1 controller fix: `subscribe().close()` now self-sufficient (gates delivery on `closed`,
 not just transport abort) — `e9f9f88`.
 **Branch:** `feat/colive-terminal-m1` (do NOT build on `main`); ~36 commits, typecheck clean.
-**Next action:** **(1) Phase 4.1** — automated in-process e2e: boot Core+Hub, desk client A + stub "glasses"
-client B on ONE session, assert both see all events + one transcript id (mirrors M0 harness, now vs our Core).
-**(2) Phase 4.2** — hardware UAT (THE loop): `colive serve` + `colive desk` at the desk + real glasses on the
-same Core; kick off at desk → respond on glasses → return to desk, one continuous session. **(3) 4.3** finish
-the branch (PR/merge). M1 done when 4.1+4.2 pass.
+**Phase 4.1 ✅ DONE** (`32663f4` + hardening): `test/e2e.test.ts` boots the REAL Core+Hub in-process over real
+HTTP+SSE (only the SDK `query` + on-disk store faked), driven by the REAL desk `createHubClient`. 3 tests, all
+green: (a) desk kicks off → glasses sends a free-form follow-up into the SAME session → both independent clients
+get byte-identical streams, one sessionId, transcript agrees; (b) desk-initiated Write permission APPROVED from
+the glasses through the real broker; (c) symmetric DENY (proves the decision CONTENT drives the outcome, not just
+its arrival). An adversarial reviewer subagent flagged "live-vs-replay" + "permission necessity" — traced both to
+be already covered by the post-subscribe ordering + the >=2/timeout waits (the reviewer over-stated severity), but
+added its genuinely-useful suggestions: the deny test, explicit toolUseId-identity + replay-then-live ordering
+asserts, non-empty guards. **214 tests, typecheck clean — controller-verified.**
+**Next action:** **(1) Phase 4.2** — hardware UAT (THE loop): `colive serve` + `colive desk` at the desk + real
+glasses (Even app) on the same Core; kick off at desk → respond on glasses → return to desk, one continuous
+session. Run-book in notes.md. **(2) 4.3** finish the branch (PR/merge). M1 done when 4.2 passes (4.1 already does).
 **Open product decision (DECIDED 2026-05-31, revisitable):** keep `permissionMode: default` for now (safe,
 already UAT-signed-off; prompts every tool incl. reads). `--permission-mode acceptEdits` is the lighter-touch
 per-launch option for the UAT run (fewer ring taps). User: "keep for now, can change anytime."

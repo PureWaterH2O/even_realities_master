@@ -228,6 +228,24 @@ describe('Phase 4.1 — e2e co-live loop (desk + glasses on one session)', () =>
       expect(sawReply(A.events)).toBe(true)
       expect(sawReply(B.events)).toBe(true)
 
+      // LIVE (not replay): turn 1 reached A/B via replay at subscribe time, but
+      // turn 2 was initiated only AFTER both confirmed turn 1 (the >=1 waits), and
+      // there is NO reconnect / second-replay path — so turn 2's frames reach A/B
+      // ONLY via the live broadcast safeWrite. (If live fan-out were broken the
+      // >=2 result waits above would have TIMED OUT.) Make it explicit via order:
+      // turn 2's prompt is appended to the single ordered stream AFTER turn 1's
+      // result — i.e. it arrived live, after the replayed prefix.
+      const firstResultIdx = A.events.findIndex((e) => e.type === 'result')
+      const glassesPromptIdx = A.events.findIndex(
+        (e) => e.type === 'user_prompt' && e.text.includes('free-form from the glasses'),
+      )
+      expect(firstResultIdx).toBeGreaterThanOrEqual(0)
+      expect(glassesPromptIdx).toBeGreaterThan(firstResultIdx)
+
+      // Non-empty guard so the identical-stream assertion below cannot pass on two
+      // empty arrays ([] === []).
+      expect(A.events.length).toBeGreaterThan(0)
+
       // Strongest co-live proof: two independent clients receive byte-identical streams.
       expect(B.events).toEqual(A.events)
 
@@ -274,6 +292,9 @@ describe('Phase 4.1 — e2e co-live loop (desk + glasses on one session)', () =>
       const reqB = permOf(B.events)!
       expect(reqA.toolName).toBe('Write')
       expect(reqA.toolUseId).toBeTruthy()
+      // The broker propagated the SDK's EXACT toolUseID into the event (not a
+      // freshly-minted id) — this is the id the client must echo back.
+      expect(reqA.toolUseId).toBe('tu-e2e-1')
       // Both clients see the SAME pending tool-use id (the broker keys on it).
       expect(reqB.toolUseId).toBe(reqA.toolUseId)
       // The options are the {text,key} objects the Even app renders its ring from.
@@ -295,6 +316,54 @@ describe('Phase 4.1 — e2e co-live loop (desk + glasses on one session)', () =>
 
       // Converge: both independent clients end with the identical stream.
       await waitUntil(() => A.events.length === B.events.length, 4000, 'streams converge')
+      expect(B.events).toEqual(A.events)
+    },
+    15000,
+  )
+
+  it(
+    'a DENY from the glasses propagates as deny (proves the decision CONTENT drives the outcome, not just its arrival)',
+    async () => {
+      // The mirror of the allow test: the SAME fake query streams "tool decision:
+      // <behavior>", so a 'deny' outcome can ONLY appear if the broker resolved the
+      // pending permission with the client's deny — not via auto-allow (Write is not
+      // auto-allowed in 'default' mode) and not via the 60s timeout (which we never
+      // wait for). This rules out "the broker always allows / the decision value is
+      // ignored" — the allow-only test alone could not.
+      const { baseUrl, token } = await boot(makePermissionQuery())
+      const desk: HubClient = createHubClient({ baseUrl, token })
+      const glasses: HubClient = createHubClient({ baseUrl, token })
+
+      const created = await desk.sendPrompt({ text: 'do a thing that needs a tool', cwd: '/tmp' })
+      const sid = created.sessionId!
+
+      const A = collector()
+      const B = collector()
+      handles.push(desk.subscribe(sid, A.onEvent, { needReplay: true }))
+      handles.push(glasses.subscribe(sid, B.onEvent, { needReplay: true }))
+
+      const permOf = (es: CoLiveEvent[]) =>
+        es.find((e): e is Extract<CoLiveEvent, { type: 'permission_request' }> => e.type === 'permission_request')
+      await waitUntil(() => permOf(A.events) !== undefined, 4000, 'A sees permission_request')
+      const reqA = permOf(A.events)!
+
+      // The GLASSES DENIES (sending the explicit toolUseId from the event).
+      await glasses.respondPermission(sid, 'deny', reqA.toolUseId)
+
+      // BOTH clients see the DENY outcome (not allow) — the decision content flowed.
+      const sawDenyOutcome = (es: CoLiveEvent[]) =>
+        es.some((e) => e.type === 'text_delta' && e.text.includes('tool decision: deny'))
+      await waitUntil(() => sawDenyOutcome(A.events), 4000, 'A sees deny outcome')
+      await waitUntil(() => sawDenyOutcome(B.events), 4000, 'B sees deny outcome')
+      // And NEITHER client ever saw an allow outcome for this turn.
+      const sawAllow = (es: CoLiveEvent[]) =>
+        es.some((e) => e.type === 'text_delta' && e.text.includes('tool decision: allow'))
+      expect(sawAllow(A.events)).toBe(false)
+      expect(sawAllow(B.events)).toBe(false)
+
+      await waitUntil(() => countType(A.events, 'result') >= 1, 4000, 'A sees result')
+      await waitUntil(() => A.events.length === B.events.length, 4000, 'streams converge')
+      expect(A.events.length).toBeGreaterThan(0)
       expect(B.events).toEqual(A.events)
     },
     15000,

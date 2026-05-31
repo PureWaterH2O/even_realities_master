@@ -25,6 +25,62 @@ so they can graduate into `knowledge/`.
   Mitigation: distil the SDK surface into `colive-terminal/docs/sdk-reference.md` and forbid
   reading `node_modules` type files. Self-contained tasks never hit this; SDK/fs tasks did.
 
+## Phase 4.1 (automated e2e) findings (2026-05-31)
+
+`test/e2e.test.ts` (`32663f4` + hardening commit): the automated co-live loop. Boots the REAL
+Core+Hub in-process — `createApp` + a real `SessionManager` (fake `query` injected) + real
+`createSseHub` + a fake store — over a real `http.createServer`, driven by the REAL desk
+`createHubClient`. Only the SDK boundary + on-disk store are faked; everything else is the
+production path. 3 tests, all green; full suite 214, typecheck clean (controller-verified).
+- **Test composes startServer's wiring in-test** rather than calling `startServer` (which takes
+  no injected-query arg and would spin the real SDK) — so the validated `hub/server.ts` is
+  untouched. NB: `RunningServer` exposes `.port`, not `.url` (my first draft assumed `.url` →
+  caught immediately by the test failing). Fake turns use the proven `happyTurn` message shape
+  (text via `stream_event` content_block deltas) — that's what actually yields `text_delta`.
+- 🧪 **Adversarial-reviewer pass (subagent).** Verdict "WEAK PROOF" with two CRITICAL flags —
+  both **over-stated** on inspection: (1) "turn 2 could be replay not live" — false: turn 2 is
+  initiated only AFTER both clients confirm turn 1, and there is NO reconnect/second-replay path,
+  so post-subscribe frames arrive ONLY via the live broadcast `safeWrite`; a broken live path
+  would TIME OUT the `>=2 result` waits. (2) "permission could be auto-allow/timeout not client-
+  decided" — false: Write isn't auto-allowed in `default` mode, and an ignored decision would
+  block to the 60s timeout→deny (we wait 4s). Still adopted its genuinely-useful suggestions:
+  a symmetric **DENY** test (proves the decision *content* drives the outcome, not just that some
+  resolution arrived — the one real gap), an explicit `toolUseId === 'tu-e2e-1'` identity assert
+  (broker propagates the SDK's exact id), a replay-then-live **ordering** assert, and non-empty
+  guards so `B.events === A.events` can't pass on two empty arrays. Skipped its racy "probe
+  client" idea (a `needReplay:false` client has no event to confirm attachment before the turn
+  fires → flake risk for marginal gain over the ordering assert).
+- **Lesson carried forward:** trust `/workflows` + my own re-run of `npm test`/`npm run typecheck`
+  over agent self-reports (the Phase-3 agents emitted several transient false BLOCKED/DONE), and
+  over external heuristics like git-log/file-mtime (I mis-inferred pipeline progress from those
+  earlier). The reviewer is an aid, not an oracle — verify its severity claims against the code.
+
+## Phase 4.2 (hardware UAT) — RUN-BOOK (ready; awaiting the user's G2 + R1 run)
+
+The full M1 loop on real hardware. `permissionMode` stays `default` per the product decision
+(`--permission-mode acceptEdits` for fewer ring taps if desired). Steps:
+1. **Start the Hub:** from `colive-terminal/`, `npm run dev -- serve --host 0.0.0.0` (0.0.0.0 so
+   the glasses' phone can reach it; localhost-only is the default). It prints a connect QR
+   (`http://<host>:<port>?token=<token>&defaultProvider=claude` — 🧪 verified format) + the raw
+   host/port/token. Optionally `COLIVE_LOG_REQUESTS=1` for `[req]` wire logging. Note the token.
+2. **Connect the glasses:** scan the QR in the Even app (same as stock even-terminal). Confirm the
+   app's probe (`GET /api/sessions?provider=claude`, ua `Dart/3.8`) succeeds and a session lists.
+3. **Open the desk client:** a SECOND terminal, `npm run dev -- desk --host <hub-host> --port
+   <port> --token <token>` (or `BRIDGE_TOKEN=… HOST=… PORT=… npm run dev -- desk`). The desk needs
+   the Hub's exact token (no default — hard error if missing). To attach to a specific live
+   session use `--session <id>`; omit to start fresh.
+4. **THE loop (acceptance):** at the desk, type a task that kicks off a turn → confirm the glasses
+   HUD shows it live; from the glasses, dictate a FREE-FORM follow-up → confirm it enters the SAME
+   session and the response streams to BOTH desk + HUD; back at the desk, confirm the full
+   conversation (incl. the glasses turn) is visible and you can keep typing. Trigger a tool that
+   needs permission → confirm the ring prompt renders on the glasses, tap allow → tool runs;
+   confirm the desk shows the permission inline too. Esc at the desk = interrupt.
+5. **Record** 🧪 result + any gaps in this file + PROGRESS.md; then **4.3** finish-the-branch
+   (tests green → PR/merge to main via superpowers:finishing-a-development-branch).
+- Watch-items from earlier UAT: first-turn ~4s SDK cold-start before the `202` (fast-202 is a
+  deferred follow-up); the session list still shows internal/background agent sessions (deferred
+  filter). Neither blocks the loop.
+
 ## Phase 3 (thin desk client) findings (2026-05-31)
 
 Built via the `wf-phase3.mjs` subagent workflow (modeled on `wf-phase2.mjs`): per-task
