@@ -118,7 +118,7 @@ The full M1 loop on real hardware. `permissionMode` stays `default` per the prod
 
 Built via the `wf-phase3.mjs` subagent workflow (modeled on `wf-phase2.mjs`): per-task
 impl → spec-review → quality-review fix-loops, 9 agents, ~698k tokens, base SHA `fa6f6aa`.
-Commits: `444c0d1` (3.1 client), `e9f9f88` (3.1 close() hardening — controller fix),
+Commits: `444c0d1` (3.1 client), `2982c30` (3.1 close() hardening — controller fix),
 `053bf5b` (3.2 slash), `4b55745` + `c3d2b41` (3.3 app + wiring). **211 tests, typecheck
 clean — both independently re-run by the controller** (the agents self-reported several
 premature BLOCKED/DONE statuses mid-run due to transient tool-output glitches, so the final
@@ -132,7 +132,7 @@ numbers were NOT trusted on faith; re-verified green from a clean tree).
   `CoLiveEvent`. Returns a **callable** close handle (`handle()` or `handle.close()`). POST helpers
   `sendPrompt`/`respondPermission`/`respondQuestion`/`interrupt`, GET `fetchTranscript`. Bearer
   header on every request + `?token=` on the SSE URL.
-- 🧪 **`close()` must be self-sufficient (controller fix `e9f9f88`).** Quality review found `close()`
+- 🧪 **`close()` must be self-sufficient (controller fix `2982c30`).** Quality review found `close()`
   relied SOLELY on the transport honoring `controller.abort()` — a chunk already read before the
   abort propagates could still fire `onEvent` after the caller tore down. Now the read loop
   `break`s on `closed` and the parser `onEvent` drops events when `closed`. Matters for Phase 4:
