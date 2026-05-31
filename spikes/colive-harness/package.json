@@ -1,0 +1,7 @@
+{
+  "name": "colive-harness",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "M0 spike: confirm two clients on one bridge session co-live without collision"
+}

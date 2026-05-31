@@ -16,3 +16,15 @@
 - Build a fresh, minimal **protocol-compatible** server in our own TypeScript on the public, licensed `@anthropic-ai/claude-agent-sdk` + Express — **interoperating** with the Even app's observed HTTP/SSE contract (an interface, which we reverse-engineered and documented), **not copying their source.**
 - Rationale: avoids the licensing problem entirely; gives us **full ownership** of the Core (the natural home for model-config, permission-config, hook-leak handling, multi-client fan-out, full-history endpoint); depends only on public packages.
 - **M1 implication:** M1 is a *clean build to spec*, not a patch of their dist. Slightly more work than patching, but owned and legally sound. Our reverse-engineered protocol (in `knowledge/terminal-mode/overview.md` + `research/2026-05-30-terminal-mode-live-probe/findings.md`) is the implementation target.
+
+## Task 2 — Two-client co-live confirmation (🧪 PASS)
+
+Harness: `spikes/colive-harness/colive.mjs` against a scratch stock bridge (`PORT=3457`, cwd `/tmp/colive-spike`).
+Client A started a session (prompt "OK"); A **and** B subscribed; then **client B** sent a second prompt ("DONE").
+
+**Result (🧪, 2026-05-30):**
+- Both clients received **identical 14-frame streams** covering *both* turns: `user_prompt, status×, text_delta, result` ×2. **Each client saw the *other's* prompt and result live.**
+- **No fork / no collision:** exactly **1 transcript file** in the project dir, containing **both** user turns ("OK" and "DONE"). The second client's prompt **appended to the same session** (serialized by the bridge).
+- → The core architectural assumption holds: **one owner serializes multi-client input + broadcasts to all subscribers → true co-presence, zero collision.** This is what M1's Session Core must replicate.
+
+**Incidental (🧪):** the bridge resolves cwd through symlinks (`/tmp` → `/private/tmp`), so the `~/.claude/projects` dir was `-private-tmp-colive-spike`. **M1 note:** normalize/realpath the cwd so session lookups are stable.
