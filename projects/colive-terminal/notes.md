@@ -91,6 +91,26 @@ closes the **last open Phase-2 acceptance item**. Server logs showed `POST /api/
   ring-buffer replay (the `permission_request`/`permission_result`/`tool_end` frames). NB:
   backgrounded `curl`-to-file does NOT work for SSE — it block-buffers and flushes nothing until close.
 
+### Bug #3 — CONCURRENT permissions all timed out (found in deeper UAT 2026-05-31; fixed `3aa62f3`)
+Single-permission-per-turn worked, but the moment the model fired **multiple tool calls needing
+permission at once** (observed: 3 parallel `Read`s of 3 files to combine), **every** prompt timed out —
+the taps never resolved them. (Single-permission turns are fine; this is strictly the concurrent case.)
+- 🧪 **Cause:** the Hub's `PendingTracker` stored only ONE pending toolUseId per session
+  (`Map<sessionId,string>`). Concurrent `permission_request`s overwrote each other → only the latest id
+  was tracked, and the first `permission_result` deleted the whole entry → later sessionId-only taps
+  mapped to `''` (no-op) and the rest hit the 60s default-deny. A single slot cannot represent
+  concurrent requests.
+- 🧪 **Fix (mirror native):** native even-terminal keeps pending permissions as a FIFO queue and each
+  response does `pendingPermissions.shift()` — settling the OLDEST. We moved FIFO into the **broker**
+  (the single owner of the pending set, so exactly one result per resolve, no queue desync): an
+  empty/unknown toolUseId settles the oldest pending entry (JS `Map` is insertion-ordered); an explicit
+  toolUseId (desk client) still targets that exact one. Deleted `PendingTracker`; the Hub now just
+  forwards `body.toolUseId || ''`. Applies to permissions AND questions. **Unit-verified (161 tests);
+  hardware re-confirm of the 3-file-read scenario PENDING.**
+- ⚠️ **Related UX (not a bug):** we run `permissionMode: default` (prompts for EVERY tool incl. reads);
+  native runs `acceptEdits` (auto-approves more, only mutating ops reach the ring) → far fewer prompts.
+  Deliberate safe default per M0; `--permission-mode acceptEdits` is the lighter-touch option for UAT.
+
 ### Remaining follow-ups (not blockers; address during Phase 3/4 or polish)
 - **fast-`202`:** `POST /api/prompt` for a NEW session blocks ~4s resolving the real session id
   (awaits the stream init). Consider returning `202` immediately so the app subscribes during the

@@ -5,6 +5,13 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-31
 
+### Co-Live Terminal — M1 permission UAT: fixed CONCURRENT-permission timeout (bug #3, `3aa62f3`)
+
+- Deeper hardware UAT (pushing past the single-file Write) surfaced a real bug: when the model fires **multiple tool calls needing permission at once** (e.g. 3 parallel `Read`s), **all** the prompts time out — taps never resolve them. Single-permission turns were fine.
+- Cause: the Hub's `PendingTracker` held only ONE pending toolUseId per session — concurrent `permission_request`s clobbered each other and the first `permission_result` cleared the slot, so later sessionId-only taps mapped to `''` (no-op) and stranded to the 60s default-deny.
+- Fix (mirror native's FIFO `shift()`): the **broker** now settles the OLDEST pending request on an empty/unknown toolUseId (Map insertion order), while an explicit toolUseId still targets that exact one. Deleted `PendingTracker`; the Hub forwards `body.toolUseId || ''`. The broker is the single owner of the pending set, so no queue-desync. Applies to permissions + questions. **161 tests green, typecheck clean; hardware re-confirm of the 3-file-read scenario pending.**
+- Related (not a bug): we run `permissionMode: default` (every tool prompts, incl. reads); native runs `acceptEdits` (only mutating ops reach the ring). `--permission-mode acceptEdits` is the lighter-touch UAT option. Phase 3 (desk client) is parked until permission UAT is signed off.
+
 ### Co-Live Terminal — M1 ring-permission HARDWARE ACCEPTANCE: PASS 🧪 (Phase 2 now fully complete)
 
 - The **last open Phase-2 acceptance item** is done. A desk-injected (curl) Write prompt to a glasses-subscribed session rendered a **tappable ring permission prompt**; tapping "Yes" approved it and the tool ran. Verified end-to-end across **two co-live turns** from the glasses: `Write` created `/tmp/colive-hello.txt` (`hi`), then a `Bash` verify confirmed the contents — each gated by its own ring tap. Server logs showed `POST /api/permission-response -> 200` (ua `Dart/3.8`) per tap.
