@@ -28,3 +28,20 @@ Client A started a session (prompt "OK"); A **and** B subscribed; then **client 
 - → The core architectural assumption holds: **one owner serializes multi-client input + broadcasts to all subscribers → true co-presence, zero collision.** This is what M1's Session Core must replicate.
 
 **Incidental (🧪):** the bridge resolves cwd through symlinks (`/tmp` → `/private/tmp`), so the `~/.claude/projects` dir was `-private-tmp-colive-spike`. **M1 note:** normalize/realpath the cwd so session lookups are stable.
+
+## Task 4 — Desk-client parity-blocker hunt (seeded inventory)
+
+Full table: `research/2026-05-30-colive-m0-spike/parity-inventory.md`. Key results:
+
+- **🧪 Slash commands do NOT execute via the prompt stream.** `/context` sent as a prompt **hung the turn** —
+  0 input/output tokens, no `text_delta`, no `result` for 30s+ (had to `/api/interrupt`). They're TUI-level;
+  the desk client must **intercept slash commands client-side** and never forward `/cmd` to `query()`. The Core
+  should also guard against raw slash-command prompts.
+- **🧪 Capability metadata is fully present** in the SDK `init`: complete `slash_commands`, `skills`, `agents`,
+  `plugins`, `mcp_servers` lists — so the *brain* is there; only TUI *invocation/affordances* are the client's job.
+- **No truly Blocked features.** Everything classifies as **Reuse** (streaming, tools, permissions, questions,
+  todos, plan mode via `permissionMode`, subagents, MCP, interrupt) or **Rebuild** (input editor, autocomplete,
+  scrollback/paging, slash-command interceptor, `@`-mentions, image paste, status line, diff rendering, vim mode).
+- **M1/M3 implication:** parity is achievable on the SDK substrate; desk-client work is overwhelmingly front-end
+  **Rebuild**, with the **slash-command interceptor** as the key architectural piece to design early. A few items
+  (`@`-mention exactness, image round-trip, per-command mappings) are *verify-in-M3*, not anticipated blockers.
