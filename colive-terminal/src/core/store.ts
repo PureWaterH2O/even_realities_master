@@ -54,8 +54,21 @@ const BUSY_STALENESS_MS = 120_000
  * Terminal `type` markers: a session whose LAST meaningful jsonl line has one of
  * these types is idle (the turn is over). `stop_hook_summary` is special: it is
  * `type:"system"` with this subtype (handled separately below).
+ *
+ * 🧪 `ai-title` is metadata the SDK writes at a turn boundary (the auto-title,
+ * right after `last-prompt`) — it trails a finished turn, so a transcript ending
+ * in it is idle. Omitting it made a just-finished session read as `busy` for
+ * 120s (last line `ai-title`, recent mtime), so `/api/sessions` showed it
+ * "thinking" and the app blocked new input. (`summary` is intentionally NOT
+ * terminal — it can lead a resumed/compacted session, so it stays mtime-driven.)
  */
-const TERMINAL_TYPES = new Set(['last-prompt', 'permission-mode', 'result', 'interrupt'])
+const TERMINAL_TYPES = new Set([
+  'last-prompt',
+  'permission-mode',
+  'result',
+  'interrupt',
+  'ai-title',
+])
 
 /**
  * Resolve a cwd through symlinks so session-store lookups are stable.

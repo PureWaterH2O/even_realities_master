@@ -48,6 +48,17 @@ describe('sessionStatusFromJsonlString', () => {
     expect(sessionStatusFromJsonlString(jsonl, FRESH)).toBe('idle')
   })
 
+  it('classifies a session ending in ai-title as idle even when fresh', () => {
+    // 🧪 The SDK writes ai-title (auto-title) right after last-prompt at turn end;
+    // a fresh-mtime transcript ending here is idle, not a live turn.
+    const aiTitle = [
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}',
+      '{"type":"last-prompt","lastPrompt":"hi","sessionId":"s1"}',
+      '{"type":"ai-title","title":"A title","sessionId":"s1"}',
+    ].join('\n')
+    expect(sessionStatusFromJsonlString(aiTitle, FRESH)).toBe('idle')
+  })
+
   it('classifies a session ending mid-assistant with a FRESH mtime as busy', () => {
     const jsonl = [
       '{"type":"user","message":{"role":"user","content":"go"}}',
