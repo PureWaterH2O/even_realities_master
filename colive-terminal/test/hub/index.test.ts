@@ -16,7 +16,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import http from 'node:http'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { parseServeArgs, runServe } from '../../src/index'
+import {
+  parseServeArgs,
+  runServe,
+  parseDeskArgs,
+  buildDeskClient,
+  runDesk,
+  type RenderFn,
+} from '../../src/index'
 import type { RunningServer } from '../../src/hub/server'
 
 describe('parseServeArgs (pure)', () => {
@@ -139,3 +146,65 @@ function getStatus(port: number, path: string): Promise<number> {
     req.on('error', reject)
   })
 }
+
+describe('parseDeskArgs (pure)', () => {
+  it('maps every desk flag, coercing --port to a number', () => {
+    const args = parseDeskArgs([
+      '--host', '10.0.0.5',
+      '--port', '9000',
+      '--token', 'abc123',
+      '--session', 's-7',
+    ])
+    expect(args).toEqual({ host: '10.0.0.5', port: 9000, token: 'abc123', session: 's-7' })
+    expect(typeof args.port).toBe('number')
+  })
+
+  it('leaves unset flags undefined so env/defaults can apply', () => {
+    expect(parseDeskArgs([])).toEqual({})
+  })
+
+  it('throws on a non-numeric --port', () => {
+    expect(() => parseDeskArgs(['--port', 'nope'])).toThrow(/Invalid --port/)
+  })
+})
+
+describe('buildDeskClient (args > env > defaults)', () => {
+  it('resolves baseUrl + token + session from args over env', () => {
+    const conn = buildDeskClient(
+      { host: '1.2.3.4', port: 8080, token: 'argtok', session: 'sid-1' },
+      { HOST: '9.9.9.9', PORT: '1111', BRIDGE_TOKEN: 'envtok' },
+    )
+    expect(conn).toEqual({ baseUrl: 'http://1.2.3.4:8080', token: 'argtok', sessionId: 'sid-1' })
+  })
+
+  it('falls back to env, then to the M0 host/port defaults', () => {
+    const conn = buildDeskClient({}, { BRIDGE_TOKEN: 'envtok' })
+    expect(conn.baseUrl).toBe('http://127.0.0.1:3456')
+    expect(conn.token).toBe('envtok')
+    expect(conn.sessionId).toBeUndefined()
+  })
+
+  it('throws a clear error when no token is supplied (desk must present the Hub token)', () => {
+    expect(() => buildDeskClient({}, {})).toThrow(/token/i)
+  })
+})
+
+describe('runDesk (injected renderer — no real TTY)', () => {
+  it('builds a client and renders <App> with the resolved client + sessionId', () => {
+    const rendered: Array<{ clientPresent: boolean; sessionId: unknown }> = []
+    const fakeRender: RenderFn = (element) => {
+      const props = (element as { props: { client?: unknown; sessionId?: unknown } }).props
+      rendered.push({ clientPresent: props.client !== undefined, sessionId: props.sessionId })
+      return { unmount() {}, waitUntilExit: () => Promise.resolve() }
+    }
+    runDesk(['--session', 's-42'], { BRIDGE_TOKEN: 'tok' }, fakeRender)
+    expect(rendered).toHaveLength(1)
+    expect(rendered[0]?.clientPresent).toBe(true)
+    expect(rendered[0]?.sessionId).toBe('s-42')
+  })
+
+  it('throws (no silent no-op) when no token is available', () => {
+    const fakeRender: RenderFn = () => ({ unmount() {}, waitUntilExit: () => Promise.resolve() })
+    expect(() => runDesk([], {}, fakeRender)).toThrow(/token/i)
+  })
+})
