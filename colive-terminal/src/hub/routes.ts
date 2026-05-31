@@ -169,6 +169,17 @@ function intQuery(value: unknown): number | undefined {
 }
 
 /**
+ * Map an internal NormalizedSession to the Even-app wire shape. 🧪 The app's
+ * Dart deserializer requires `timestamp` as an ISO-8601 STRING — native
+ * even-terminal emits e.g. "2026-05-31T16:10:41.102Z". We store it as epoch ms
+ * internally; an integer on the wire makes the app reject the host outright
+ * ("failed to probe and save"). All other fields pass through unchanged.
+ */
+function toWireSession(s: NormalizedSession): Omit<NormalizedSession, 'timestamp'> & { timestamp: string } {
+  return { ...s, timestamp: new Date(s.timestamp).toISOString() }
+}
+
+/**
  * Build the authenticated /api Router and the {@link PendingTracker} that feeds
  * its toolUseId mapping. The caller is responsible for subscribing the tracker
  * to the manager fan-out (createApp does this), so the tracker is returned here
@@ -198,10 +209,12 @@ export function mountRoutes(deps: RouteDeps): { router: Router; pending: Pending
   // GET /api/sessions?cwd=&limit=
   router.get('/sessions', async (req, res, next) => {
     try {
-      const cwd = typeof req.query.cwd === 'string' ? req.query.cwd : config.projectDir
+      // No cwd => span ALL projects (the Even app polls /api/sessions with no
+      // cwd; native even-terminal lists every project, not just one).
+      const cwd = typeof req.query.cwd === 'string' ? req.query.cwd : undefined
       const limit = intQuery(req.query.limit)
       const sessions = await store.listSessions({ dir: cwd, limit })
-      res.json({ sessions })
+      res.json({ sessions: sessions.map(toWireSession) })
     } catch (err) {
       next(err)
     }

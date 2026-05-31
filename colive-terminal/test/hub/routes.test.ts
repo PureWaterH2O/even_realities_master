@@ -185,7 +185,7 @@ describe('POST /api/prompt', () => {
 })
 
 describe('GET /api/sessions', () => {
-  it('returns {sessions:[...]} from store.listSessions', async () => {
+  it('returns {sessions:[...]} with an ISO-string timestamp (Even-app wire shape)', async () => {
     const sessions: NormalizedSession[] = [
       { id: 'a', title: 'A', timestamp: 1, cwd: '/tmp', provider: 'claude', status: 'idle' },
     ]
@@ -194,10 +194,20 @@ describe('GET /api/sessions', () => {
       .get('/api/sessions?cwd=/tmp&limit=5')
       .set('Authorization', `Bearer ${TOKEN}`)
       .expect(200)
-    expect(res.body.sessions).toEqual(sessions)
-    expect(store.listSessions).toHaveBeenCalled()
+    // timestamp must be an ISO-8601 STRING, not an int (🧪 the app rejects an int)
+    expect(res.body.sessions).toEqual([
+      { id: 'a', title: 'A', timestamp: '1970-01-01T00:00:00.001Z', cwd: '/tmp', provider: 'claude', status: 'idle' },
+    ])
     const arg = store.listSessions.mock.calls[0][0]
+    expect(arg.dir).toBe('/tmp')
     expect(arg.limit).toBe(5)
+  })
+
+  it('spans ALL projects (dir undefined) when no cwd is given', async () => {
+    const { app, store } = makeApp()
+    await request(app).get('/api/sessions').set('Authorization', `Bearer ${TOKEN}`).expect(200)
+    const arg = store.listSessions.mock.calls[0][0]
+    expect(arg.dir).toBeUndefined()
   })
 })
 
