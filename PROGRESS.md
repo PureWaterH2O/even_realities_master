@@ -3,6 +3,86 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
+## 2026-05-31
+
+### Co-Live Terminal — M1 Phase 4.2 hardware UAT: full loop runs 🧪 + fixed desk-prompt-stuck bug (`9a232c8`)
+
+- 🧪 **First real desk + glasses hardware run of the full M1 loop — almost everything worked:** kick off at the desk → live on the glasses HUD → free-form follow-up dictated from the glasses → response on BOTH → permission ring tap. One co-live UI bug found: a permission answered FROM THE GLASSES (ring tap) correctly continued the conversation but left the inline permission prompt **stuck on the desk terminal** (a local desk answer dismissed fine; only the remote answer didn't).
+- 🧪 **Root cause + fix (one line):** `src/desk/app.tsx`'s `permission_result` handler appended a note but never `setPending(undefined)`. The prompt was cleared only in the local-answer paths; a glasses tap produces no local keypress, only the broker's broadcast `permission_result` — the client-agnostic dismiss signal (broadcast to ALL subscribers on every settle path, for permissions + questions). Added `setPending(undefined)` to that branch so a remote answer dismisses the desk prompt too. Built via `wf-permfix.mjs` (systematic debugging: failing test first, minimal fix, adversarial verifier that reverted the line to confirm fail-without/pass-with). **216 tests green, typecheck clean — controller-reverified from a clean tree.** Noted (out of scope): the desk's single `pending` slot can't disambiguate concurrent permissions (the glasses is the primary multi-permission UI; the broker FIFO-resolves correctly).
+- **Next:** re-test the loop on hardware (confirm the desk prompt now clears on a glasses tap) → 4.3 finish-the-branch.
+
+### Co-Live Terminal — M1 Phase 4.1 (automated co-live e2e) COMPLETE + adversarially hardened
+
+- `colive-terminal/test/e2e.test.ts` boots the REAL Core+Hub in-process over real HTTP+SSE (only the SDK `query` + on-disk store faked, injected into a real `SessionManager` + `createApp` + `createSseHub`), driven by the REAL desk `createHubClient`. 3 tests green: (a) desk kicks off → glasses sends a **free-form follow-up into the SAME session** → both independent clients receive byte-identical streams, exactly one sessionId, transcript endpoint agrees; (b) desk-initiated **Write permission APPROVED from the glasses** through the real broker (same toolUseId + `{text,key}` options seen by both); (c) symmetric **DENY** (proves the decision *content* drives the outcome, not just that some resolution arrived). The **software side of the M1 loop is proven.** (`32663f4`, `c9203ca`)
+- The test caught two integration bugs in its own first draft (`RunningServer.port` not `.url`; fake-turn message shape) before going green — composed startServer's wiring in-test so the validated `hub/server.ts` is untouched.
+- **Adversarial-reviewer subagent** verdict "WEAK PROOF" flagged live-vs-replay + permission-necessity; traced both to be already covered (turn 2 is initiated only after both clients confirm turn 1, with no reconnect/replay path → live-only; Write isn't auto-allowed in `default` mode and an ignored decision would block to the 60s timeout) — reviewer over-stated severity, but adopted its useful adds (the deny test, explicit `toolUseId` identity + replay-then-live ordering asserts, non-empty guards). **214 tests green, typecheck clean — controller-verified (not agent self-report).**
+- **Next: Phase 4.2 hardware UAT** — the full loop on real G2 + R1 (run-book in `projects/colive-terminal/notes.md`): `colive serve` + `colive desk` at the desk + glasses on the same Core. Then 4.3 finish the branch. `permissionMode` stays `default` (user's call; `--permission-mode acceptEdits` = fewer ring taps).
+
+### Co-Live Terminal — M1 Phase 3 (thin desk client) COMPLETE
+
+- Built via the `wf-phase3.mjs` subagent workflow (impl→spec→quality fix-loops, 9 agents, ~698k tok): `desk/client.ts` (HTTP/SSE client of the Hub — `eventsource-parser` subscribe + POST helpers + fetchTranscript), `desk/slash.ts` (pure slash interceptor — never POSTs a `/cmd`), `desk/app.tsx` (ink TUI: transcript + input + status + inline permission/question, Esc=interrupt; injected `HubClient` for `ink-testing-library`) + `colive desk` wired in `index.ts`. **Both `npm test` + `npm run typecheck` independently re-verified** (agent self-reports had transient false BLOCKED/DONE from tool-output glitches — not trusted on faith).
+- Controller fix `2982c30`: `subscribe().close()` made self-sufficient (gate delivery on a `closed` flag, not just transport abort) + regression test driving a fetch that ignores abort — matters for the TUI re-subscribing on a session change.
+- ⚠️ ink+vitest gotcha (carried into the 4.1 e2e): async React state landing outside `act()` pollutes the next file's `console.error` spy under a shared worker → `act()`-flush. permissionMode decision recorded (keep `default` for now). Commits `444c0d1` (3.1), `053bf5b` (3.2), `4b55745`+`c3d2b41` (3.3), `71d6905` (docs).
+
+### Co-Live Terminal — M1 permission UAT SIGNED OFF 🧪 + Phase 3 env ready
+
+- Hardware re-test confirmed the concurrent-permission fix: a full agentic loop from the glasses — create (incl. **2 concurrent Writes**) → read (3 files) → delete — gave **6 permission requests → 6 allow → 0 timeout**. The concurrent Writes each got their own allow (the case that was 100% failing pre-fix). Files created in the project dir + correctly deleted; git tree clean. **Permission UAT signed off — single/sequential/concurrent all work.**
+- **7 hardware-surfaced bugs** found + fixed across Phase-2 UAT total (4 conn/stream + 2 permission-shape + 1 concurrent-FIFO). 161 tests green, typecheck clean.
+- **Phase 3 build env prepared** (`ca23f47`): ink@7 + react@19 + eventsource-parser@3 + ink-testing-library@4; `.tsx` renders headlessly under vitest 4 (oxc automatic JSX). Phase 3 itself NOT started — to be built next via the subagent workflow (author `wf-phase3.mjs` modeling `wf-phase2.mjs`).
+- Open product decision (not a blocker): keep `permissionMode: default` (prompts for every tool) vs move toward native's `acceptEdits` (fewer taps).
+
+### Co-Live Terminal — M1 permission UAT: fixed CONCURRENT-permission timeout (bug #3, `3aa62f3`)
+
+- Deeper hardware UAT (pushing past the single-file Write) surfaced a real bug: when the model fires **multiple tool calls needing permission at once** (e.g. 3 parallel `Read`s), **all** the prompts time out — taps never resolve them. Single-permission turns were fine.
+- Cause: the Hub's `PendingTracker` held only ONE pending toolUseId per session — concurrent `permission_request`s clobbered each other and the first `permission_result` cleared the slot, so later sessionId-only taps mapped to `''` (no-op) and stranded to the 60s default-deny.
+- Fix (mirror native's FIFO `shift()`): the **broker** now settles the OLDEST pending request on an empty/unknown toolUseId (Map insertion order), while an explicit toolUseId still targets that exact one. Deleted `PendingTracker`; the Hub forwards `body.toolUseId || ''`. The broker is the single owner of the pending set, so no queue-desync. Applies to permissions + questions. **161 tests green, typecheck clean; hardware re-confirm of the 3-file-read scenario pending.**
+- Related (not a bug): we run `permissionMode: default` (every tool prompts, incl. reads); native runs `acceptEdits` (only mutating ops reach the ring). `--permission-mode acceptEdits` is the lighter-touch UAT option. Phase 3 (desk client) is parked until permission UAT is signed off.
+
+### Co-Live Terminal — M1 ring-permission HARDWARE ACCEPTANCE: PASS 🧪 (Phase 2 now fully complete)
+
+- The **last open Phase-2 acceptance item** is done. A desk-injected (curl) Write prompt to a glasses-subscribed session rendered a **tappable ring permission prompt**; tapping "Yes" approved it and the tool ran. Verified end-to-end across **two co-live turns** from the glasses: `Write` created `/tmp/colive-hello.txt` (`hi`), then a `Bash` verify confirmed the contents — each gated by its own ring tap. Server logs showed `POST /api/permission-response -> 200` (ua `Dart/3.8`) per tap.
+- Surfaced **2 more protocol bugs** (both fixed, `3f22983`; diffed vs native `even-terminal` 0.7.9 `dist/claude/session.js`):
+  1. **`permission_request.options` must be `{text,key}` objects, not bare strings** — the Even app renders its ring buttons from these (`text`=label, `key`=the `decision` POSTed back). With `['allow','deny']` it rendered nothing → no prompt → silent 60s timeout. Now `[{text:'Yes',key:'allow'},{text:'No',key:'deny'}]`; `detail` is a short string (file path/command), not the raw input object.
+  2. **An allow MUST return `updatedInput` (a record)** — the SDK Zod-validates `PermissionResult` at runtime and rejects bare `{behavior:'allow'}` (`ZodError path:["updatedInput"], expected:"record"`), failing the tool *after* approval (caused the retry / "second prompt"). The TS type marks it optional → type-checks but fails live. Now every allow path echoes the original `input` back (mirrors native). `sdk-reference.md` corrected.
+- Diagnostic that worked: `curl -N --max-time 6 .../api/events?...&needReplay=true` reads the SSE ring-buffer replay. NB backgrounded `curl`-to-file does **not** work for SSE (block-buffers, flushes nothing until close).
+- **6 hardware bugs total** found + fixed across Phase 2 (4 conn/stream + 2 permission). 158 tests green. **Next:** Phase 3 (thin desk client) → Phase 4 (desk+glasses-on-one-session loop) → finish branch.
+
+### Co-Live Terminal — M1 Phase 2 HARDWARE ACCEPTANCE: core co-live loop PROVEN on real G2 🧪
+
+- Connected the **real Even app** to `colive serve` and ran a **continuous multi-turn conversation from the glasses** (3+ messages, each response live on the HUD, can keep going on one session). The M1 core mechanic works on real hardware. Model = `claude-opus-4-8`; first turn ~4.3s (SDK cold start — **not** the old ~20s hook lag), subsequent turns ~15ms to `202`.
+- The hardware run surfaced **4 protocol bugs no unit test could** (all fixed; diffed live against native `even-terminal` 0.7.9):
+  1. **`/api/sessions` `timestamp` must be an ISO-8601 string**, not an epoch-ms int — the app's `dart:io` deserializer rejected the host ("failed to probe and save"). Also: no `cwd` ⇒ span **all** projects. (`a5c82e7`)
+  2. **CORS** — added permissive CORS + `OPTIONS` preflight for stock parity (not the actual blocker here, since the app uses `dart:io`, not a WebView). (`d0af84a`)
+  3. **Missing terminal `status: idle` SSE frame** — string-prompt mode never emitted it (only `session_state_changed:idle` did, which the SDK sends only in streaming mode), so the HUD hung "thinking" forever and blocked the next prompt. Now emitted reliably at turn end. (`8e20fa1`)
+  4. **`ai-title` status misclassification** — a just-finished session read `busy` for 120s (last jsonl line is `ai-title`), so the polled `/api/sessions` showed "thinking". Now `ai-title` ⇒ idle. (`bebdc02`)
+- Added `COLIVE_LOG_REQUESTS=1` wire logging to the Hub. 🧪 The app's connect probe is a **single `GET /api/sessions?provider=claude`** (ua `Dart/3.8 (dart:io)`); it polls that every ~1s and fetches `/sessions/:id/history?limit=10` on open.
+- **Remaining for M1:** ring-permission hardware check; **Phase 3** thin desk client; **Phase 4** the full desk+glasses-on-one-session loop (M1's definition of done). Minor follow-ups: fast-`202` (first POST blocks ~4s resolving the new id), filter internal/agent sessions from the list, per-poll perf.
+
+### Co-Live Terminal — M1 Phase 2 (Client Hub) COMPLETE 🧪
+
+- **Phase 2 (Client Hub) — DONE; 153 tests green, typecheck clean; `colive serve` boots end-to-end** (controller smoke-test over real HTTP: 401 without token; 200 + correct `/api/info` via bearer header AND `?token`; `/api/sessions` shape). Four modules:
+  - `hub/sse.ts` — per-session SSE: ring buffer (500), `:ok` preamble, `id:/data:` frames, 15s heartbeat, `needReplay` replay; tolerates empty/unknown sessions; broadcast never throws (drops dead clients).
+  - `hub/routes.ts` — every Even-app endpoint + bearer auth (header or `?token`, constant-time); maps the app's **sessionId-only** permission/question responses to the **latest pending `toolUseId`** (tracked from broadcasts) and `allowAlways`→`allow`.
+  - `hub/server.ts` — `createApp(deps)` (testable) + `startServer(config)` (listens, banner + QR).
+  - `index.ts` — `colive serve [--model --permission-mode --host --port --project-dir]`.
+- **🧪 Fixed the QR connect-URL** to the verified Even-app format `http://<host>:<port>?token=<token>&defaultProvider=claude` (implementer had guessed a `colive://` scheme; our M0 research already had the real format from `even-terminal`'s `common.js`).
+- **Next: Task 2.3 hardware-acceptance pause** — connect the real Even app to `colive serve` (confirm live stream, no ~20s first-turn delay, model = `claude-opus-4-8`, ring permission). Then Phase 3 (desk client) + Phase 4 (the loop).
+
+### Co-Live Terminal — M1 build: Phase 0 + Phase 1 (Session Core) COMPLETE 🧪
+
+- Building M1 in a fresh ultracode chat on `feat/colive-terminal-m1` via **subagent-driven-development**, each task run as a workflow pipeline: TDD implementer → spec-compliance review → code-quality review (+ fix loops).
+- **Phase 0** — scaffolded `colive-terminal/` (TS ESM, `@anthropic-ai/claude-agent-sdk@0.3.158` + Express 5, vitest 4 + supertest, TS 6, Node ≥22). Captured the exact SDK API surface in `colive-terminal/docs/sdk-reference.md`.
+- **Phase 1 (Session Core) — DONE; 104 tests green, typecheck clean.** Five modules, all TDD + two-stage-reviewed:
+  - `events.ts` — SSE event vocabulary (discriminated union; single source of truth).
+  - `config.ts` — model (default `claude-opus-4-8`) / permissionMode (`default`) / settingSources (`[]`) / host / port / token resolution (args > env > default).
+  - `store.ts` — session list/transcript/status reader over `~/.claude/projects/*.jsonl`; realpath cwd; **uncapped** transcript for scrollback.
+  - `session.ts` — one live `query()` per session; SDK-stream → our events (status/tool_start/tool_end/text_delta/running_stats/result); busy/enqueue; interrupt via `abortController`; **thinking text never broadcast**.
+  - `permissions.ts` — permission broker (`canUseTool` → `permission_request`, 60s default-deny; AskUserQuestion → `user_question`, 120s default-skip; honors mode) + slash-command guard (leading-`/` prompts hang `query()` → rejected).
+  - `sessionManager.ts` — facade: create/resume/**serialize** multi-client prompts per session + **fan-out** events to all subscribers (the co-live core).
+- **🧪 Claude Code session-store path encoding** (vs real transcripts): project dir → `~/.claude/projects/<name>` replaces **every non-alphanumeric char with `-`** (`/private/tmp/colive-spike` → `-private-tmp-colive-spike`; `random_claude_stuff/even_realities` → `random-claude-stuff-even-realities`). → `encodeProjectDir`. Detail: `projects/colive-terminal/notes.md`.
+- **🧪 Workflow-harness lesson:** implementer subagents stalled twice (180s no-progress → killed) from **Reading the 232 KB `sdk.d.ts`** (context bloat). Fix: distil the SDK surface into a reference doc + forbid reading `node_modules` type files. Self-contained tasks (1.1) never hit this; SDK/fs tasks did.
+- **Next:** Phase 2 — Client Hub (`sse.ts` ring-buffer/broadcast/heartbeat + `routes.ts`/`server.ts` Even-app contract), then the **Task 2.3 hardware-acceptance pause** (real Even app vs `colive serve`). Then Phase 3 desk client, Phase 4 the end-to-end loop.
+
 ## 2026-05-30
 
 ### Co-Live Terminal — M0 de-risking spike COMPLETE → **GO**
