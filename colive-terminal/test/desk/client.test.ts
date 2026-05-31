@@ -301,4 +301,59 @@ describe('createHubClient — subscribe (real stub Hub on port 0)', () => {
     },
     5000,
   )
+
+  it(
+    'delivers no events after close() even if the transport ignores abort',
+    async () => {
+      // Reviewer-found invariant (3.1 quality): close() must be self-sufficient —
+      // an event arriving after close() must NOT reach onEvent, even when the
+      // transport does not honour AbortController. Guards the Phase-4 case where
+      // the TUI tears down / re-subscribes on a session change and a late in-flight
+      // chunk must not fire onEvent after the UI state is gone.
+      const enc = new TextEncoder()
+      let controller!: ReadableStreamDefaultController<Uint8Array>
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c
+        },
+      })
+      // A fake fetch that IGNORES the abort signal and streams what we drive.
+      const ignoreAbortFetch = (async () =>
+        new Response(stream, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })) as unknown as typeof fetch
+
+      const client = createHubClient({
+        baseUrl: 'http://hub.test',
+        token: TOKEN,
+        fetch: ignoreAbortFetch,
+      })
+      const seen: CoLiveEvent[] = []
+      const handle = await new Promise<ReturnType<HubClient['subscribe']>>((resolve) => {
+        const h = client.subscribe('s-late', (ev) => {
+          seen.push(ev)
+          resolve(h)
+        })
+        controller.enqueue(
+          enc.encode(`id: 1\ndata: ${JSON.stringify({ type: 'status', state: 'busy' })}\n\n`),
+        )
+      })
+
+      handle.close()
+      // Pushed strictly AFTER close(): must be dropped, not delivered.
+      controller.enqueue(
+        enc.encode(`id: 2\ndata: ${JSON.stringify({ type: 'text_delta', text: 'late' })}\n\n`),
+      )
+      await new Promise((r) => setTimeout(r, 30))
+
+      expect(seen).toEqual([{ type: 'status', state: 'busy' }])
+      try {
+        controller.close()
+      } catch {
+        // stream may already be cancelled by the read loop — ignore
+      }
+    },
+    5000,
+  )
 })

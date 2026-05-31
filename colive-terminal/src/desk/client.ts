@@ -171,6 +171,13 @@ export function createHubClient(options: HubClientOptions): HubClient {
       onEvent: (event) => {
         // Comment lines (":ok", ":heartbeat") are not delivered here — the parser
         // only emits complete `data:` frames. Each data string is one CoLiveEvent.
+        //
+        // Gate delivery on `closed` so close() is self-sufficient: an in-flight
+        // chunk already read before the abort propagates must NOT fire onEvent
+        // after the caller has torn down (e.g. the TUI unmounting / re-subscribing
+        // on a session change in Phase 4). Without this, delivery relies solely on
+        // the transport honoring controller.abort().
+        if (closed) return
         try {
           onEvent(JSON.parse(event.data) as CoLiveEvent)
         } catch {
@@ -195,7 +202,7 @@ export function createHubClient(options: HubClientOptions): HubClient {
         try {
           while (true) {
             const { done, value } = await reader.read()
-            if (done) break
+            if (done || closed) break
             parser.feed(decoder.decode(value, { stream: true }))
           }
         } finally {
