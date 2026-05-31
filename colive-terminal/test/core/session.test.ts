@@ -78,6 +78,17 @@ function happyTurnMessages(sessionId = 'sess-abc') {
       },
     },
     { type: 'stream_event', event: { type: 'message_stop' } },
+    // final assistant message: re-carries the SAME tool_use (tool-1) already
+    // streamed via content_block_start. Must NOT double-emit tool_start.
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Hello world' },
+          { type: 'tool_use', id: 'tool-1', name: 'Read', input: {} },
+        ],
+      },
+    },
     // result
     {
       type: 'result',
@@ -144,6 +155,11 @@ describe('ClaudeSession — event normalization', () => {
 
     // tool_start for the tool_use block
     expect(emitted).toContainEqual({ type: 'tool_start', name: 'Read', toolId: 'tool-1' })
+
+    // ...emitted EXACTLY ONCE, even though tool-1 also appears in the final
+    // assistant message (includePartialMessages double-surfaces it).
+    const toolStarts = emitted.filter((e) => e.type === 'tool_start')
+    expect(toolStarts).toEqual([{ type: 'tool_start', name: 'Read', toolId: 'tool-1' }])
 
     // result event carries the SDK result fields, provider claude
     const result = emitted.find((e) => e.type === 'result')
@@ -262,6 +278,111 @@ describe('ClaudeSession — event normalization', () => {
     // result event still reports success:false
     const result = emitted.find((e) => e.type === 'result')
     expect(result).toMatchObject({ type: 'result', success: false })
+  })
+
+  it('emits tool_start for a final-assistant tool_use that was never streamed', async () => {
+    const emitted: CoLiveEvent[] = []
+    // A turn where the ONLY signal of the tool is the final assistant message
+    // (no content_block_start). Per the mapping table, final tool_use -> tool_start.
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'fa1' },
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: 'done' },
+            { type: 'tool_use', id: 'final-tool', name: 'Write', input: { path: 'x' } },
+          ],
+        },
+      },
+      { type: 'result', subtype: 'success', session_id: 'fa1', result: 'done', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+    ]
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('write a file')
+
+    const toolStarts = emitted.filter((e) => e.type === 'tool_start')
+    expect(toolStarts).toEqual([{ type: 'tool_start', name: 'Write', toolId: 'final-tool' }])
+  })
+
+  it('does not double-emit tool_start when a streamed tool reappears in the final assistant message', async () => {
+    const emitted: CoLiveEvent[] = []
+    // tool-7 is announced via content_block_start AND repeated in the final
+    // assistant message — exactly the includePartialMessages:true double-surface.
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'dd1' },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'tool-7', name: 'Bash', input: {} },
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'tool-7', name: 'Bash', input: {} }],
+        },
+      },
+      { type: 'result', subtype: 'success', session_id: 'dd1', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+    ]
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('run a command')
+
+    const toolStarts = emitted.filter((e) => e.type === 'tool_start')
+    expect(toolStarts).toEqual([{ type: 'tool_start', name: 'Bash', toolId: 'tool-7' }])
+  })
+
+  it('dedups per-turn so a re-run of the same tool id emits tool_start again', async () => {
+    const emitted: CoLiveEvent[] = []
+    // Two turns, each streaming tool id 'reused'. The Set is cleared per turn,
+    // so each turn must independently emit one tool_start (no cross-turn dedup).
+    const turn = (sid: string) => [
+      { type: 'system', subtype: 'init', session_id: sid },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'reused', name: 'Read', input: {} },
+        },
+      },
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'reused', name: 'Read', input: {} }] },
+      },
+      { type: 'result', subtype: 'success', session_id: sid, result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+    ]
+    const { fn } = fakeQuery([turn('rt1'), turn('rt2')])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('one')
+    await session.run('two')
+
+    const toolStarts = emitted.filter((e) => e.type === 'tool_start')
+    expect(toolStarts).toEqual([
+      { type: 'tool_start', name: 'Read', toolId: 'reused' },
+      { type: 'tool_start', name: 'Read', toolId: 'reused' },
+    ])
   })
 })
 

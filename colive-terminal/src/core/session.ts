@@ -108,6 +108,15 @@ export class ClaudeSession {
    */
   private openBlocks: Map<number, 'text' | 'thinking'> = new Map()
 
+  /**
+   * Tool ids already announced via a streaming `content_block_start` this turn.
+   * With includePartialMessages:true a tool_use appears BOTH as a streaming
+   * start AND in the final assistant message, so handleAssistant() consults this
+   * Set to avoid double-emitting `tool_start` for the same toolId. Cleared per
+   * turn.
+   */
+  private announcedToolIds: Set<string> = new Set()
+
   constructor(deps: ClaudeSessionDeps) {
     this.config = deps.config
     this.emit = deps.emit
@@ -189,6 +198,7 @@ export class ClaudeSession {
     const abortController = new AbortController()
     this.currentAbort = abortController
     this.openBlocks.clear()
+    this.announcedToolIds.clear()
 
     const options: QueryOptions = {
       model: this.config.model,
@@ -296,10 +306,12 @@ export class ClaudeSession {
         if (!isRecord(block)) return
         const index = asNumber(event.index)
         if (block.type === 'tool_use') {
+          const toolId = asString(block.id)
+          this.announcedToolIds.add(toolId)
           this.emit({
             type: 'tool_start',
             name: asString(block.name),
-            toolId: asString(block.id),
+            toolId,
           })
         } else if (block.type === 'text') {
           this.openBlocks.set(index, 'text')
@@ -350,10 +362,15 @@ export class ClaudeSession {
     if (!Array.isArray(content)) return
     for (const block of content) {
       if (isRecord(block) && block.type === 'tool_use') {
+        const toolId = asString(block.id)
+        // Skip any tool already announced via a streaming content_block_start
+        // this turn (includePartialMessages double-surfaces the same tool_use).
+        if (this.announcedToolIds.has(toolId)) continue
+        this.announcedToolIds.add(toolId)
         this.emit({
           type: 'tool_start',
           name: asString(block.name),
-          toolId: asString(block.id),
+          toolId,
         })
       }
     }
