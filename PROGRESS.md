@@ -5,6 +5,17 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-30
 
+### Co-Live Terminal — M0 de-risking spike COMPLETE → **GO**
+
+- Ran all four M0 checks (plan: `docs/superpowers/plans/2026-05-30-colive-terminal-m0-spike.md`; raw: `research/2026-05-30-colive-m0-spike/`):
+  1. **Source/fork** — `even-terminal` is closed, compiled-only, **no license** → **reimplement** our own protocol-compatible Core (don't fork). 🧪
+  2. **Co-live** — two-client harness (`spikes/colive-harness/`) **PASS**: both clients get all events, 2nd client's prompt appends to the **same transcript**, no collision. 🧪
+  3. **Parity-blocker hunt** — **no true blockers**; everything Reuse/Rebuild; **slash commands hang via the prompt stream** → desk client must intercept them client-side. Seeded `parity-inventory.md`. 🧪
+  4. **iOS backgrounding** — **PASS** (biggest risk retired): glasses streamed live ~2 min with the **phone locked + pocketed**, zero disconnects. 🧪
+- **Incidental 🧪:** ~20 s/turn `SessionStart`-hook latency (our global hooks) → Core must control `settingSources`; app subscribes SSE only when a session is viewed (first-turn race); terse dictated prompts trigger autonomous multi-step work (needs guardrails); `/api/interrupt` stops runaways; multi-phone BLE contention can steal the glasses.
+- **Decision: GO.** M1 inputs locked (own Core, configurable model/permission/hooks, slash interceptor, realpath cwd, client-owned SSE timing, full-history endpoint; long-idle backgrounding + Tailscale deferred to M2).
+- **Next:** write the **M1 implementation plan** (+ likely desk-client sub-spec). Effort: High for the plan, **ultracode** when coding M1.
+
 ### First project chosen + spec drafted — "Co-Live Terminal"
 
 - Decided the first build: a **co-live, single-owner Claude Code session** that a **desk client** and the **glasses** attach to as co-equal live clients — work at the desk, leave and interact freely from the G2+R1 (free-form, not just yes/no), return and pick up the same live session; works off-Wi-Fi via Tailscale.

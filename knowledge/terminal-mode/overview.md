@@ -37,6 +37,26 @@ on-wire traffic. Full audit trail: [`../../research/2026-05-30-terminal-mode-liv
 - **An *observed* session does not update live on the glasses** — you must exit→reopen to refresh content (only the
   10 s status poll is live). Live streaming exists **only** for sessions the bridge itself drives.
 
+### M0 co-live spike addendum (2026-05-30, all 🧪 — see `../../research/2026-05-30-colive-m0-spike/`)
+
+- **🧪 Live stream SURVIVES iOS backgrounding.** With the phone **locked + pocketed**, the glasses HUD kept updating
+  live for **~2 min continuous** (SSE frames every 10s, zero disconnects). The "out for a run" mechanic works for
+  active tasks. *Caveat:* long **idle** pockets (10+ min, no frames) untested — may still drop; reconnect/replay TBD.
+- **🧪 Two clients co-live on one session with no collision** — both receive all events; a 2nd client's prompt
+  appends to the same transcript (serialized by the one owner). Validates the co-live architecture.
+- **🧪 ~20 s first-output latency per bridge turn** caused by the host's **global `.claude` `SessionStart` hooks**
+  (superpowers + remember) injecting context (+ MCP-connect attempts). A custom Core that controls `settingSources`
+  removes it.
+- **🧪 The app subscribes to a session's SSE only when it's *viewed*** — a fast reply can finish before the HUD
+  attaches (→ looks "dead" on the first turn). Owning both clients fixes the timing.
+- **🧪 Slash commands are NOT invokable via the prompt stream** — sending `/context` as a prompt **hung the turn**
+  (0 tokens, no output). A desk client must intercept slash commands client-side; never forward `/cmd` to `query()`.
+- **🧪 Terse dictated prompts trigger autonomous multi-step work** — "Go." was read as "proceed," and the agent
+  read files / ran Bash for ~110 s on `acceptEdits` until interrupted. Needs guardrails. `/api/interrupt` stops it cleanly.
+- **🧪 `even-terminal` is closed-source / compiled-only / no declared license** → we **reimplement** a
+  protocol-compatible Core rather than fork. (Multi-phone BLE contention can also silently steal the glasses — keep
+  other paired phones' Bluetooth off.)
+
 ## Summary
 
 **Terminal Mode** is an official, built-in G2 feature (shipped in the Even Realities app **v2.2.0**, live ~late Apr 2026; **Codex** support added in **v2.2.1**; multi-session streaming in **v2.2.2**). It turns the glasses into an ambient control surface for AI coding agents: the agent's running output "tail" appears in the green HUD, status is glanceable (Thinking / Listening / Executing), and you respond hands-free with the R1 ring (tap = approve, hold = dictate). The host side is the official npm CLI **`@evenrealities/even-terminal`** (current 0.7.9), a local Express + SSE bridge (default port 3456, bearer-token auth) that drives **Claude** via `@anthropic-ai/claude-agent-sdk` and **Codex** via `codex app-server` JSON-RPC. Note: this is unrelated to the Even **Hub** "terminal"/CLI naming, which is just their Claude Code dev tooling.
@@ -104,4 +124,5 @@ The agents downloaded v0.7.9 and confirmed its integrity hash matched npm's publ
 ## Change log
 
 - 2026-05-30: created from initial multi-agent survey (run `wf_302a9f4e-3e2`). Bridge internals verified against the integrity-checked npm tarball.
+- 2026-05-30: **M0 co-live spike** (real G2+R1). 🧪 Live stream survives iOS backgrounding (~2 min pocketed); two-client co-live confirmed (no collision); ~20 s/turn `SessionStart`-hook latency; app subscribes SSE only on view; slash commands hang via prompt stream; terse prompts trigger autonomy; even-terminal closed/no-license → reimplement. Detail: `../../research/2026-05-30-colive-m0-spike/`.
 - 2026-05-30: **live hardware probe** (real G2+R1+app vs genuine 0.7.9 bridge). Promoted bridge internals to 🧪. **Corrected** two claims: (1) "no env/CLI/config override" → only model/permissionMode/maxTurns are fixed; PORT/BRIDGE_TOKEN/PROJECT_DIR/EVEN_HOST_MODE etc. are configurable; (2) "non-allowlisted Bash routes to the ring" → only *mutating* Bash + KillShell/Config/Mcp/RemoteTrigger + AskUserQuestion do; reads/edits/writes/safe-bash auto-approve. Added: desk-TUI sessions are listable/observable but not live-interactable; full SSE vocabulary; model-display gotcha; dictation=raw STT; our hooks leak into bridge sessions. Audit trail: `../../research/2026-05-30-terminal-mode-live-probe/findings.md`.

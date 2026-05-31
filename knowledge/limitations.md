@@ -23,6 +23,9 @@ Known limits that span domains, and the biggest unknowns we want to resolve. Per
 - 🧪 **Our own `.claude` hooks execute inside bridge-driven sessions** and leak onto the HUD (capture-reminder Stop hook). _(terminal-mode)_
 - 🧪 **Replying to a session from the glasses `resume`s & appends in place** (same id), headless on 4.6 — so glasses + a live desk TUI on the same session = two writers → collision risk. Literal same-live-session needs one coordinating owner. _(terminal-mode)_
 - 🧪 **Observed sessions don't live-update on the glasses** (exit→reopen to refresh; only status polls). _(terminal-mode)_
+- 🧪→✅ **iOS backgrounding does NOT kill the live stream** (M0 spike): glasses updated live ~2 min with the phone locked+pocketed. The "out for a run" mechanic works for active tasks. *Open:* long-idle (10+ min) drop/reconnect untested. _(terminal-mode)_
+- 🧪 **~20 s/turn `SessionStart`-hook latency** when running the stock bridge with global `.claude` hooks; a custom Core controlling `settingSources` removes it. _(terminal-mode)_
+- 🧪 **Slash commands hang if sent via the prompt stream** — a desk client must intercept them client-side. _(terminal-mode)_
 - **Pre-1.0 SDK (0.0.x).** APIs and limits may change between minor versions. _(sdk-app-dev)_
 
 ## Top open questions
