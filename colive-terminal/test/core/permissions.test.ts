@@ -73,8 +73,13 @@ describe('PermissionBroker.canUseTool — normal tool', () => {
       expect(req.toolName).toBe('Read')
       expect(req.toolUseId).toBe('tu-9')
       expect(req.description).toBe('Claude wants to read foo.txt')
-      expect(req.detail).toEqual({ file_path: 'foo.txt' })
-      expect(Array.isArray(req.options)).toBe(true)
+      expect(req.detail).toBe('foo.txt')
+      // 🧪 options are {text,key} objects (the app renders its ring buttons
+      // from these); the keys are the wire decisions allow/deny.
+      expect(req.options).toEqual([
+        { text: 'Yes', key: 'allow' },
+        { text: 'No', key: 'deny' },
+      ])
       expect(Array.isArray(req.suggestions)).toBe(true)
     }
 
@@ -88,7 +93,11 @@ describe('PermissionBroker.canUseTool — normal tool', () => {
 
     // Client allows.
     broker.resolvePermission('tu-9', 'allow')
-    await expect(decision).resolves.toEqual({ behavior: 'allow' })
+    // 🧪 allow echoes the original tool input back as updatedInput (SDK-required).
+    await expect(decision).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: { file_path: 'foo.txt' },
+    })
   })
 
   it('emits a permission_result naming the tool and decision on resolve', async () => {
@@ -185,7 +194,10 @@ describe('PermissionBroker.canUseTool — timeout', () => {
 
     await vi.advanceTimersByTimeAsync(PERMISSION_TIMEOUT_MS - 1000)
     broker.resolvePermission('tu-fast', 'allow')
-    await expect(decision).resolves.toEqual({ behavior: 'allow' })
+    await expect(decision).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: { file_path: 'x' },
+    })
   })
 })
 
@@ -194,7 +206,7 @@ describe('PermissionBroker.canUseTool — acceptEdits mode', () => {
     const { emit, events } = makeEmit()
     const broker = new PermissionBroker({ emit, permissionMode: 'acceptEdits' })
     const result = await broker.canUseTool('Edit', { file_path: 'a.ts' }, makeOpts())
-    expect(result).toEqual({ behavior: 'allow' })
+    expect(result).toEqual({ behavior: 'allow', updatedInput: { file_path: 'a.ts' } })
     expect(events).toEqual([])
   })
 
@@ -202,7 +214,7 @@ describe('PermissionBroker.canUseTool — acceptEdits mode', () => {
     const { emit, events } = makeEmit()
     const broker = new PermissionBroker({ emit, permissionMode: 'acceptEdits' })
     const result = await broker.canUseTool('Write', { file_path: 'a.ts' }, makeOpts())
-    expect(result).toEqual({ behavior: 'allow' })
+    expect(result).toEqual({ behavior: 'allow', updatedInput: { file_path: 'a.ts' } })
     expect(events).toEqual([])
   })
 
@@ -222,7 +234,7 @@ describe('PermissionBroker — bypass / auto modes auto-allow everything', () =>
     const { emit, events } = makeEmit()
     const broker = new PermissionBroker({ emit, permissionMode: 'bypassPermissions' })
     const result = await broker.canUseTool('Bash', { command: 'rm x' }, makeOpts())
-    expect(result).toEqual({ behavior: 'allow' })
+    expect(result).toEqual({ behavior: 'allow', updatedInput: { command: 'rm x' } })
     expect(events).toEqual([])
   })
 })

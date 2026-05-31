@@ -52,9 +52,12 @@ describe('CoLiveEvent vocabulary', () => {
         type: 'permission_request',
         toolName: 'Bash',
         description: 'run ls',
-        detail: { cmd: 'ls' },
+        detail: 'ls',
         toolUseId: 'tu-1',
-        options: ['allow', 'deny'],
+        options: [
+          { text: 'Yes', key: 'allow' },
+          { text: 'No', key: 'deny' },
+        ],
         suggestions: [],
       } satisfies PermissionRequestEvent,
       {

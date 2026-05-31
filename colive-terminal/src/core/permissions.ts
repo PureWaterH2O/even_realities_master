@@ -35,7 +35,7 @@
  */
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
-import type { CoLiveEvent } from './events'
+import type { CoLiveEvent, PermissionOption } from './events'
 
 /** Event sink — the single callback the broker emits through. */
 export type Emit = (event: CoLiveEvent) => void
@@ -60,8 +60,36 @@ const EDIT_TOOLS: ReadonlySet<string> = new Set([
   'NotebookEdit',
 ])
 
-/** The decision buttons surfaced to clients for a normal permission request. */
-const PERMISSION_OPTIONS: readonly string[] = ['allow', 'deny']
+/**
+ * The decision buttons surfaced to clients for a normal permission request.
+ * 🧪 Shape matters: the Even app renders its tappable ring prompt from these
+ * `{text, key}` objects (label + the `decision` it POSTs back). Bare strings
+ * render nothing — the request silently times out. Matches native
+ * even-terminal's `buildClaudePermissionOptions` minimal (no-suggestion) case;
+ * `text` is the HUD label, `key` is the wire decision. (`allowAlways` parity —
+ * an extra button derived from `opts.suggestions` — is a tracked follow-up.)
+ */
+const PERMISSION_OPTIONS: readonly PermissionOption[] = [
+  { text: 'Yes', key: 'allow' },
+  { text: 'No', key: 'deny' },
+]
+
+/** Tool-input keys (in priority order) whose value summarizes a permission. */
+const DETAIL_KEYS = ['command', 'file_path', 'url', 'prompt', 'query', 'content'] as const
+
+/**
+ * Derive the short `detail` string for a permission_request from the tool input.
+ * 🧪 The Even app expects a string here (file path / command / url), not the raw
+ * input object — mirrors native even-terminal's cascade (command → file_path →
+ * url → prompt → query → content), truncated. Empty string if nothing matches.
+ */
+function detailFromInput(input: Record<string, unknown>): string {
+  for (const key of DETAIL_KEYS) {
+    const value = input[key]
+    if (typeof value === 'string' && value.length > 0) return value.slice(0, 200)
+  }
+  return ''
+}
 
 /** Broker construction dependencies. */
 export interface PermissionBrokerDeps {
@@ -75,6 +103,12 @@ export interface PermissionBrokerDeps {
 interface Pending<T> {
   /** The tool this await is for (so a permission_result can name it). */
   toolName: string
+  /**
+   * The original tool input, echoed back as `updatedInput` when the client
+   * allows. The SDK requires a record there at runtime (see toDecisionResult).
+   * Only set for permission awaits; questions resolve their own updatedInput.
+   */
+  input?: Record<string, unknown>
   resolve: (value: T) => void
   timer: ReturnType<typeof setTimeout>
   /** Detach the abort listener (if any) when settled. */
@@ -130,7 +164,11 @@ export class PermissionBroker {
       return this.askQuestion(input, opts)
     }
     if (this.shouldAutoAllow(toolName)) {
-      return Promise.resolve<PermissionResult>({ behavior: 'allow' })
+      // 🧪 updatedInput is REQUIRED for an allow at runtime (the SDK validates
+      // the PermissionResult with Zod), even though the TS type marks it
+      // optional. Omit it and the SDK rejects the result with a ZodError and the
+      // tool fails. Echo the input through unchanged, mirroring native.
+      return Promise.resolve<PermissionResult>({ behavior: 'allow', updatedInput: input })
     }
     return this.requestPermission(toolName, input, opts)
   }
@@ -146,7 +184,7 @@ export class PermissionBroker {
     this.pendingPermissions.delete(toolUseId)
     pending.cleanup()
     clearTimeout(pending.timer)
-    const result = toDecisionResult(decision, 'denied by client')
+    const result = toDecisionResult(decision, 'denied by client', pending.input ?? {})
     this.emitResult(pending.toolName, decision === 'allow' ? 'allow' : 'deny')
     pending.resolve(result)
   }
@@ -228,12 +266,12 @@ export class PermissionBroker {
       const cleanup = () => opts.signal.removeEventListener('abort', onAbort)
       opts.signal.addEventListener('abort', onAbort, { once: true })
 
-      this.pendingPermissions.set(toolUseId, { toolName, resolve, timer, cleanup })
+      this.pendingPermissions.set(toolUseId, { toolName, input, resolve, timer, cleanup })
       this.emit({
         type: 'permission_request',
         toolName,
         description: describePermission(toolName, opts),
-        detail: input,
+        detail: detailFromInput(input),
         toolUseId,
         options: [...PERMISSION_OPTIONS],
         suggestions: opts.suggestions ?? [],
@@ -281,13 +319,22 @@ export class PermissionBroker {
   }
 }
 
-/** Map a client decision string to an SDK PermissionResult. */
+/**
+ * Map a client decision string to an SDK PermissionResult.
+ *
+ * 🧪 An allow MUST carry `updatedInput` (a record): the SDK validates the
+ * result with Zod at runtime and rejects an allow without it
+ * (`ZodError … path:["updatedInput"], expected:"record"`), failing the tool —
+ * even though the TS type marks `updatedInput` optional. We echo the original
+ * tool input back unchanged, mirroring native even-terminal.
+ */
 function toDecisionResult(
   decision: PermissionDecision,
   denyMessage: string,
+  updatedInput: Record<string, unknown>,
 ): PermissionResult {
   return decision === 'allow'
-    ? { behavior: 'allow' }
+    ? { behavior: 'allow', updatedInput }
     : { behavior: 'deny', message: denyMessage }
 }
 

@@ -92,12 +92,21 @@ type CanUseTool = (toolName: string, input: Record<string,unknown>, opts: {
 }) => Promise<PermissionResult>
 
 type PermissionResult =
-  | { behavior:'allow', updatedInput?: Record<string,unknown>, updatedPermissions?: PermissionUpdate[] }
+  | { behavior:'allow', updatedInput: Record<string,unknown>, updatedPermissions?: PermissionUpdate[] }
   | { behavior:'deny', message: string, interrupt?: boolean }
 ```
 - `canUseTool` is how a tool call becomes a `permission_request` event: emit it, await the client's
   `/api/permission-response` decision (60s → default **deny**), then resolve allow/deny.
   `opts.title` is the pre-rendered prompt sentence ("Claude wants to read foo.txt") — prefer it for HUD text.
+- 🧪 **`updatedInput` is REQUIRED on an allow** — echo the original `input` back unchanged (like native).
+  The TS type marks it optional, but the SDK validates the result with Zod at runtime and **rejects an
+  allow without it** (`ZodError … path:["updatedInput"], expected:"record"`), failing the tool. (Hardware
+  bug, 2026-05-31: bare `{behavior:'allow'}` made every tool fail post-approval.)
+- 🧪 **`permission_request.options` are `{text,key}` objects, not strings** — the Even app renders its
+  tappable ring buttons from these (`text`=label, `key`=the `decision` it POSTs back). Bare-string options
+  render nothing → no prompt → silent timeout. Native minimal set: `[{text:"Yes",key:"allow"},{text:"No",key:"deny"}]`
+  (+ a `{text:<desc>,key:"allowAlways"}` when `suggestions` are present). `detail` is a short string
+  (file path / command), not the raw input object.
 - AskUserQuestion surfaces as a tool too (`toolName === 'AskUserQuestion'`) → emit `user_question`, await
   `/api/question-response` (120s → default **skip**).
 - **Slash guard:** independent of the SDK — a prompt whose first non-space char is `/` must be rejected

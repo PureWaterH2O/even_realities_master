@@ -78,14 +78,31 @@ export interface ResultEvent {
   outputTokens: number
 }
 
+/**
+ * A selectable permission button. 🧪 The Even app renders its tappable
+ * permission UI from these objects: `text` is the button label shown on the
+ * HUD, `key` is the decision value the app POSTs back to
+ * `/api/permission-response`. (Verified against native even-terminal 0.7.9
+ * `buildClaudePermissionOptions` — bare string options render nothing, so the
+ * ring prompt never appears and the request silently times out.)
+ */
+export interface PermissionOption {
+  /** Button label shown on the HUD (e.g. "Yes" / "No"). */
+  text: string
+  /** Decision posted back on tap (`allow` | `allowAlways` | `deny`). */
+  key: string
+}
+
 /** A tool wants permission to run; clients respond with a decision. */
 export interface PermissionRequestEvent {
   type: 'permission_request'
   toolName: string
   description: string
-  detail: unknown
+  /** 🧪 A short string (the file path / command / url), not the raw input object. */
+  detail: string
   toolUseId: string
-  options: string[]
+  /** 🧪 Objects, not strings — the app keys its tappable buttons on these. */
+  options: PermissionOption[]
   suggestions: unknown[]
 }
 

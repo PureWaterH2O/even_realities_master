@@ -410,7 +410,11 @@ describe('SessionManager — respondPermission / respondQuestion routing', () =>
     await runP
     for (let i = 0; i < 10; i++) await Promise.resolve()
 
-    expect((wrapped as any).__decision).toEqual({ behavior: 'allow' })
+    // allow echoes the original tool input back as updatedInput (SDK-required).
+    expect((wrapped as any).__decision).toEqual({
+      behavior: 'allow',
+      updatedInput: { file_path: 'x' },
+    })
   })
 
   it('routes a question answer to the right session broker', async () => {
