@@ -5,6 +5,19 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-31
 
+### Co-Live Terminal — M1 Phase 4.1 (automated co-live e2e) COMPLETE + adversarially hardened
+
+- `colive-terminal/test/e2e.test.ts` boots the REAL Core+Hub in-process over real HTTP+SSE (only the SDK `query` + on-disk store faked, injected into a real `SessionManager` + `createApp` + `createSseHub`), driven by the REAL desk `createHubClient`. 3 tests green: (a) desk kicks off → glasses sends a **free-form follow-up into the SAME session** → both independent clients receive byte-identical streams, exactly one sessionId, transcript endpoint agrees; (b) desk-initiated **Write permission APPROVED from the glasses** through the real broker (same toolUseId + `{text,key}` options seen by both); (c) symmetric **DENY** (proves the decision *content* drives the outcome, not just that some resolution arrived). The **software side of the M1 loop is proven.** (`32663f4`, `c9203ca`)
+- The test caught two integration bugs in its own first draft (`RunningServer.port` not `.url`; fake-turn message shape) before going green — composed startServer's wiring in-test so the validated `hub/server.ts` is untouched.
+- **Adversarial-reviewer subagent** verdict "WEAK PROOF" flagged live-vs-replay + permission-necessity; traced both to be already covered (turn 2 is initiated only after both clients confirm turn 1, with no reconnect/replay path → live-only; Write isn't auto-allowed in `default` mode and an ignored decision would block to the 60s timeout) — reviewer over-stated severity, but adopted its useful adds (the deny test, explicit `toolUseId` identity + replay-then-live ordering asserts, non-empty guards). **214 tests green, typecheck clean — controller-verified (not agent self-report).**
+- **Next: Phase 4.2 hardware UAT** — the full loop on real G2 + R1 (run-book in `projects/colive-terminal/notes.md`): `colive serve` + `colive desk` at the desk + glasses on the same Core. Then 4.3 finish the branch. `permissionMode` stays `default` (user's call; `--permission-mode acceptEdits` = fewer ring taps).
+
+### Co-Live Terminal — M1 Phase 3 (thin desk client) COMPLETE
+
+- Built via the `wf-phase3.mjs` subagent workflow (impl→spec→quality fix-loops, 9 agents, ~698k tok): `desk/client.ts` (HTTP/SSE client of the Hub — `eventsource-parser` subscribe + POST helpers + fetchTranscript), `desk/slash.ts` (pure slash interceptor — never POSTs a `/cmd`), `desk/app.tsx` (ink TUI: transcript + input + status + inline permission/question, Esc=interrupt; injected `HubClient` for `ink-testing-library`) + `colive desk` wired in `index.ts`. **Both `npm test` + `npm run typecheck` independently re-verified** (agent self-reports had transient false BLOCKED/DONE from tool-output glitches — not trusted on faith).
+- Controller fix `2982c30`: `subscribe().close()` made self-sufficient (gate delivery on a `closed` flag, not just transport abort) + regression test driving a fetch that ignores abort — matters for the TUI re-subscribing on a session change.
+- ⚠️ ink+vitest gotcha (carried into the 4.1 e2e): async React state landing outside `act()` pollutes the next file's `console.error` spy under a shared worker → `act()`-flush. permissionMode decision recorded (keep `default` for now). Commits `444c0d1` (3.1), `053bf5b` (3.2), `4b55745`+`c3d2b41` (3.3), `71d6905` (docs).
+
 ### Co-Live Terminal — M1 permission UAT SIGNED OFF 🧪 + Phase 3 env ready
 
 - Hardware re-test confirmed the concurrent-permission fix: a full agentic loop from the glasses — create (incl. **2 concurrent Writes**) → read (3 files) → delete — gave **6 permission requests → 6 allow → 0 timeout**. The concurrent Writes each got their own allow (the case that was 100% failing pre-fix). Files created in the project dir + correctly deleted; git tree clean. **Permission UAT signed off — single/sequential/concurrent all work.**
