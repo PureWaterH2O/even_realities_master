@@ -5,12 +5,10 @@ import { tmpdir } from 'node:os'
 import { buildQrPayload, startServer, type RunningServer } from '../../src/hub/server'
 import type { ResolvedConfig } from '../../src/core/config'
 
-describe('buildQrPayload (unverified format, isolated)', () => {
-  it('encodes host, port and token into a single payload', () => {
+describe('buildQrPayload (🧪 verified Even-app connect URL)', () => {
+  it('emits the exact even-terminal connect URL: http://host:port?token=…&defaultProvider=claude', () => {
     const payload = buildQrPayload({ host: '127.0.0.1', port: 4321, token: 'abc' })
-    expect(payload).toContain('127.0.0.1')
-    expect(payload).toContain('4321')
-    expect(payload).toContain('abc')
+    expect(payload).toBe('http://127.0.0.1:4321?token=abc&defaultProvider=claude')
   })
 })
 

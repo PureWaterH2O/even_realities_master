@@ -62,12 +62,14 @@ export function createApp(deps: AppDeps): Express {
 }
 
 /**
- * The connection QR payload. UNVERIFIED app-expected format — kept here, alone,
- * so hardware acceptance can correct it in one place. Currently a compact URL
- * the app could parse: scheme://host:port?token=…
+ * The connection QR payload. 🧪 VERIFIED format — the Even app expects the exact
+ * connect URL the stock `even-terminal` bridge emits (its `common.js` builds it
+ * with `URLSearchParams({ token, defaultProvider })`; our 2026-05-30 live probe
+ * confirmed `http://<host>:<port>?token=<token>&defaultProvider=claude`). Kept
+ * here, alone, so the one app-facing format lives in one place.
  */
 export function buildQrPayload(config: { host: string; port: number; token: string }): string {
-  return `colive://${config.host}:${config.port}/?token=${config.token}`
+  return `http://${config.host}:${config.port}?token=${config.token}&defaultProvider=claude`
 }
 
 /** Print the startup banner, the QR, and the manual-entry fallback. */
