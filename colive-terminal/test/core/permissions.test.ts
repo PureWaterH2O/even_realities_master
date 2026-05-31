@@ -161,6 +161,23 @@ describe('PermissionBroker.canUseTool — timeout', () => {
     expect(result.behavior).toBe('deny')
   })
 
+  it('emits a terminal permission_result (decision "timeout") so clients can dismiss the HUD', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const decision = broker.canUseTool('Read', { file_path: 'x' }, makeOpts({ toolUseID: 'tu-timeout-evt' }))
+
+    await vi.advanceTimersByTimeAsync(PERMISSION_TIMEOUT_MS)
+    await decision
+
+    const resultEvent = events.find((e) => e.type === 'permission_result')
+    expect(resultEvent).toBeDefined()
+    if (resultEvent?.type === 'permission_result') {
+      expect(resultEvent.toolName).toBe('Read')
+      expect(resultEvent.decision).toBe('timeout')
+      expect(resultEvent.summary).toContain('Read')
+    }
+  })
+
   it('does NOT time out if resolved before 60s', async () => {
     const { emit } = makeEmit()
     const broker = new PermissionBroker({ emit, permissionMode: 'default' })
@@ -236,6 +253,31 @@ describe('PermissionBroker.canUseTool — AskUserQuestion', () => {
     expect(result.behavior).toBe('allow')
   })
 
+  it('emits a terminal permission_result (decision "answered") on resolveQuestion', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const decision = broker.canUseTool(
+      'AskUserQuestion',
+      { questions: [{ question: 'pick one', options: [{ label: 'A' }] }] },
+      makeOpts({ toolUseID: 'q-answered' }),
+    )
+    broker.resolveQuestion('q-answered', 'A')
+    await decision
+    const resultEvent = events.find((e) => e.type === 'permission_result')
+    expect(resultEvent).toBeDefined()
+    if (resultEvent?.type === 'permission_result') {
+      expect(resultEvent.toolName).toBe('AskUserQuestion')
+      expect(resultEvent.decision).toBe('answered')
+    }
+  })
+
+  it('is a no-op when resolveQuestion is called for an unknown toolUseId', () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    expect(() => broker.resolveQuestion('nope', 'x')).not.toThrow()
+    expect(events).toEqual([])
+  })
+
   it('defaults to SKIP (deny) after 120s with no answer', async () => {
     vi.useFakeTimers()
     try {
@@ -253,6 +295,29 @@ describe('PermissionBroker.canUseTool — AskUserQuestion', () => {
       vi.useRealTimers()
     }
   })
+
+  it('emits a terminal permission_result (decision "skipped") on 120s timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const { emit, events } = makeEmit()
+      const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+      const decision = broker.canUseTool(
+        'AskUserQuestion',
+        { questions: [{ question: 'pick one', options: [] }] },
+        makeOpts({ toolUseID: 'q-skip-evt' }),
+      )
+      await vi.advanceTimersByTimeAsync(QUESTION_TIMEOUT_MS)
+      await decision
+      const resultEvent = events.find((e) => e.type === 'permission_result')
+      expect(resultEvent).toBeDefined()
+      if (resultEvent?.type === 'permission_result') {
+        expect(resultEvent.toolName).toBe('AskUserQuestion')
+        expect(resultEvent.decision).toBe('skipped')
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('PermissionBroker — abort signal', () => {
@@ -264,6 +329,40 @@ describe('PermissionBroker — abort signal', () => {
     ac.abort()
     const result = await decision
     expect(result.behavior).toBe('deny')
+  })
+
+  it('emits a terminal permission_result (decision "aborted") when a pending permission is aborted', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const ac = new AbortController()
+    const decision = broker.canUseTool('Read', { file_path: 'x' }, makeOpts({ signal: ac.signal, toolUseID: 'tu-abort-evt' }))
+    ac.abort()
+    await decision
+    const resultEvent = events.find((e) => e.type === 'permission_result')
+    expect(resultEvent).toBeDefined()
+    if (resultEvent?.type === 'permission_result') {
+      expect(resultEvent.toolName).toBe('Read')
+      expect(resultEvent.decision).toBe('aborted')
+    }
+  })
+
+  it('emits a terminal permission_result (decision "aborted") when a pending question is aborted', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const ac = new AbortController()
+    const decision = broker.canUseTool(
+      'AskUserQuestion',
+      { questions: [{ question: 'pick one', options: [] }] },
+      makeOpts({ signal: ac.signal, toolUseID: 'q-abort-evt' }),
+    )
+    ac.abort()
+    await decision
+    const resultEvent = events.find((e) => e.type === 'permission_result')
+    expect(resultEvent).toBeDefined()
+    if (resultEvent?.type === 'permission_result') {
+      expect(resultEvent.toolName).toBe('AskUserQuestion')
+      expect(resultEvent.decision).toBe('aborted')
+    }
   })
 
   it('denies immediately (no event) when the signal is already aborted', async () => {

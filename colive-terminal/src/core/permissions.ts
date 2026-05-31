@@ -8,6 +8,12 @@
  * `PermissionResult` allow/deny. `AskUserQuestion` becomes a `user_question`
  * event awaiting {@link PermissionBroker.resolveQuestion}.
  *
+ * Lifecycle: the broker is the single owner of each prompt's lifecycle, so
+ * EVERY settle path emits exactly one terminal `permission_result` (decision
+ * `allow`/`deny`/`answered`/`timeout`/`aborted`/`skipped`) — clients use it to
+ * dismiss the rendered HUD prompt. (The pre-aborted early returns never emit a
+ * request/question in the first place, so they correctly stay silent.)
+ *
  * Defaults & ground truth (M0):
  *   - Timeout: a permission with no response in 60s defaults to DENY; an
  *     unanswered question in 120s defaults to SKIP (deny).
@@ -141,12 +147,7 @@ export class PermissionBroker {
     pending.cleanup()
     clearTimeout(pending.timer)
     const result = toDecisionResult(decision, 'denied by client')
-    this.emit({
-      type: 'permission_result',
-      toolName: pending.toolName,
-      summary: `${pending.toolName} ${decision === 'allow' ? 'allowed' : 'denied'}`,
-      decision,
-    })
+    this.emitResult(pending.toolName, decision === 'allow' ? 'allow' : 'deny')
     pending.resolve(result)
   }
 
@@ -160,9 +161,26 @@ export class PermissionBroker {
     this.pendingQuestions.delete(toolUseId)
     pending.cleanup()
     clearTimeout(pending.timer)
+    this.emitResult(pending.toolName, 'answered')
     // An answered question feeds the chosen option back to the model as the
     // tool result; the SDK consumes it via updatedInput.
     pending.resolve({ behavior: 'allow', updatedInput: { answer } })
+  }
+
+  /**
+   * Emit the single terminal `permission_result` that lets co-live clients
+   * dismiss a rendered permission/question prompt. The broker owns the whole
+   * lifecycle, so EVERY settle path (client resolve, timeout, abort) emits
+   * exactly one of these — otherwise a timed-out / aborted prompt would strand
+   * forever on the HUD with no event to clear it.
+   */
+  private emitResult(toolName: string, decision: string): void {
+    this.emit({
+      type: 'permission_result',
+      toolName,
+      summary: `${toolName} ${decision}`,
+      decision,
+    })
   }
 
   /** True if the configured mode auto-allows `toolName` (no prompt). */
@@ -196,6 +214,7 @@ export class PermissionBroker {
       const timer = setTimeout(() => {
         if (!this.pendingPermissions.delete(toolUseId)) return
         cleanup()
+        this.emitResult(toolName, 'timeout')
         resolve({ behavior: 'deny', message: 'permission request timed out' })
       }, PERMISSION_TIMEOUT_MS)
 
@@ -203,6 +222,7 @@ export class PermissionBroker {
         if (!this.pendingPermissions.delete(toolUseId)) return
         clearTimeout(timer)
         cleanup()
+        this.emitResult(toolName, 'aborted')
         resolve({ behavior: 'deny', message: 'turn aborted' })
       }
       const cleanup = () => opts.signal.removeEventListener('abort', onAbort)
@@ -235,6 +255,7 @@ export class PermissionBroker {
       const timer = setTimeout(() => {
         if (!this.pendingQuestions.delete(toolUseId)) return
         cleanup()
+        this.emitResult(ASK_USER_QUESTION_TOOL, 'skipped')
         resolve({ behavior: 'deny', message: 'question skipped (timed out)' })
       }, QUESTION_TIMEOUT_MS)
 
@@ -242,6 +263,7 @@ export class PermissionBroker {
         if (!this.pendingQuestions.delete(toolUseId)) return
         clearTimeout(timer)
         cleanup()
+        this.emitResult(ASK_USER_QUESTION_TOOL, 'aborted')
         resolve({ behavior: 'deny', message: 'turn aborted' })
       }
       const cleanup = () => opts.signal.removeEventListener('abort', onAbort)
