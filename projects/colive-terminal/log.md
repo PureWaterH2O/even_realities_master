@@ -12,3 +12,7 @@
   (full Even-app HTTP/SSE contract, bearer auth, pending-toolUseId mapping) + `index.ts`
   `colive serve` CLI. **153 tests green**; `colive serve` boots end-to-end (controller smoke-test).
   Fixed the QR connect-URL to the verified `even-terminal` format. **Next: hardware acceptance.**
+- 2026-05-31: **🧪 Phase 2 HARDWARE ACCEPTANCE PASSED** — real Even app, continuous multi-turn
+  conversation from the glasses on one session (model `claude-opus-4-8`). Found + fixed 4 protocol
+  bugs the unit tests couldn't (ISO `timestamp`, CORS/OPTIONS, missing terminal `status:idle`,
+  `ai-title` busy-misclassification), diffed live vs native even-terminal 0.7.9. 158 tests green.

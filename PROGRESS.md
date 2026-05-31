@@ -5,6 +5,17 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-31
 
+### Co-Live Terminal — M1 Phase 2 HARDWARE ACCEPTANCE: core co-live loop PROVEN on real G2 🧪
+
+- Connected the **real Even app** to `colive serve` and ran a **continuous multi-turn conversation from the glasses** (3+ messages, each response live on the HUD, can keep going on one session). The M1 core mechanic works on real hardware. Model = `claude-opus-4-8`; first turn ~4.3s (SDK cold start — **not** the old ~20s hook lag), subsequent turns ~15ms to `202`.
+- The hardware run surfaced **4 protocol bugs no unit test could** (all fixed; diffed live against native `even-terminal` 0.7.9):
+  1. **`/api/sessions` `timestamp` must be an ISO-8601 string**, not an epoch-ms int — the app's `dart:io` deserializer rejected the host ("failed to probe and save"). Also: no `cwd` ⇒ span **all** projects. (`a5c82e7`)
+  2. **CORS** — added permissive CORS + `OPTIONS` preflight for stock parity (not the actual blocker here, since the app uses `dart:io`, not a WebView). (`d0af84a`)
+  3. **Missing terminal `status: idle` SSE frame** — string-prompt mode never emitted it (only `session_state_changed:idle` did, which the SDK sends only in streaming mode), so the HUD hung "thinking" forever and blocked the next prompt. Now emitted reliably at turn end. (`8e20fa1`)
+  4. **`ai-title` status misclassification** — a just-finished session read `busy` for 120s (last jsonl line is `ai-title`), so the polled `/api/sessions` showed "thinking". Now `ai-title` ⇒ idle. (`bebdc02`)
+- Added `COLIVE_LOG_REQUESTS=1` wire logging to the Hub. 🧪 The app's connect probe is a **single `GET /api/sessions?provider=claude`** (ua `Dart/3.8 (dart:io)`); it polls that every ~1s and fetches `/sessions/:id/history?limit=10` on open.
+- **Remaining for M1:** ring-permission hardware check; **Phase 3** thin desk client; **Phase 4** the full desk+glasses-on-one-session loop (M1's definition of done). Minor follow-ups: fast-`202` (first POST blocks ~4s resolving the new id), filter internal/agent sessions from the list, per-poll perf.
+
 ### Co-Live Terminal — M1 Phase 2 (Client Hub) COMPLETE 🧪
 
 - **Phase 2 (Client Hub) — DONE; 153 tests green, typecheck clean; `colive serve` boots end-to-end** (controller smoke-test over real HTTP: 401 without token; 200 + correct `/api/info` via bearer header AND `?token`; `/api/sessions` shape). Four modules:
