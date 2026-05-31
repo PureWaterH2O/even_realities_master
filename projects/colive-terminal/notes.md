@@ -62,11 +62,36 @@ glasses on one live session (model `claude-opus-4-8`; first turn ~4.3s SDK cold-
      Now `ai-title` ⇒ idle. (`bebdc02`)
 - Diagnostic aid: `COLIVE_LOG_REQUESTS=1` env enables `[req]` wire logging in the Hub.
 
+## Ring-permission HARDWARE ACCEPTANCE — 🧪 PASS (2026-05-31, real G2 + Even app)
+
+**Result: PASS.** A desk-injected (curl) Write prompt to a glasses-subscribed session rendered a
+**tappable ring permission prompt**; tapping "Yes" approved it and the tool executed. Verified
+end-to-end across **two co-live turns** from the glasses: Write created `/tmp/colive-hello.txt`
+(`hi`, 2 bytes), then a Bash verify confirmed the contents — each gated by its own ring tap. This
+closes the **last open Phase-2 acceptance item**. Server logs showed `POST /api/permission-response
+-> 200` (ua `Dart/3.8`) per tap. Fix committed in `3f22983`.
+
+- 🧪 **2 protocol bugs found + fixed** (diffed live vs native `even-terminal` 0.7.9
+  `dist/claude/session.js`):
+  1. **`permission_request.options` must be `{text,key}` OBJECTS, not strings.** The Even app renders
+     its tappable ring buttons from these (`text`=HUD label, `key`=the `decision` it POSTs back). We
+     sent `['allow','deny']` (bare strings) → the app rendered nothing → no prompt → silent 60s
+     timeout (assistant said *"Write request timed out waiting for permission approval"*). Native
+     minimal set: `[{text:'Yes',key:'allow'},{text:'No',key:'deny'}]` (+ `{...,key:'allowAlways'}`
+     when `suggestions` present). Also `detail` is a short **string** (file path / command), not the
+     raw input object. Keys `allow`/`allowAlways` → our Hub `normalizeDecision` already maps to allow.
+  2. **An allow MUST return `updatedInput` (a record).** The SDK validates the `PermissionResult`
+     with **Zod at runtime** and rejects a bare `{behavior:'allow'}` with
+     `ZodError … path:["updatedInput"], expected:"record"` → the tool fails *after* approval (the
+     model then retried Write→Bash, each hitting the same wall = the "second prompt" the user saw).
+     The TS type marks `updatedInput` optional → it type-checks but fails live. Now every allow path
+     (auto-allow + `resolvePermission`) echoes the original `input` back, mirroring native
+     (`{behavior:'allow', updatedInput: toolInput}`). `sdk-reference.md` corrected.
+- Diagnostic method that worked: `curl -N --max-time 6 .../api/events?...&needReplay=true` to read the
+  ring-buffer replay (the `permission_request`/`permission_result`/`tool_end` frames). NB:
+  backgrounded `curl`-to-file does NOT work for SSE — it block-buffers and flushes nothing until close.
+
 ### Remaining follow-ups (not blockers; address during Phase 3/4 or polish)
-- **Ring-permission hardware check still TODO** (the one un-done Phase-2 acceptance item) — send a
-  tool-triggering prompt (e.g. "create a file /tmp/colive-hello.txt containing hi"), expect a ring
-  permission prompt, tap = allow → tool runs. Our broker + `permission_request`/`permission_result`
-  events are built & unit-tested; just need the on-glasses confirm.
 - **fast-`202`:** `POST /api/prompt` for a NEW session blocks ~4s resolving the real session id
   (awaits the stream init). Consider returning `202` immediately so the app subscribes during the
   turn (avoids the first-turn race where it subscribes after the turn ends).

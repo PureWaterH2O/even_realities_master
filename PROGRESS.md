@@ -5,6 +5,15 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-31
 
+### Co-Live Terminal — M1 ring-permission HARDWARE ACCEPTANCE: PASS 🧪 (Phase 2 now fully complete)
+
+- The **last open Phase-2 acceptance item** is done. A desk-injected (curl) Write prompt to a glasses-subscribed session rendered a **tappable ring permission prompt**; tapping "Yes" approved it and the tool ran. Verified end-to-end across **two co-live turns** from the glasses: `Write` created `/tmp/colive-hello.txt` (`hi`), then a `Bash` verify confirmed the contents — each gated by its own ring tap. Server logs showed `POST /api/permission-response -> 200` (ua `Dart/3.8`) per tap.
+- Surfaced **2 more protocol bugs** (both fixed, `3f22983`; diffed vs native `even-terminal` 0.7.9 `dist/claude/session.js`):
+  1. **`permission_request.options` must be `{text,key}` objects, not bare strings** — the Even app renders its ring buttons from these (`text`=label, `key`=the `decision` POSTed back). With `['allow','deny']` it rendered nothing → no prompt → silent 60s timeout. Now `[{text:'Yes',key:'allow'},{text:'No',key:'deny'}]`; `detail` is a short string (file path/command), not the raw input object.
+  2. **An allow MUST return `updatedInput` (a record)** — the SDK Zod-validates `PermissionResult` at runtime and rejects bare `{behavior:'allow'}` (`ZodError path:["updatedInput"], expected:"record"`), failing the tool *after* approval (caused the retry / "second prompt"). The TS type marks it optional → type-checks but fails live. Now every allow path echoes the original `input` back (mirrors native). `sdk-reference.md` corrected.
+- Diagnostic that worked: `curl -N --max-time 6 .../api/events?...&needReplay=true` reads the SSE ring-buffer replay. NB backgrounded `curl`-to-file does **not** work for SSE (block-buffers, flushes nothing until close).
+- **6 hardware bugs total** found + fixed across Phase 2 (4 conn/stream + 2 permission). 158 tests green. **Next:** Phase 3 (thin desk client) → Phase 4 (desk+glasses-on-one-session loop) → finish branch.
+
 ### Co-Live Terminal — M1 Phase 2 HARDWARE ACCEPTANCE: core co-live loop PROVEN on real G2 🧪
 
 - Connected the **real Even app** to `colive serve` and ran a **continuous multi-turn conversation from the glasses** (3+ messages, each response live on the HUD, can keep going on one session). The M1 core mechanic works on real hardware. Model = `claude-opus-4-8`; first turn ~4.3s (SDK cold start — **not** the old ~20s hook lag), subsequent turns ~15ms to `202`.
