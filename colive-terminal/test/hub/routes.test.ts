@@ -97,6 +97,22 @@ function makeApp(overrides?: Partial<AppDeps>): {
   }
 }
 
+describe('CORS (stock even-terminal parity — Even app probe is cross-origin)', () => {
+  it('sets permissive CORS headers on a normal request', async () => {
+    const { app } = makeApp()
+    const res = await request(app).get('/api/info').set('Authorization', `Bearer ${TOKEN}`).expect(200)
+    expect(res.headers['access-control-allow-origin']).toBe('*')
+    expect(res.headers['access-control-allow-headers']).toContain('Authorization')
+  })
+
+  it('answers an OPTIONS preflight with 204 BEFORE auth (no token required)', async () => {
+    const { app } = makeApp()
+    const res = await request(app).options('/api/info').expect(204)
+    expect(res.headers['access-control-allow-origin']).toBe('*')
+    expect(res.headers['access-control-allow-methods']).toContain('POST')
+  })
+})
+
 describe('routes — auth', () => {
   it('401 with no token', async () => {
     const { app } = makeApp()

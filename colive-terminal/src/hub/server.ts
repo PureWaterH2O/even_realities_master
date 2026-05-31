@@ -19,7 +19,7 @@
  * isolated in {@link buildQrPayload} so it's a one-line change once the real
  * format is known.
  */
-import express, { type Express } from 'express'
+import express, { type Express, type Request, type Response, type NextFunction } from 'express'
 import qrcode from 'qrcode-terminal'
 import type { ResolvedConfig } from '../core/config'
 import { SessionManager } from '../core/sessionManager'
@@ -42,6 +42,43 @@ export interface AppDeps {
  */
 export function createApp(deps: AppDeps): Express {
   const app = express()
+
+  // Optional wire-level request logging for diagnosing real-client (Even app)
+  // connects. Off by default; enable with COLIVE_LOG_REQUESTS=1. Mirrors the
+  // stock even-terminal bridge, which logs every request URL. Logged BEFORE auth
+  // so we see even rejected/unmatched requests (the auth header is redacted).
+  if (process.env.COLIVE_LOG_REQUESTS) {
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      const started = Date.now()
+      const ua = req.get('user-agent') ?? '-'
+      const auth = req.get('authorization') ? 'Bearer …' : (req.query['token'] ? '?token=…' : 'none')
+      res.on('finish', () => {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[req] ${req.method} ${req.originalUrl} -> ${res.statusCode} ` +
+            `(${Date.now() - started}ms) auth=${auth} ua=${ua}`,
+        )
+      })
+      next()
+    })
+  }
+
+  // Permissive CORS, matching the stock even-terminal bridge (🧪 M0: "CORS fully
+  // open"). The Even app's connect probe is a cross-origin request (the G2 app
+  // stack uses WebViews), so without these headers + an OPTIONS-preflight answer
+  // the probe fails even though a top-level browser GET succeeds. Answered BEFORE
+  // auth so the unauthenticated preflight is not rejected.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    res.header('Access-Control-Allow-Origin', '*')
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    res.header('Access-Control-Allow-Headers', 'Authorization, Content-Type')
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204)
+      return
+    }
+    next()
+  })
+
   app.use(express.json())
 
   const { router, pending } = mountRoutes(deps)
@@ -58,6 +95,17 @@ export function createApp(deps: AppDeps): Express {
   })
 
   app.use('/api', router)
+
+  // Surface any handler error so a real-client request that breaks a route is
+  // visible (with COLIVE_LOG_REQUESTS) instead of express's silent default 500.
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    if (process.env.COLIVE_LOG_REQUESTS) {
+      // eslint-disable-next-line no-console
+      console.error(`[err] ${req.method} ${req.originalUrl}:`, err)
+    }
+    if (!res.headersSent) res.status(500).json({ error: 'internal error' })
+  })
+
   return app
 }
 
