@@ -332,6 +332,38 @@ describe('SessionManager — resume an existing-id session', () => {
     expect(calls).toHaveLength(2)
     expect(calls[1].options.resume).toBe('known-id')
   })
+
+  it('resumes a COLD on-disk session: an id never created in this manager → query.resume === that id', async () => {
+    // The normal client flow: list sessions via GET /api/sessions, pick an OLD
+    // (on-disk) session, POST /api/prompt with that sessionId. That id was never
+    // created in THIS manager instance (it is not live in-memory), so the manager
+    // must resume the existing transcript — NOT silently fork a brand-new session.
+    // Regression for the gap where an unknown id was treated as "start fresh",
+    // discarding the id so the SDK minted a new sessionId instead of resuming.
+    const tagged: TaggedEvent[] = []
+    const { fn, calls } = fakeQuery([happyTurn('on-disk-sess', 'resumed reply')])
+    const mgr = new SessionManager({ config: makeConfig(), query: fn })
+    mgr.subscribe((e) => tagged.push(e))
+
+    // The id was produced by some EARLIER process (it is on disk), not by us.
+    const coldId = 'on-disk-sess'
+    const returned = await mgr.prompt(coldId, 'continue please', makeConfig().projectDir)
+    await drain()
+
+    // The same (existing) id comes back — the transcript was continued, not forked.
+    expect(returned).toBe('on-disk-sess')
+    // Exactly one turn ran, and it resumed the on-disk transcript by that id.
+    expect(calls).toHaveLength(1)
+    expect(calls[0].options.resume).toBe('on-disk-sess')
+    // Events fan out tagged with the resumed id (never a local: placeholder).
+    expect(tagged.length).toBeGreaterThan(0)
+    for (const t of tagged) {
+      expect(t.sessionId).toBe('on-disk-sess')
+      expect(t.sessionId.startsWith('local:')).toBe(false)
+    }
+    // The manager now tracks the resumed session live (status keyed by the real id).
+    expect(mgr.getStatus('on-disk-sess')).toBe('idle')
+  })
 })
 
 describe('SessionManager — respondPermission / respondQuestion routing', () => {

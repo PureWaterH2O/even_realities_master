@@ -125,13 +125,16 @@ export class SessionManager {
    *
    *  - Slash guard FIRST: a slash prompt is rejected (the slash error is emitted)
    *    and `undefined` is returned — it never reaches `query()`.
-   *  - Known live `id`: resume+run on that existing session. If it is busy the
-   *    text is serialized (enqueued) and runs after the in-flight turn (the M0
-   *    co-live finding). Resolves with `id`.
-   *  - No `id` (or an id not in the live map): create a fresh session, start it,
-   *    and drive the turn. Resolves with the real sessionId as soon as the stream
-   *    surfaces it. (Resuming an on-disk transcript by id is the store reader's
-   *    job, not this live-map facade's — an unknown id here starts fresh.)
+   *  - Known live `id`: resume+run on that existing in-memory session. If it is
+   *    busy the text is serialized (enqueued) and runs after the in-flight turn
+   *    (the M0 co-live finding). Resolves with `id`.
+   *  - `id` given but NOT live in-memory (a cold / on-disk session — the normal
+   *    "list sessions → pick an old one → prompt it" flow): adopt that id and
+   *    resume the existing transcript via `start(id, cwd)`, so the SDK appends to
+   *    it (single transcript, no fork) rather than minting a new sessionId.
+   *    Resolves with that same `id`.
+   *  - No `id`: create a fresh session, start it, and drive the turn. Resolves
+   *    with the real sessionId as soon as the stream surfaces it.
    *
    * The turn itself runs to completion in the background; this resolves as soon
    * as the owning session's id is known (mirroring the Hub's 202-with-id flow).
@@ -155,7 +158,13 @@ export class SessionManager {
       return existing.currentId
     }
 
-    return this.startFreshSession(text, cwd)
+    // An id was given but no live session owns it: this is a cold/on-disk session
+    // (e.g. picked from GET /api/sessions). Adopt the id and resume its transcript.
+    if (id !== undefined) {
+      return this.startSession(text, cwd, id)
+    }
+
+    return this.startSession(text, cwd, undefined)
   }
 
   /**
@@ -191,23 +200,32 @@ export class SessionManager {
   }
 
   /**
-   * Create a fresh session keyed by a temporary local id, start it, and drive the
-   * first turn. Resolves with the REAL sessionId once the stream's `init` message
-   * surfaces it (at which point the map is re-keyed). Falls back to the local id
-   * if the turn ends without ever surfacing one.
+   * Create a session, start it, and drive the first turn.
+   *
+   *  - `resumeId === undefined` (fresh session): key by a temporary local id until
+   *    the stream's `init` message surfaces the REAL id, then re-key the map and
+   *    resolve with it. Falls back to the local id if the turn ends without one.
+   *  - `resumeId` given (cold / on-disk resume): the id is known up front, so key
+   *    the entry by it immediately and `start(resumeId, cwd)` so the next turn
+   *    resumes that transcript (single transcript, no fork). The id resolves
+   *    synchronously — no re-keying, no buffering window — and we return it.
    */
-  private async startFreshSession(
+  private async startSession(
     text: string,
-    cwd?: string,
+    cwd: string | undefined,
+    resumeId: string | undefined,
   ): Promise<string> {
-    // A temporary key so the entry is addressable (and events are taggable)
-    // before the real id is known.
-    const localId = `local:${randomUUID()}`
+    // For a resume the id is known now, so key by it directly; otherwise use a
+    // temporary local key so the entry is addressable (and events taggable)
+    // before the real id surfaces from the stream.
+    const initialId = resumeId ?? `local:${randomUUID()}`
     const entry: SessionEntry = {
       session: undefined as unknown as ClaudeSession,
       broker: undefined as unknown as PermissionBroker,
-      currentId: localId,
-      idResolved: false,
+      currentId: initialId,
+      // A resumed session's id is already final — mark it resolved so its events
+      // fan out live (correctly tagged) with no pre-init buffering window.
+      idResolved: resumeId !== undefined,
       buffered: [],
     }
 
@@ -229,10 +247,20 @@ export class SessionManager {
     })
     entry.session = session
     entry.broker = broker
-    this.sessions.set(localId, entry)
+    this.sessions.set(initialId, entry)
 
     const resolvedCwd = realpathSync(cwd ?? this.config.projectDir)
-    await session.start(undefined, resolvedCwd)
+    // start(resumeId, cwd): for a resume this sets the session's id so the turn's
+    // options.resume points at the existing transcript; for a fresh session it is
+    // undefined and the id is learned from the stream.
+    await session.start(resumeId, resolvedCwd)
+
+    // A resumed session already knows its id (start set it): return it immediately,
+    // skipping the learn-from-stream wait the fresh path needs.
+    if (resumeId !== undefined) {
+      void session.run(text)
+      return entry.currentId
+    }
 
     // Drive the turn in the background; do not await full completion here.
     void session.run(text)
