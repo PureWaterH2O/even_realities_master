@@ -25,6 +25,63 @@ so they can graduate into `knowledge/`.
   Mitigation: distil the SDK surface into `colive-terminal/docs/sdk-reference.md` and forbid
   reading `node_modules` type files. Self-contained tasks never hit this; SDK/fs tasks did.
 
+## Phase 3 (thin desk client) findings (2026-05-31)
+
+Built via the `wf-phase3.mjs` subagent workflow (modeled on `wf-phase2.mjs`): per-task
+impl → spec-review → quality-review fix-loops, 9 agents, ~698k tokens, base SHA `fa6f6aa`.
+Commits: `444c0d1` (3.1 client), `e9f9f88` (3.1 close() hardening — controller fix),
+`053bf5b` (3.2 slash), `4b55745` + `c3d2b41` (3.3 app + wiring). **211 tests, typecheck
+clean — both independently re-run by the controller** (the agents self-reported several
+premature BLOCKED/DONE statuses mid-run due to transient tool-output glitches, so the final
+numbers were NOT trusted on faith; re-verified green from a clean tree).
+
+- **`src/desk/client.ts` — the desk is JUST AN HTTP/SSE CLIENT of the Hub** (no SDK, no model).
+  `createHubClient({baseUrl, token, fetch?})` → `HubClient` interface (so the TUI + a fake both
+  depend on it). `subscribe(sessionId,onEvent,{needReplay?})` opens a streaming `fetch` GET
+  `/api/events?sessionId=&token=&needReplay=`, parses with `eventsource-parser` (`createParser`
+  → `parser.feed(decode(chunk))` in a background read loop), `JSON.parse`s each data frame to a
+  `CoLiveEvent`. Returns a **callable** close handle (`handle()` or `handle.close()`). POST helpers
+  `sendPrompt`/`respondPermission`/`respondQuestion`/`interrupt`, GET `fetchTranscript`. Bearer
+  header on every request + `?token=` on the SSE URL.
+- 🧪 **`close()` must be self-sufficient (controller fix `e9f9f88`).** Quality review found `close()`
+  relied SOLELY on the transport honoring `controller.abort()` — a chunk already read before the
+  abort propagates could still fire `onEvent` after the caller tore down. Now the read loop
+  `break`s on `closed` and the parser `onEvent` drops events when `closed`. Matters for Phase 4:
+  the TUI unmounts / re-subscribes on a session change, and a late in-flight event must not hit a
+  gone UI. Regression test drives a fake fetch that **ignores** abort and asserts a post-close
+  frame is not delivered.
+- **Desk always sends the explicit `toolUseId`** from the permission/question event (it knows it) —
+  it never leans on the Hub's empty-id FIFO oldest-first fallback (that's for the glasses app, which
+  omits the id). `respondPermission/Question` send `toolUseId: id ?? ''`.
+- **`src/desk/slash.ts` is pure** (no I/O): `interpretInput(raw)` → discriminated result. `/clear`→
+  new_session, `/compact`→ M3 not-implemented note, `/context`/`/usage`→ local view, `/help`→ list,
+  unknown `/x`→ hint, else→ prompt. **Load-bearing invariant (tested): no `/`-leading input is ever
+  returned as a PROMPT** (slash cmds hang the SDK; the Core guards server-side, the client must never
+  send them). Case-insensitive; command = first whitespace token; lone `/`→ empty prompt.
+- **`src/desk/app.tsx` (ink TUI, 529 lines) takes an INJECTED `HubClient`** so `ink-testing-library`
+  drives it with a fake (no server/model). `useReducer` transcript (user_prompt + accumulated
+  text_delta turns, tool summaries, result closes the turn); status line from status/running_stats;
+  inline permission (number keys → `respondPermission(sid, option.key, toolUseId)`) + question prompts;
+  hand-rolled `useInput` text entry (NO new dep — `ink-text-input` is absent). On launch:
+  `fetchTranscript` THEN `subscribe`; cleanup closes the subscription on unmount / re-subscribes on
+  sessionId change. Esc → interrupt; Enter → `interpretInput` (prompt → sendPrompt, capturing the
+  Hub-resolved id for a new session; commands handled locally, never posted).
+- 🧪 **ink + vitest gotcha (3.3, carry to Phase 4 e2e):** async React state updates landing **outside
+  `act()`** (e.g. `setSessionId` resolving from the async `sendPrompt` chain after a test ended) emit a
+  stray `console.error` that, under a **shared vitest worker**, pollutes the NEXT test file's
+  `console.error` spy → a spurious cross-file failure (it surfaced in `test/hub/index.test.ts`). Fix:
+  `act()`-wrap the test's flush/write helpers and drain microtasks + one macrotask tick. The Phase-4
+  e2e that renders `app.tsx` against a real `createHubClient` must use the same `act()`-flush pattern
+  (see `test/desk/app.test.tsx`).
+- **Quality follow-ups (deferred, non-blocking):** new-session transcript clobber (unconditional
+  `reset` on sessionId change can drop the optimistic local user line if replay returns empty — relies
+  on Hub echo today); `forceSessionRender` ref+counter dual-source is the cleverest/most fragile part
+  of app.tsx (a plain `useState` would be simpler); test `act()` helpers use fixed-count microtask
+  draining (polling a condition would be sturdier); no `onError`/`onClose` hook on subscribe (silent on
+  failed connect) — add if a UAT disconnect needs a "disconnected" UI; no auto-reconnect/replay-resume
+  (single streaming connection — add at app layer for M2 resilience). app.tsx at 529 lines is the
+  largest file; cohesive but reducer + presenters are natural M3 extraction points.
+
 ## Phase 2 (Client Hub) findings (2026-05-31)
 
 - 🧪 **Even-app connect QR = the stock `even-terminal` URL**:
