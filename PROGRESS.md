@@ -3,6 +3,23 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
+## 2026-05-31
+
+### Co-Live Terminal — M1 build: Phase 0 + Phase 1 (Session Core) COMPLETE 🧪
+
+- Building M1 in a fresh ultracode chat on `feat/colive-terminal-m1` via **subagent-driven-development**, each task run as a workflow pipeline: TDD implementer → spec-compliance review → code-quality review (+ fix loops).
+- **Phase 0** — scaffolded `colive-terminal/` (TS ESM, `@anthropic-ai/claude-agent-sdk@0.3.158` + Express 5, vitest 4 + supertest, TS 6, Node ≥22). Captured the exact SDK API surface in `colive-terminal/docs/sdk-reference.md`.
+- **Phase 1 (Session Core) — DONE; 104 tests green, typecheck clean.** Five modules, all TDD + two-stage-reviewed:
+  - `events.ts` — SSE event vocabulary (discriminated union; single source of truth).
+  - `config.ts` — model (default `claude-opus-4-8`) / permissionMode (`default`) / settingSources (`[]`) / host / port / token resolution (args > env > default).
+  - `store.ts` — session list/transcript/status reader over `~/.claude/projects/*.jsonl`; realpath cwd; **uncapped** transcript for scrollback.
+  - `session.ts` — one live `query()` per session; SDK-stream → our events (status/tool_start/tool_end/text_delta/running_stats/result); busy/enqueue; interrupt via `abortController`; **thinking text never broadcast**.
+  - `permissions.ts` — permission broker (`canUseTool` → `permission_request`, 60s default-deny; AskUserQuestion → `user_question`, 120s default-skip; honors mode) + slash-command guard (leading-`/` prompts hang `query()` → rejected).
+  - `sessionManager.ts` — facade: create/resume/**serialize** multi-client prompts per session + **fan-out** events to all subscribers (the co-live core).
+- **🧪 Claude Code session-store path encoding** (vs real transcripts): project dir → `~/.claude/projects/<name>` replaces **every non-alphanumeric char with `-`** (`/private/tmp/colive-spike` → `-private-tmp-colive-spike`; `random_claude_stuff/even_realities` → `random-claude-stuff-even-realities`). → `encodeProjectDir`. Detail: `projects/colive-terminal/notes.md`.
+- **🧪 Workflow-harness lesson:** implementer subagents stalled twice (180s no-progress → killed) from **Reading the 232 KB `sdk.d.ts`** (context bloat). Fix: distil the SDK surface into a reference doc + forbid reading `node_modules` type files. Self-contained tasks (1.1) never hit this; SDK/fs tasks did.
+- **Next:** Phase 2 — Client Hub (`sse.ts` ring-buffer/broadcast/heartbeat + `routes.ts`/`server.ts` Even-app contract), then the **Task 2.3 hardware-acceptance pause** (real Even app vs `colive serve`). Then Phase 3 desk client, Phase 4 the end-to-end loop.
+
 ## 2026-05-30
 
 ### Co-Live Terminal — M0 de-risking spike COMPLETE → **GO**
