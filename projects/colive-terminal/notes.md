@@ -25,6 +25,39 @@ so they can graduate into `knowledge/`.
   Mitigation: distil the SDK surface into `colive-terminal/docs/sdk-reference.md` and forbid
   reading `node_modules` type files. Self-contained tasks never hit this; SDK/fs tasks did.
 
+## Phase 4.2 hardware UAT — bug #1: glasses-answered permission left the desk prompt stuck (fixed `9a232c8`)
+
+🧪 **First real desk+glasses hardware run of the full loop — almost everything worked** (kick off at
+desk → live on glasses HUD → free-form follow-up from glasses → response on both → permission ring
+tap). One co-live UI bug: when a permission was answered FROM THE GLASSES (ring tap), the conversation
+correctly continued (broker resolved it) but the inline permission prompt **stayed stuck on the desk
+terminal**. Answering from the desk itself was fine — only the REMOTE answer left the desk prompt.
+- 🧪 **Root cause** (`src/desk/app.tsx`, was lines 242-245): the `permission_result` event handler only
+  appended a transcript note and returned — it never called `setPending(undefined)`. The inline prompt
+  is held in the `pending` useState (set on `permission_request`/`user_question`), and was cleared ONLY
+  in the LOCAL-answer paths (`resolvePending` after a desk keypress, `submitQuestionText`, `/clear`). A
+  glasses ring tap produces NO local keypress on the desk — the desk only receives the broker's
+  broadcast `permission_result`, so `pending` was never cleared and `<PendingPrompt>` rendered forever.
+- 🧪 **Fix (one line):** call `setPending(undefined)` in the `permission_result` branch. `permission_result`
+  is the **client-agnostic dismiss signal** — the broker (`core/permissions.ts emitResult`) broadcasts
+  exactly ONE to ALL subscribers on every settle path (allow/deny/answered/timeout/aborted/skipped), for
+  permissions AND questions (a resolved question emits `permission_result` decision `answered`). So the
+  desk now dismisses on a remote answer exactly as on a local one. Local paths still `setPending(undefined)`
+  themselves → the later broadcast re-clear is a harmless no-op; the handler only clears UI + appends the
+  note, never POSTs (no double-POST). Built via `wf-permfix.mjs` (systematic debugging: failing test FIRST
+  — repro proven before the fix — then minimal fix, then an adversarial verifier that reverted the line to
+  confirm fail-without/pass-with). 2 regression tests added (remote permission + remote question
+  dismissal). **216 tests, typecheck clean — controller-reverified from a clean tree** (the agents emitted
+  some transient false BLOCKED reports mid-run from buffered tool output; final state verified independently).
+- **Pre-existing limitation noted (NOT fixed — out of scope):** the desk holds a SINGLE `pending` slot and
+  `PermissionResultEvent` carries no `toolUseId`, so in a CONCURRENT multi-permission turn the desk can
+  only show/clear one prompt at a time and a `permission_result` clears whatever is currently shown (can't
+  disambiguate WHICH request resolved). The glasses app is the primary multi-permission UI and the broker
+  FIFO-resolves concurrent requests correctly; the desk single-slot behavior is acceptable for M1. Track
+  for any future desk-side concurrent-permission support.
+- **UAT status:** re-test the full loop on hardware to confirm the desk prompt now dismisses on a glasses
+  tap; if clean, that closes Phase 4.2 → 4.3 finish-the-branch.
+
 ## Phase 4.1 (automated e2e) findings (2026-05-31)
 
 `test/e2e.test.ts` (`32663f4` + hardening commit): the automated co-live loop. Boots the REAL

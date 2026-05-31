@@ -9,8 +9,8 @@ via eventsource-parser + POST helpers + fetchTranscript), `desk/slash.ts` (pure 
 app.tsx` (ink TUI: transcript+input+status+inline permission/question, Esc=interrupt) + `colive desk` wired
 in `index.ts`. **211 tests; typecheck clean — both independently re-verified by the controller** (not just
 agent self-report). +1 controller fix: `subscribe().close()` now self-sufficient (gates delivery on `closed`,
-not just transport abort) — `e9f9f88`.
-**Branch:** `feat/colive-terminal-m1` (do NOT build on `main`); ~36 commits, typecheck clean.
+not just transport abort) — `2982c30`.
+**Branch:** `feat/colive-terminal-m1` (do NOT build on `main`); ~40 commits, typecheck clean.
 **Phase 4.1 ✅ DONE** (`32663f4` + hardening): `test/e2e.test.ts` boots the REAL Core+Hub in-process over real
 HTTP+SSE (only the SDK `query` + on-disk store faked), driven by the REAL desk `createHubClient`. 3 tests, all
 green: (a) desk kicks off → glasses sends a free-form follow-up into the SAME session → both independent clients
@@ -20,9 +20,14 @@ its arrival). An adversarial reviewer subagent flagged "live-vs-replay" + "permi
 be already covered by the post-subscribe ordering + the >=2/timeout waits (the reviewer over-stated severity), but
 added its genuinely-useful suggestions: the deny test, explicit toolUseId-identity + replay-then-live ordering
 asserts, non-empty guards. **214 tests, typecheck clean — controller-verified.**
-**Next action:** **(1) Phase 4.2** — hardware UAT (THE loop): `colive serve` + `colive desk` at the desk + real
-glasses (Even app) on the same Core; kick off at desk → respond on glasses → return to desk, one continuous
-session. Run-book in notes.md. **(2) 4.3** finish the branch (PR/merge). M1 done when 4.2 passes (4.1 already does).
+**Phase 4.2 hardware UAT — STARTED 🧪:** first real desk+glasses run of the full loop worked end-to-end (kick off
+at desk → live on glasses HUD → free-form follow-up from glasses → response on both → permission ring tap), with
+ONE co-live bug found+fixed: a glasses-answered permission left the inline prompt stuck on the desk (the desk
+`permission_result` handler never cleared `pending`). Fixed `9a232c8` (+2 regression tests; **216 tests, typecheck
+clean — controller-reverified**). See notes.md "Phase 4.2 … bug #1".
+**Next action:** **(1)** user re-tests the loop on hardware to confirm the desk prompt now dismisses on a glasses
+tap (the last open 4.2 acceptance item). **(2) 4.3** finish the branch (PR/merge) once the re-test is clean.
+M1 done when the 4.2 re-test passes.
 **Open product decision (DECIDED 2026-05-31, revisitable):** keep `permissionMode: default` for now (safe,
 already UAT-signed-off; prompts every tool incl. reads). `--permission-mode acceptEdits` is the lighter-touch
 per-launch option for the UAT run (fewer ring taps). User: "keep for now, can change anytime."
