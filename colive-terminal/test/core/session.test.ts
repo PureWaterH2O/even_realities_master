@@ -248,15 +248,16 @@ describe('ClaudeSession — event normalization', () => {
     expect(emitted).toContainEqual({ type: 'status', state: 'idle' })
   })
 
-  it('emits error on a result error subtype', async () => {
+  it('emits error on a result error subtype, parsing the real string[] errors shape', async () => {
     const emitted: CoLiveEvent[] = []
+    // SDKResultError.errors is string[] (sdk.d.ts) — NOT an array of objects.
     const messages = [
       { type: 'system', subtype: 'init', session_id: 's3' },
       {
         type: 'result',
         subtype: 'error_during_execution',
         session_id: 's3',
-        errors: [{ message: 'kaboom' }],
+        errors: ['kaboom', 'and then some'],
         total_cost_usd: 0,
         num_turns: 1,
         duration_ms: 1,
@@ -274,10 +275,41 @@ describe('ClaudeSession — event normalization', () => {
     await session.run('break it')
     const err = emitted.find((e) => e.type === 'error')
     expect(err).toBeDefined()
-    expect(err).toMatchObject({ type: 'error' })
+    // the human message is built from the string[] elements (joined)
+    expect(err).toEqual({ type: 'error', message: 'kaboom; and then some' })
     // result event still reports success:false
     const result = emitted.find((e) => e.type === 'result')
     expect(result).toMatchObject({ type: 'result', success: false })
+  })
+
+  it('falls back to the subtype when an error result carries no errors[]', async () => {
+    const emitted: CoLiveEvent[] = []
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 's3b' },
+      {
+        type: 'result',
+        subtype: 'error_max_turns',
+        session_id: 's3b',
+        errors: [],
+        total_cost_usd: 0,
+        num_turns: 1,
+        duration_ms: 1,
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    ]
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('loop forever')
+    expect(emitted.find((e) => e.type === 'error')).toEqual({
+      type: 'error',
+      message: 'error_max_turns',
+    })
   })
 
   it('emits tool_start for a final-assistant tool_use that was never streamed', async () => {
@@ -383,6 +415,337 @@ describe('ClaudeSession — event normalization', () => {
       { type: 'tool_start', name: 'Read', toolId: 'reused' },
       { type: 'tool_start', name: 'Read', toolId: 'reused' },
     ])
+  })
+})
+
+describe('ClaudeSession — tool_end pairing', () => {
+  it('pairs a streamed tool_start with a tool_end from the tool_result user message', async () => {
+    const emitted: CoLiveEvent[] = []
+    // The SDK delivers tool results as a `type:'user'` message whose
+    // message.content carries `tool_result` blocks; a richer raw detail rides on
+    // the top-level `tool_use_result`.
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'te1' },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'tool-1', name: 'Read', input: { path: 'a.txt' } },
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'tool-1', content: 'file contents', is_error: false },
+          ],
+        },
+        tool_use_result: { stdout: 'file contents', exitCode: 0 },
+      },
+      { type: 'result', subtype: 'success', session_id: 'te1', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+    ]
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('read it')
+
+    expect(emitted).toContainEqual({ type: 'tool_start', name: 'Read', toolId: 'tool-1' })
+    const toolEnds = emitted.filter((e) => e.type === 'tool_end')
+    expect(toolEnds).toEqual([
+      {
+        type: 'tool_end',
+        name: 'Read',
+        toolId: 'tool-1',
+        summary: 'Read completed',
+        detail: { input: { path: 'a.txt' }, output: { stdout: 'file contents', exitCode: 0 } },
+      },
+    ])
+    // ordering: tool_start precedes tool_end
+    const startIdx = emitted.findIndex((e) => e.type === 'tool_start')
+    const endIdx = emitted.findIndex((e) => e.type === 'tool_end')
+    expect(startIdx).toBeLessThan(endIdx)
+  })
+
+  it('pairs a final-assistant-only tool_use with its tool_end', async () => {
+    const emitted: CoLiveEvent[] = []
+    // No streaming content_block_start for the tool — only the final assistant
+    // message announces it. The tool_result must still produce a tool_end.
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'te2' },
+      {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'fin-1', name: 'Write', input: { path: 'x' } }],
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: 'fin-1', content: 'ok' }],
+        },
+      },
+      { type: 'result', subtype: 'success', session_id: 'te2', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+    ]
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('write it')
+
+    // falls back to the block content when there is no top-level tool_use_result
+    expect(emitted.filter((e) => e.type === 'tool_end')).toEqual([
+      {
+        type: 'tool_end',
+        name: 'Write',
+        toolId: 'fin-1',
+        summary: 'Write completed',
+        detail: { input: { path: 'x' }, output: 'ok' },
+      },
+    ])
+  })
+
+  it('marks a tool_end as failed when the tool_result is an error', async () => {
+    const emitted: CoLiveEvent[] = []
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'te3' },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'err-1', name: 'Bash', input: { command: 'false' } },
+        },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [{ type: 'tool_result', tool_use_id: 'err-1', content: 'boom', is_error: true }],
+        },
+      },
+      { type: 'result', subtype: 'success', session_id: 'te3', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+    ]
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('run')
+
+    expect(emitted.filter((e) => e.type === 'tool_end')).toEqual([
+      {
+        type: 'tool_end',
+        name: 'Bash',
+        toolId: 'err-1',
+        summary: 'Bash failed',
+        detail: { input: { command: 'false' }, output: 'boom' },
+      },
+    ])
+  })
+
+  it('uses each block content (not the shared tool_use_result) when a user message carries multiple tool_results', async () => {
+    const emitted: CoLiveEvent[] = []
+    // Two parallel tools resolve in ONE user message. The top-level
+    // tool_use_result is a single field and must NOT be attributed to both
+    // blocks; each tool_end takes its own block content.
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'te5' },
+      {
+        type: 'stream_event',
+        event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 't-a', name: 'Read', input: { path: 'a' } } },
+      },
+      {
+        type: 'stream_event',
+        event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 't-b', name: 'Read', input: { path: 'b' } } },
+      },
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 't-a', content: 'out-a' },
+            { type: 'tool_result', tool_use_id: 't-b', content: 'out-b' },
+          ],
+        },
+        // a shared raw detail that must NOT leak onto both ends
+        tool_use_result: { shared: true },
+      },
+      { type: 'result', subtype: 'success', session_id: 'te5', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+    ]
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('two reads')
+
+    expect(emitted.filter((e) => e.type === 'tool_end')).toEqual([
+      { type: 'tool_end', name: 'Read', toolId: 't-a', summary: 'Read completed', detail: { input: { path: 'a' }, output: 'out-a' } },
+      { type: 'tool_end', name: 'Read', toolId: 't-b', summary: 'Read completed', detail: { input: { path: 'b' }, output: 'out-b' } },
+    ])
+  })
+
+  it('emits a tool_end at most once and ignores tool_results for unknown tools', async () => {
+    const emitted: CoLiveEvent[] = []
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'te4' },
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'tool_use', id: 'known', name: 'Read', input: {} },
+        },
+      },
+      // unknown tool result: no prior tool_start → must NOT emit a tool_end
+      {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'unknown', content: 'x' }] },
+      },
+      // the known tool's result
+      {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'known', content: 'y' }] },
+      },
+      // a duplicate result for the same known tool → must NOT emit a second tool_end
+      {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'known', content: 'y again' }] },
+      },
+      { type: 'result', subtype: 'success', session_id: 'te4', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+    ]
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('go')
+
+    const toolEnds = emitted.filter((e) => e.type === 'tool_end')
+    expect(toolEnds).toEqual([
+      {
+        type: 'tool_end',
+        name: 'Read',
+        toolId: 'known',
+        summary: 'Read completed',
+        detail: { input: {}, output: 'y' },
+      },
+    ])
+  })
+})
+
+describe('ClaudeSession — running_stats heartbeat', () => {
+  it('emits running_stats roughly every 10s with duration + accumulated tokens', async () => {
+    const emitted: CoLiveEvent[] = []
+    // A controllable fake clock: we capture the scheduled callback + interval and
+    // a monotonic now() we advance by hand.
+    let scheduled: (() => void) | undefined
+    let scheduledMs = 0
+    let nowMs = 1_000
+    const clock = {
+      setInterval: (fn: () => void, ms: number) => {
+        scheduled = fn
+        scheduledMs = ms
+        return 'handle'
+      },
+      clearInterval: vi.fn(),
+      now: () => nowMs,
+    }
+
+    // A turn that stays open (gated) so we can fire the heartbeat mid-flight.
+    let releaseTurn!: () => void
+    const turnGate = new Promise<void>((resolve) => {
+      releaseTurn = resolve
+    })
+    const fn = (() =>
+      (async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'rs1' }
+        // usage arrives via stream events before the heartbeat fires
+        yield { type: 'stream_event', event: { type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 0 } } } }
+        yield { type: 'stream_event', event: { type: 'message_delta', usage: { input_tokens: 5, output_tokens: 12 } } }
+        await turnGate
+        yield { type: 'result', subtype: 'success', session_id: 'rs1', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 5, output_tokens: 12 } }
+      })()) as unknown as QueryFn
+
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+      clock,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+
+    const run = session.run('long')
+    // let the generator run up to the gate: init + both usage stream events are
+    // consumed (each yield needs a microtask turn) before we fire the heartbeat.
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+
+    expect(scheduledMs).toBe(10_000)
+    expect(scheduled).toBeTypeOf('function')
+
+    // advance the clock 10s and fire the heartbeat
+    nowMs = 11_000
+    scheduled!()
+    expect(emitted).toContainEqual({
+      type: 'running_stats',
+      durationMs: 10_000,
+      inputTokens: 5,
+      outputTokens: 12,
+    })
+
+    releaseTurn()
+    await run
+
+    // timer cleared when the turn ends
+    expect(clock.clearInterval).toHaveBeenCalledWith('handle')
+    // no heartbeat lingers once the turn is over
+    const statsCount = emitted.filter((e) => e.type === 'running_stats').length
+    expect(statsCount).toBe(1)
+  })
+
+  it('does not emit running_stats for a turn that completes before the first tick', async () => {
+    const emitted: CoLiveEvent[] = []
+    const clock = {
+      // Never invoke the callback (the turn finishes before any tick).
+      setInterval: () => 'h',
+      clearInterval: vi.fn(),
+      now: () => 0,
+    }
+    const { fn } = fakeQuery([
+      [
+        { type: 'system', subtype: 'init', session_id: 'rs2' },
+        { type: 'result', subtype: 'success', session_id: 'rs2', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+      ],
+    ])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+      clock,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('quick')
+    expect(emitted.filter((e) => e.type === 'running_stats')).toEqual([])
+    expect(clock.clearInterval).toHaveBeenCalledWith('h')
   })
 })
 
@@ -580,6 +943,71 @@ describe('ClaudeSession — interrupt', () => {
     })
     await session.start(undefined, realpathSync(tmpdir()))
     expect(() => session.interrupt()).not.toThrow()
+    expect(session.busy).toBe(false)
+  })
+
+  it('emits NO error event when an aborted turn throws (the abort guard suppresses it)', async () => {
+    const emitted: CoLiveEvent[] = []
+    let capturedSignal!: AbortSignal
+    // The stream throws AFTER abort — exactly the SDK's behavior when a turn is
+    // aborted mid-flight. The catch guard must swallow it (abort is not an error).
+    const fn = ((args: { prompt: unknown; options?: any }) => {
+      capturedSignal = args.options.abortController.signal
+      return (async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'ab1' }
+        // Wait until aborted, then throw (as the SDK does on abort).
+        await new Promise<void>((resolve) => {
+          if (capturedSignal.aborted) return resolve()
+          capturedSignal.addEventListener('abort', () => resolve(), { once: true })
+        })
+        throw new Error('AbortError: The operation was aborted')
+      })()
+    }) as unknown as QueryFn
+
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+
+    const run = session.run('abort me')
+    await Promise.resolve()
+    expect(session.busy).toBe(true)
+
+    session.interrupt()
+    await run
+
+    // the abort guard suppressed the throw: NO error event
+    expect(emitted.filter((e) => e.type === 'error')).toEqual([])
+    expect(session.busy).toBe(false)
+  })
+
+  it('emits exactly ONE error event when a non-abort throw escapes the stream', async () => {
+    const emitted: CoLiveEvent[] = []
+    // A generic (non-abort) throw from the stream — the abort signal is NOT set,
+    // so the catch guard must surface a single error event.
+    const fn = (() =>
+      (async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'ab2' }
+        throw new Error('boom from the stream')
+      })()) as unknown as QueryFn
+
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+
+    // run() must not reject — the error is delivered as an event, not a throw.
+    await expect(session.run('break')).resolves.toBeUndefined()
+
+    expect(emitted.filter((e) => e.type === 'error')).toEqual([
+      { type: 'error', message: 'boom from the stream' },
+    ])
     expect(session.busy).toBe(false)
   })
 })

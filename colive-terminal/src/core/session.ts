@@ -8,7 +8,11 @@
  *     gotcha) so SDK session-store lookups stay stable.
  *   - run(text): drive one turn via `query()` with our OWNED config
  *     (model / permissionMode / settingSources from config, includePartialMessages,
- *     canUseTool, abortController) and map each SDK message to normalized events.
+ *     canUseTool, abortController) and map each SDK message to normalized events
+ *     (status / tool_start / tool_end / text_delta / running_stats / result). A
+ *     `tool_start` (from a streaming or final tool_use) is paired with a `tool_end`
+ *     when the SDK delivers the result as a `type:'user'` / `tool_result` message;
+ *     a periodic `running_stats` heartbeat fires every 10s while the turn runs.
  *     A `busy` flag + FIFO queue: a run() issued mid-turn is enqueued and runs
  *     after the current turn drains.
  *   - interrupt(): abort the current turn via its AbortController. v1 uses string
@@ -63,6 +67,20 @@ export interface SessionConfig {
   maxTurns?: number
 }
 
+/**
+ * A timer scheduler — just the two clock primitives we use for the periodic
+ * `running_stats` heartbeat. Injectable so tests drive it with fake timers
+ * (or a stub) instead of waiting wall-clock seconds. Defaults to globals.
+ */
+export interface Clock {
+  setInterval: (fn: () => void, ms: number) => unknown
+  clearInterval: (handle: unknown) => void
+  now: () => number
+}
+
+/** How often (ms) we emit `running_stats` while a turn is in flight. */
+export const RUNNING_STATS_INTERVAL_MS = 10_000
+
 /** Constructor dependencies — everything that keeps this class decoupled. */
 export interface ClaudeSessionDeps {
   config: SessionConfig
@@ -70,6 +88,8 @@ export interface ClaudeSessionDeps {
   canUseTool: CanUseTool
   /** Defaults to the real SDK `query`; tests inject a fake. */
   query?: QueryFn
+  /** Defaults to the global timer/Date primitives; tests inject a fake. */
+  clock?: Clock
 }
 
 /**
@@ -81,6 +101,7 @@ export class ClaudeSession {
   private readonly emit: Emit
   private readonly canUseTool: CanUseTool
   private readonly query: QueryFn
+  private readonly clock: Clock
 
   /** Resolved (realpath'd) working directory; set by start(). */
   private cwd: string | undefined
@@ -117,11 +138,35 @@ export class ClaudeSession {
    */
   private announcedToolIds: Set<string> = new Set()
 
+  /**
+   * Open tools by `toolId` → the `{name, input}` we saw at `tool_start`, so when
+   * the matching `tool_result` arrives (as a `type:'user'` message) we can emit a
+   * fully-populated `tool_end{name, toolId, detail:{input, output}}`. Cleared per
+   * turn. An entry is removed once its tool_end fires (so a tool_end is emitted at
+   * most once per tool).
+   */
+  private openTools: Map<string, { name: string; input: unknown }> = new Map()
+
+  /** Turn start time (clock.now()) for the `running_stats.durationMs`. */
+  private turnStartedAt = 0
+
+  /** Best-known token totals this turn, fed from any usage we observe. */
+  private inputTokens = 0
+  private outputTokens = 0
+
+  /** Handle for the periodic `running_stats` timer (cleared per turn). */
+  private statsTimer: unknown
+
   constructor(deps: ClaudeSessionDeps) {
     this.config = deps.config
     this.emit = deps.emit
     this.canUseTool = deps.canUseTool
     this.query = deps.query ?? (sdkQuery as unknown as QueryFn)
+    this.clock = deps.clock ?? {
+      setInterval: (fn, ms) => setInterval(fn, ms),
+      clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+      now: () => Date.now(),
+    }
   }
 
   /** The captured session id (for resume / subscribe). Undefined before first start. */
@@ -199,6 +244,11 @@ export class ClaudeSession {
     this.currentAbort = abortController
     this.openBlocks.clear()
     this.announcedToolIds.clear()
+    this.openTools.clear()
+    this.inputTokens = 0
+    this.outputTokens = 0
+    this.turnStartedAt = this.clock.now()
+    this.startStatsTimer()
 
     const options: QueryOptions = {
       model: this.config.model,
@@ -224,9 +274,40 @@ export class ClaudeSession {
         this.emit({ type: 'error', message: errorMessage(err) })
       }
     } finally {
+      this.stopStatsTimer()
       this.currentAbort = undefined
       this._busy = false
     }
+  }
+
+  /** Start the periodic `running_stats` heartbeat for the in-flight turn. */
+  private startStatsTimer(): void {
+    this.stopStatsTimer()
+    this.statsTimer = this.clock.setInterval(() => {
+      this.emit({
+        type: 'running_stats',
+        durationMs: this.clock.now() - this.turnStartedAt,
+        inputTokens: this.inputTokens,
+        outputTokens: this.outputTokens,
+      })
+    }, RUNNING_STATS_INTERVAL_MS)
+  }
+
+  /** Stop the `running_stats` heartbeat (idempotent). */
+  private stopStatsTimer(): void {
+    if (this.statsTimer !== undefined) {
+      this.clock.clearInterval(this.statsTimer)
+      this.statsTimer = undefined
+    }
+  }
+
+  /** Fold any token usage we observe (stream or result) into the turn totals. */
+  private absorbUsage(usage: unknown): void {
+    if (!isRecord(usage)) return
+    const input = asNumber(usage.input_tokens)
+    const output = asNumber(usage.output_tokens)
+    if (input > 0) this.inputTokens = input
+    if (output > 0) this.outputTokens = output
   }
 
   /** Map one SDK message to zero-or-more normalized events. */
@@ -243,6 +324,10 @@ export class ClaudeSession {
     }
     if (type === 'assistant') {
       this.handleAssistant(message)
+      return
+    }
+    if (type === 'user') {
+      this.handleUser(message)
       return
     }
     if (type === 'result') {
@@ -307,12 +392,10 @@ export class ClaudeSession {
         const index = asNumber(event.index)
         if (block.type === 'tool_use') {
           const toolId = asString(block.id)
+          const name = asString(block.name)
           this.announcedToolIds.add(toolId)
-          this.emit({
-            type: 'tool_start',
-            name: asString(block.name),
-            toolId,
-          })
+          this.openTools.set(toolId, { name, input: block.input })
+          this.emit({ type: 'tool_start', name, toolId })
         } else if (block.type === 'text') {
           this.openBlocks.set(index, 'text')
           this.emit({ type: 'status', state: 'text_start' })
@@ -344,8 +427,19 @@ export class ClaudeSession {
         // tool_use / unknown blocks: no *_end status.
         return
       }
+      case 'message_start': {
+        // Carries initial usage (input tokens); fold it into running_stats totals.
+        const inner = event.message
+        if (isRecord(inner)) this.absorbUsage(inner.usage)
+        return
+      }
+      case 'message_delta': {
+        // Carries cumulative output-token usage as the message streams.
+        this.absorbUsage(event.usage)
+        return
+      }
       default:
-        // message_start / message_stop / others: turn framing handled elsewhere.
+        // message_stop / others: turn framing handled elsewhere.
         return
     }
   }
@@ -363,16 +457,59 @@ export class ClaudeSession {
     for (const block of content) {
       if (isRecord(block) && block.type === 'tool_use') {
         const toolId = asString(block.id)
+        const name = asString(block.name)
+        // Record the {name, input} so the matching tool_result can pair into a
+        // tool_end even when this tool was only surfaced in the final message.
+        if (!this.openTools.has(toolId)) {
+          this.openTools.set(toolId, { name, input: block.input })
+        }
         // Skip any tool already announced via a streaming content_block_start
         // this turn (includePartialMessages double-surfaces the same tool_use).
         if (this.announcedToolIds.has(toolId)) continue
         this.announcedToolIds.add(toolId)
-        this.emit({
-          type: 'tool_start',
-          name: asString(block.name),
-          toolId,
-        })
+        this.emit({ type: 'tool_start', name, toolId })
       }
+    }
+  }
+
+  /**
+   * `type:'user'` message — the SDK surfaces tool results here. Its
+   * `message.content` carries `tool_result` blocks ({tool_use_id, content,
+   * is_error}); each pairs with an open tool_start to produce a `tool_end`. The
+   * top-level `tool_use_result` (when present) is the richer raw detail, but it is
+   * a single field for the whole message — so we only attribute it when this
+   * message carries exactly one tool_result block; otherwise each block's own
+   * `content` is the authoritative output (no cross-block mis-attribution). We
+   * only emit a tool_end for a tool we previously announced (so unrelated user
+   * input never spuriously fires one).
+   */
+  private handleUser(message: Record<string, unknown>): void {
+    const inner = message.message
+    if (!isRecord(inner)) return
+    const content = inner.content
+    if (!Array.isArray(content)) return
+    const toolResults = content.filter(
+      (b): b is Record<string, unknown> => isRecord(b) && b.type === 'tool_result',
+    )
+    const singleResult = toolResults.length === 1
+    for (const block of toolResults) {
+      const toolId = asString(block.tool_use_id)
+      const open = this.openTools.get(toolId)
+      if (open === undefined) continue // not one of ours, or already ended
+      this.openTools.delete(toolId)
+      // Prefer the richer top-level tool_use_result only when it unambiguously
+      // belongs to this single result; otherwise use the block's own content.
+      const output =
+        singleResult && message.tool_use_result !== undefined
+          ? message.tool_use_result
+          : block.content
+      this.emit({
+        type: 'tool_end',
+        name: open.name,
+        toolId,
+        summary: toolEndSummary(open.name, block.is_error === true),
+        detail: { input: open.input, output },
+      })
     }
   }
 
@@ -386,6 +523,7 @@ export class ClaudeSession {
     }
 
     const usage = isRecord(message.usage) ? message.usage : {}
+    this.absorbUsage(usage)
     const sessionId =
       typeof message.session_id === 'string'
         ? message.session_id
@@ -406,17 +544,31 @@ export class ClaudeSession {
   }
 }
 
-/** Extract a human message from an error-subtype result. */
+/**
+ * Extract a human message from an error-subtype result. Per the SDK contract,
+ * `SDKResultError.errors` is `string[]` (sdk.d.ts). We also defensively accept
+ * object elements with a `.message` field in case a future shape carries them.
+ */
 function resultErrorMessage(message: Record<string, unknown>): string {
   const errors = message.errors
   if (Array.isArray(errors) && errors.length > 0) {
     const parts = errors
-      .map((e) => (isRecord(e) && typeof e.message === 'string' ? e.message : ''))
+      .map((e) => {
+        if (typeof e === 'string') return e
+        if (isRecord(e) && typeof e.message === 'string') return e.message
+        return ''
+      })
       .filter((s) => s.length > 0)
     if (parts.length > 0) return parts.join('; ')
   }
   // Fall back to the subtype itself (e.g. "error_max_turns").
   return asString(message.subtype) || 'unknown error'
+}
+
+/** A short human summary line for a completed tool. */
+function toolEndSummary(name: string, isError: boolean): string {
+  const tool = name || 'tool'
+  return isError ? `${tool} failed` : `${tool} completed`
 }
 
 /** Stringify a thrown value for an error event. */
