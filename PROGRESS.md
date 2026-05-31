@@ -5,6 +5,13 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-31
 
+### Co-Live Terminal — M1 permission UAT SIGNED OFF 🧪 + Phase 3 env ready
+
+- Hardware re-test confirmed the concurrent-permission fix: a full agentic loop from the glasses — create (incl. **2 concurrent Writes**) → read (3 files) → delete — gave **6 permission requests → 6 allow → 0 timeout**. The concurrent Writes each got their own allow (the case that was 100% failing pre-fix). Files created in the project dir + correctly deleted; git tree clean. **Permission UAT signed off — single/sequential/concurrent all work.**
+- **7 hardware-surfaced bugs** found + fixed across Phase-2 UAT total (4 conn/stream + 2 permission-shape + 1 concurrent-FIFO). 161 tests green, typecheck clean.
+- **Phase 3 build env prepared** (`ca23f47`): ink@7 + react@19 + eventsource-parser@3 + ink-testing-library@4; `.tsx` renders headlessly under vitest 4 (oxc automatic JSX). Phase 3 itself NOT started — to be built next via the subagent workflow (author `wf-phase3.mjs` modeling `wf-phase2.mjs`).
+- Open product decision (not a blocker): keep `permissionMode: default` (prompts for every tool) vs move toward native's `acceptEdits` (fewer taps).
+
 ### Co-Live Terminal — M1 permission UAT: fixed CONCURRENT-permission timeout (bug #3, `3aa62f3`)
 
 - Deeper hardware UAT (pushing past the single-file Write) surfaced a real bug: when the model fires **multiple tool calls needing permission at once** (e.g. 3 parallel `Read`s), **all** the prompts time out — taps never resolve them. Single-permission turns were fine.

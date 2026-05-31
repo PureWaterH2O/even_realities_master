@@ -105,8 +105,12 @@ the taps never resolved them. (Single-permission turns are fine; this is strictl
   (the single owner of the pending set, so exactly one result per resolve, no queue desync): an
   empty/unknown toolUseId settles the oldest pending entry (JS `Map` is insertion-ordered); an explicit
   toolUseId (desk client) still targets that exact one. Deleted `PendingTracker`; the Hub now just
-  forwards `body.toolUseId || ''`. Applies to permissions AND questions. **Unit-verified (161 tests);
-  hardware re-confirm of the 3-file-read scenario PENDING.**
+  forwards `body.toolUseId || ''`. Applies to permissions AND questions. (161 tests.)
+- 🧪 **HARDWARE CONFIRMED (2026-05-31):** re-ran a full agentic loop from the glasses — create
+  (incl. **2 concurrent Writes**) → read (3 files) → delete — wire trace showed **6 permission
+  requests → 6 allow → 0 timeout**; the concurrent Writes each got their own allow (the exact case
+  that was 100% failing pre-fix). Files created in the project dir and correctly deleted; git tree
+  clean afterwards. **Permission UAT is signed off** by the user — single/sequential/concurrent all work.
 - ⚠️ **Related UX (not a bug):** we run `permissionMode: default` (prompts for EVERY tool incl. reads);
   native runs `acceptEdits` (auto-approves more, only mutating ops reach the ring) → far fewer prompts.
   Deliberate safe default per M0; `--permission-mode acceptEdits` is the lighter-touch option for UAT.
