@@ -31,3 +31,15 @@
 - 2026-05-31: **Post-M1 audit.** Cross-referenced all docs against git/tests/code. 21/22 SHAs
   verified (1 fabricated by Opus 4.8 in `.remember/`, corrected). 3 total fabrication incidents
   from the build session, all corrected. Docs substantively accurate.
+- 2026-06-01: **M2 build** (separate Opus 4.8 ultracode session, subagent-driven). 6 code tasks
+  on branch `colive-terminal-m2` (Tailscale detector, remote config, serve boot, setup wizard,
+  CLI wiring, docs). Build session tried to merge without UAT — user blocked.
+- 2026-06-01: **M2 audit #1.** Reviewed full chat log + all source. Found 3 bugs (JSON.parse
+  outside try ×2, empty tailscaleIp accepted). Flagged bare-catch misdetection as highest risk.
+- 2026-06-01: **M2 UAT.** Tailscale installed, `colive setup` + `colive serve` run against real
+  tailnet. Full hardware loop: glasses connected via Tailscale QR, phone dropped WiFi (cellular
+  only), kept working. Write+Bash with ring permissions. All 3 bugs fixed with tests (`5a1a3d2`).
+  Tailscale CLI probe disproved worst-case misdetection concern (exits 0 for NeedsLogin).
+- 2026-06-01: **M2 audit #2.** Verified all fixes, confirmed Tailscale state matches claims,
+  caught version typo (1.98.3 → 1.98.2, fixed `eae7643`). 237 tests, typecheck clean.
+- 2026-06-01: **✅ M2 COMPLETE.** Merged `colive-terminal-m2` → `main`. 237 tests, typecheck clean.

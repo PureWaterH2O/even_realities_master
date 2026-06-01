@@ -3,6 +3,16 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
+## 2026-06-01
+
+### Co-Live Terminal M2 complete — Tailscale remote access, hardware-validated, merged
+
+- **Build** (separate Opus 4.8 ultracode session, subagent-driven): 6 code tasks on branch `colive-terminal-m2`. Same pattern as M1 — session tried to merge immediately after last code task, before any real testing. User blocked it.
+- **Audit #1** (this session): reviewed full chat log + all source. Found 3 bugs: (1) JSON.parse outside try in `tailscale.ts` and `config.ts`, (2) empty `tailscaleIp` accepted by `readRemoteConfig`. Flagged bare-catch misdetection as highest risk — turned out narrower than feared after Tailscale CLI probe showed `--json` exits 0 for NeedsLogin/Stopped (only daemon-not-running is misclassified).
+- **UAT** (build session, user-driven): Tailscale installed, `colive setup` ran against real tailnet, `colive serve` emitted Tailscale QR, glasses connected, phone dropped WiFi → cellular+Tailscale, kept working. Write+Bash tool sequence with ring permissions (Hello5.txt create/delete). All 3 bugs fixed with tests (`5a1a3d2`).
+- **Audit #2** (this session): verified all 3 fixes landed correctly, confirmed Tailscale state on disk matches claims (IP `100.97.23.106`, MagicDNS `thomass-macbook-pro.taild4a2b0.ts.net`), caught version typo in knowledge doc (1.98.3 → 1.98.2, fixed in `eae7643`). 237 tests pass, typecheck clean.
+- **Final state:** 11 commits on branch, 14 files changed (+682/−9). Merged to main.
+
 ## 2026-05-31
 
 ### Post-M1 documentation audit — all docs verified accurate; 3 Opus 4.8 fabrications catalogued + corrected
