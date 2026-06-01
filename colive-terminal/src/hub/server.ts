@@ -105,21 +105,38 @@ export function createApp(deps: AppDeps): Express {
  * confirmed `http://<host>:<port>?token=<token>&defaultProvider=claude`). Kept
  * here, alone, so the one app-facing format lives in one place.
  */
-export function buildQrPayload(config: { host: string; port: number; token: string }): string {
-  return `http://${config.host}:${config.port}?token=${config.token}&defaultProvider=claude`
+export function buildQrPayload(config: {
+  host: string
+  port: number
+  token: string
+  advertiseHost?: string
+}): string {
+  const host = config.advertiseHost ?? config.host
+  return `http://${host}:${config.port}?token=${config.token}&defaultProvider=claude`
 }
 
 /** Print the startup banner, the QR, and the manual-entry fallback. */
 function printStartupBanner(config: ResolvedConfig, boundPort: number): void {
-  const payload = buildQrPayload({ host: config.host, port: boundPort, token: config.token })
+  const payload = buildQrPayload({
+    host: config.host,
+    port: boundPort,
+    token: config.token,
+    advertiseHost: config.advertiseHost,
+  })
   // eslint-disable-next-line no-console
   console.log('\nCo-Live Terminal — Client Hub')
-  console.log(`  listening   http://${config.host}:${boundPort}`)
+  if (config.advertiseHost) {
+    console.log(`  listening   http://0.0.0.0:${boundPort}`)
+    console.log(`  glasses     http://${config.advertiseHost}:${boundPort} (via Tailscale)`)
+    console.log(`  desk        http://localhost:${boundPort}`)
+  } else {
+    console.log(`  listening   http://${config.host}:${boundPort}`)
+  }
   console.log(`  model       ${config.model}`)
   console.log('\nScan to connect:')
   qrcode.generate(payload, { small: true }, (qr) => console.log(qr))
   console.log('Or enter manually:')
-  console.log(`  host   ${config.host}`)
+  console.log(`  host   ${config.advertiseHost ?? config.host}`)
   console.log(`  port   ${boundPort}`)
   console.log(`  token  ${config.token}\n`)
 }
