@@ -28,6 +28,7 @@ as `not-connected` — *provided the daemon is running*.
 - 🧪 **Genuinely-absent binary → ENOENT → `not-installed`** (correct). Confirmed by running `colive setup` with `tailscale` off `PATH`. _Source: 2026-06-01 `colive setup` CLI drive._
 - ✅ **Realistic deployment is safe:** the Tailscale **macOS GUI app** runs the daemon continuously once installed, so the real "installed but disconnected" state is `NeedsLogin`/`Stopped` *with the daemon up* → exit 0 → correctly `not-connected`. The exit-1 (daemon-down) misclassification is mainly the brew-CLI-without-`brew services start tailscale` path. _Source: probe + Tailscale macOS behavior._
 - 🟡 **`BackendState:"Stopped"` (daemon up, toggled off) is assumed to also exit 0 with JSON** (same CLI code path as `NeedsLogin`); our unit fixtures assume this but it was not directly observed on 2026-06-01. _Source: inferred from the NeedsLogin probe._
+- 🧪 **Full M2 loop hardware-validated end-to-end (2026-06-01).** On a real connected tailnet, `colive setup` detected `running` (IP `100.97.23.106`, MagicDNS `thomass-macbook-pro.taild4a2b0.ts.net`) and wrote the config; `colive serve` emitted the 3-line banner + a QR carrying the Tailscale host; the glasses connected, the phone dropped WiFi (cellular+Tailscale only) and **kept working**, and a Write+Bash tool sequence ran with ring-approved permissions (created then deleted `Hello5.txt`). Independently corroborated via the live Hub API: `/api/info` returns identically over localhost AND the MagicDNS hostname, the session transcript matches, and the file is gone from disk. _Source: user hardware run + controller API/filesystem verification, 2026-06-01._
 
 ## Why it matters
 
@@ -43,8 +44,9 @@ misreported as `not-installed`.
 
 - Direct confirmation of the `Stopped` exit code (log in, then `tailscale down`, re-probe).
 - Should `detectTailscale` distinguish "daemon not running" (`status --json` exit 1, "failed to connect…") from genuine ENOENT, surfacing a `not-running` hint instead of `not-installed`? (Small hardening; would add a union variant rippling into `setup.ts`/`runServe`.)
-- Full hardware loop (glasses scan Tailscale QR; walk-away/cellular continuity) — still unrun as of 2026-06-01.
+- ~~Full hardware loop (glasses scan Tailscale QR; walk-away/cellular continuity)~~ — **DONE 2026-06-01, passed** (see facts).
 
 ## Change log
 
 - 2026-06-01: created from a local Tailscale-CLI probe (v1.98.3). Promotes the disconnected-detection question from 🔴 speculation ("likely exits non-zero") to 🧪: `--json` exits 0 for `NeedsLogin`; only daemon-down (exit 1) is misclassified as `not-installed`.
+- 2026-06-01: full M2 remote loop hardware-validated end-to-end (setup→serve→glasses→walk-away→tool-use) and corroborated via the live Hub API + filesystem. Closed the hardware-loop open question.
