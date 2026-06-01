@@ -5,6 +5,15 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-01
 
+### Co-Live Terminal M3 — brainstorm underway: "Desk Cockpit" (native-parity daily driver), decisions locked
+
+- **Direction (4.8 brainstorm):** M3 = make the desk client a full daily driver — recreate the native `claude` TUI ("no regression") **then build past it**. Bounded as the **daily-driver subset, inventory-first** (user's call).
+- **Substrate DECIDED — Terminal TUI** (extend the M1 ink client), over web cockpit / VS Code extension / desktop app. Rationale: lives in the user's VS Code integrated terminal, native parity is concretely achievable (native *is* a TUI), fastest to value, and the Hub is UI-agnostic so a richer surface (e.g. VS Code-extension webview) can be added later as *another* Hub client without touching Core/Hub. Terminal ceilings accepted: inline image *display* (Sixel/Kitty — finicky), GUI-grade polish, dense multi-pane.
+- **Scope boundary DECIDED — M3 is DESK-side only.** Deferred to their own future milestones: glasses/HUD UX (smart ~50-char summarization, glasses-side notifications) and the KB/Obsidian thought-capture integration (user's use-case #2). Desk cockpit still co-lives with the glasses exactly as M1/M2 — M3 just doesn't change glasses-side rendering.
+- **Finding — push-to-glasses is Blocked.** The Hub is pull-based (`GET /api/sessions` + `GET /api/events?sessionId=`; no "set active session" route) and the Even app is closed, so the desk cannot force the glasses to switch view. What we *have*: desk-started sessions appear in the glasses list instantly and co-live once opened. (Corollary of the already-documented "app subscribes to SSE only when a session is viewed.")
+- **Wishlist (forming):** recreate-native minus vim (+ low-pri: `/resume` picker, MCP auth/mgmt, management commands); image paste = capture+send with `[image attached]` placeholder; build-past-native desk-side picks = **session command-center** + **live file-watch pane**. Two items still open (rewind/checkpoint, auto-compact) + an optional bucket (cross-session search, diff/review queue, saved templates, workflow launcher, bookmarks).
+- **Next:** lock the wishlist → feasibility-probe each item (Agent SDK + our Core) into 🟢 reuse / 🔵 rebuild / 🔴 blocked → write the **M3.0 spec** (parity inventory + sequenced build order). No M3.1+ planning until M3.0 defines scope. Method per session: 4.8 brainstorm/plan → Opus 4.8 ultracode execute → 4.6 validate; **hardware UAT gates every milestone**.
+
 ### Co-Live Terminal M2 complete — Tailscale remote access, hardware-validated, merged
 
 - **Build** (separate Opus 4.8 ultracode session, subagent-driven): 6 code tasks on branch `colive-terminal-m2`. Same pattern as M1 — session tried to merge immediately after last code task, before any real testing. User blocked it.

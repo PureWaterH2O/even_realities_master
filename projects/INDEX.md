@@ -5,7 +5,7 @@ Status board for everything we're building. Each active project has a folder
 
 | Project | Slug | Status | Started | Last update |
 |---------|------|--------|---------|-------------|
-| Co-Live Terminal | `colive-terminal` | ✅ M1 done — end-to-end loop hardware-validated & merged to `main` (216 tests); M2 (Tailscale remote / reconnect) + M3 (native parity) next | 2026-05-30 | 2026-05-31 |
+| Co-Live Terminal | `colive-terminal` | ✅ M1 + M2 done (merged to `main`, 237 tests, hardware-validated). 🟨 M3 "Desk Cockpit" (native-parity daily driver) **brainstorm underway** — substrate=Terminal TUI, DESK-only scope; next = M3.0 spec (parity inventory + feasibility sort) | 2026-05-30 | 2026-06-01 |
 
 Status key: 💡 idea · 🟦 planned · 🟨 in progress · ✅ done · 🟥 blocked · ⬛ abandoned
 
