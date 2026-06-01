@@ -50,4 +50,15 @@ describe('detectTailscale', () => {
     const result = await detectTailscale(exec)
     expect(result).toEqual({ state: 'running', ip: '100.64.1.2', hostname: '' })
   })
+
+  it('throws a clear error when status output is not valid JSON', async () => {
+    const exec: ShellExec = async () => ({ stdout: 'not json at all', stderr: '' })
+    await expect(detectTailscale(exec)).rejects.toThrow(/parse/i)
+  })
+
+  it('returns running with empty ip/hostname when Self is null', async () => {
+    const j = JSON.stringify({ BackendState: 'Running', Self: null })
+    const exec: ShellExec = async () => ({ stdout: j, stderr: '' })
+    expect(await detectTailscale(exec)).toEqual({ state: 'running', ip: '', hostname: '' })
+  })
 })

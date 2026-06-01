@@ -24,10 +24,16 @@ export async function readRemoteConfig(configDir?: string): Promise<RemoteConfig
     return null
   }
 
-  const data = JSON.parse(raw)
+  let data: any
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    throw new Error(`Invalid remote config at ${path}: not valid JSON`)
+  }
   if (
     typeof data.tailscaleHostname !== 'string' ||
     typeof data.tailscaleIp !== 'string' ||
+    data.tailscaleIp === '' ||
     (data.prefer !== 'hostname' && data.prefer !== 'ip')
   ) {
     throw new Error(`Invalid remote config at ${path}: missing or malformed fields`)

@@ -19,7 +19,12 @@ export async function detectTailscale(exec: ShellExec = defaultExec): Promise<Ta
     return { state: 'not-installed' }
   }
 
-  const data = JSON.parse(stdout)
+  let data: any
+  try {
+    data = JSON.parse(stdout)
+  } catch {
+    throw new Error('Could not parse `tailscale status --json` output as JSON.')
+  }
   const backendState: string = data.BackendState ?? ''
 
   if (backendState !== 'Running') {

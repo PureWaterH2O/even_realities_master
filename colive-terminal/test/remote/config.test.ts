@@ -36,6 +36,20 @@ describe('readRemoteConfig', () => {
     const result = await readRemoteConfig(dir)
     expect(result).toEqual(config)
   })
+
+  it('throws a clear error on a file that is not valid JSON', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'colive-cfg-'))
+    const { writeFile: wf } = await import('node:fs/promises')
+    await wf(join(dir, 'remote.json'), 'this is { not json')
+    await expect(readRemoteConfig(dir)).rejects.toThrow(/Invalid remote config/)
+  })
+
+  it('throws when tailscaleIp is empty', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'colive-cfg-'))
+    const { writeFile: wf } = await import('node:fs/promises')
+    await wf(join(dir, 'remote.json'), JSON.stringify({ tailscaleHostname: 'x', tailscaleIp: '', prefer: 'ip' }))
+    await expect(readRemoteConfig(dir)).rejects.toThrow(/missing or malformed/)
+  })
 })
 
 describe('resolveRemoteHost', () => {
