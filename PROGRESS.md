@@ -5,6 +5,14 @@ built, what we decided. Newest entries on top.
 
 ## 2026-05-31
 
+### Post-M1 documentation audit — all docs verified accurate; 3 Opus 4.8 fabrications catalogued + corrected
+
+- Ran a full cross-reference audit of PROGRESS.md, `projects/colive-terminal/` (status/notes/log), `knowledge/terminal-mode/overview.md`, and `.remember/` against git history, tests, and code. **Result: the code, git state, and substantive documentation are all accurate.**
+- **22 commit SHAs checked: 21 verified, 1 fabricated** (`57cbedc0` in `.remember/today-2026-05-31.md` — a hardware observation tagged with a non-existent commit; corrected in-place). A second fabricated SHA (`e9f9f88`) had already been caught and fixed in `f39c140`. Combined with the fabricated npm-audit-vulnerability claim (fixed in `181a717`), that's **3 total fabrication incidents from the Opus 4.8 session** — all now corrected.
+- **216 tests confirmed** (ran `npm test`); **typecheck confirmed clean** (ran `npm run typecheck`). All module files exist where documented. E2e test has exactly 3 tests matching descriptions. Package deps match claimed versions.
+- **Merge state verified:** `a6412d0` is a real no-ff merge (43 commits on the feature branch, docs said "~40"), branch deleted, HEAD=`181a717` up to date with origin.
+- **Minor doc hygiene issues found (not corrected — cosmetic):** (1) `log.md` stops at Phase 2; Phases 3–4 never logged. (2) `status.md` retains "in progress" build log below the "M1 COMPLETE" header with present-tense language. (3) PROGRESS.md line 110 says "fork" without a superseded note (the decision changed to "reimplement" in the M0 spike). (4) The vulnerability correction calls the fabrication a "transcription error" — the commit message `181a717` is more precise.
+
 ### Co-Live Terminal — ✅ M1 COMPLETE: end-to-end loop hardware-validated + merged to `main` (`a6412d0`)
 
 - 🧪 **M1 definition of done MET on real G2 + R1.** The full co-live loop runs: kick off a task at the thin desk client → live on the glasses HUD → dictate a **free-form** follow-up from the glasses → it enters the **same** session → response on **both** → continue at the desk. Hardware-confirmed across this session: allow + **deny** permission paths (model recovers gracefully on deny), **Esc-interrupt**, `/clear`→new session, and **bidirectional permission-prompt dismissal** (answer on the desk OR the glasses ring → prompt clears on both).
