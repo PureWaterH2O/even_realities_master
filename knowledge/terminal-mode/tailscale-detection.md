@@ -13,16 +13,21 @@ overall_confidence: 🧪
 
 Co-Live Terminal M2 detects the Mac's Tailscale state by shelling out to
 `tailscale status --json` (see `colive-terminal/src/remote/tailscale.ts`,
-`detectTailscale`). On 2026-06-01 we probed the real Tailscale CLI **1.98.3**
-(installed via `brew install tailscale`, run as a userspace daemon — no login,
-no tailnet) to confirm the exit-code/JSON behavior the detector relies on. The
+`detectTailscale`). The Tailscale binary `colive` actually invokes on the test
+Mac (default `PATH`, `/usr/local/bin/tailscale`) is the **macOS app CLI v1.98.2**
+— the version the hardware-validated run used, and the only `tailscale` now
+installed. On 2026-06-01 we verified the exit-code/JSON behavior the detector
+relies on; the *logged-out* and *daemon-down* states were captured with a
+throwaway `brew`-installed `tailscale` userspace daemon (since uninstalled), as
+`status --json` behaves identically across these adjacent point releases. The
 key result: the CLI's `--json` output **exits 0 with parseable JSON even when
 logged out**, so an installed-but-disconnected Tailscale is correctly classified
 as `not-connected` — *provided the daemon is running*.
 
 ## Facts
 
-- 🧪 **Daemon running, logged out (`NeedsLogin`): `tailscale status --json` exits 0** with full JSON (`BackendState:"NeedsLogin"`, `TailscaleIPs:null`, `Self.DNSName:""`). `detectTailscale` → `{state:'not-connected', backendState:'NeedsLogin'}`. _Source: local probe 2026-06-01, tailscale 1.98.3, userspace `tailscaled --tun=userspace-networking`._
+- 🧪 **Deployed binary confirmed (v1.98.2):** with the Mac connected, the default `tailscale status --json` (macOS app CLI v1.98.2, `/usr/local/bin/tailscale`) returns exit 0 + valid JSON with `BackendState:"Running"` and `Self.DNSName:"thomass-macbook-pro.taild4a2b0.ts.net."` → `detectTailscale` → `{state:'running', …}`. _Source: 2026-06-01 status call against the live connection._
+- 🧪 **Daemon running, logged out (`NeedsLogin`): `tailscale status --json` exits 0** with full JSON (`BackendState:"NeedsLogin"`, `TailscaleIPs:null`, `Self.DNSName:""`). `detectTailscale` → `{state:'not-connected', backendState:'NeedsLogin'}`. _Source: local probe 2026-06-01, throwaway brew `tailscaled --tun=userspace-networking` (since uninstalled); deployed CLI on the test Mac is the macOS app v1.98.2._
 - 🧪 **Daemon NOT running: `tailscale status --json` exits 1** ("failed to connect to local Tailscale service; is Tailscale running?"). `detectTailscale`'s bare `catch` maps this to `not-installed` — **imprecise**: a CLI that is installed but whose daemon hasn't been started reads as "not installed." _Source: same probe._
 - 🧪 **Plain `tailscale status` (no `--json`) exits 1 when logged out** ("Logged out."), but the `--json` variant exits 0. The detector uses `--json`, which is the forgiving one. _Source: same probe._
 - 🧪 **Genuinely-absent binary → ENOENT → `not-installed`** (correct). Confirmed by running `colive setup` with `tailscale` off `PATH`. _Source: 2026-06-01 `colive setup` CLI drive._
@@ -48,5 +53,6 @@ misreported as `not-installed`.
 
 ## Change log
 
-- 2026-06-01: created from a local Tailscale-CLI probe (v1.98.3). Promotes the disconnected-detection question from 🔴 speculation ("likely exits non-zero") to 🧪: `--json` exits 0 for `NeedsLogin`; only daemon-down (exit 1) is misclassified as `not-installed`.
+- 2026-06-01: created from a local Tailscale-CLI probe. Promotes the disconnected-detection question from 🔴 speculation ("likely exits non-zero") to 🧪: `--json` exits 0 for `NeedsLogin`; only daemon-down (exit 1) is misclassified as `not-installed`.
+- 2026-06-01: version correction — the deployed Tailscale on the test Mac is the **macOS app CLI v1.98.2** (`/usr/local/bin/tailscale`, what `colive` invokes and what the hardware run used). An earlier draft cited **1.98.3**, which was a throwaway `brew`-installed build used only to reach the logged-out/daemon-down states for the exit-code probe (now uninstalled). Caught by the M2 audit.
 - 2026-06-01: full M2 remote loop hardware-validated end-to-end (setup→serve→glasses→walk-away→tool-use) and corroborated via the live Hub API + filesystem. Closed the hardware-loop open question.
