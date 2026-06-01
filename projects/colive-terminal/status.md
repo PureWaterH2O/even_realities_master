@@ -1,12 +1,6 @@
 # Co-Live Terminal — Status
 
-**Current state:** ✅ **M1 COMPLETE** — end-to-end co-live loop hardware-validated (real G2 + R1) and
-**merged to `main`** (merge `a6412d0`; 216 tests, typecheck clean). Hardware UAT signed off: allow + deny
-permissions, Esc-interrupt, `/clear`→new session, free-form glasses follow-up into the same session,
-and bidirectional permission-prompt dismissal. **Next milestones:** M2 (Tailscale remote + long-idle
-reconnect/replay-resume) and M3 (full native parity — see plan's deferred scope). Deferred follow-ups
-carried forward: fast-`202`, filter internal sessions from the list, per-poll perf, desk single-slot
-concurrent-permission disambiguation, `bin:{colive}` before any real install/distribution.
+**Current state:** ✅ **M2 COMPLETE** — Tailscale remote access hardware-validated end-to-end (setup→serve→glasses→walk-away→tool-use) and **merged to `main`**. 237 tests, typecheck clean. Glasses work from anywhere on the tailnet (cellular+Tailscale, no LAN required). **Next milestones:** M3 (full native parity — see plan's deferred scope). Deferred follow-ups carried forward: fast-`202`, filter internal sessions from the list, per-poll perf, desk single-slot concurrent-permission disambiguation, `bin:{colive}` before any real install/distribution, daemon-not-running vs not-installed distinction (see `knowledge/terminal-mode/tailscale-detection.md` open questions).
 
 ---
 _History below is the M1 build log._

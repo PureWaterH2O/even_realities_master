@@ -19,6 +19,9 @@ import { resolveConfig, type ConfigArgs, type ConfigEnv } from './core/config'
 import { startServer, type RunningServer } from './hub/server'
 import { createHubClient } from './desk/client'
 import { App } from './desk/app'
+import { readRemoteConfig, resolveRemoteHost } from './remote/config'
+import { detectTailscale, type ShellExec } from './remote/tailscale'
+import { runSetup, createDefaultIO } from './remote/setup'
 
 /**
  * Parse `colive serve` flags into a {@link ConfigArgs}.
@@ -66,11 +69,42 @@ function parsePort(value: string): number {
  * Run the `serve` subcommand: parse flags, resolve config, start the server.
  * Returns the {@link RunningServer} handle so callers/tests own the lifecycle.
  * `env` defaults to process.env (overridable in tests).
+ *
+ * When `--host` is NOT passed, reads the remote config and requires Tailscale
+ * to be running. The server binds to `0.0.0.0` and advertises the Tailscale
+ * address in the QR/banner so the glasses connect through the WireGuard tunnel.
+ * `exec` is injectable for tests.
  */
-export function runServe(argv: string[], env: ConfigEnv = process.env): Promise<RunningServer> {
+export async function runServe(
+  argv: string[],
+  env: ConfigEnv = process.env,
+  exec?: ShellExec,
+): Promise<RunningServer> {
   const args = parseServeArgs(argv)
   const config = resolveConfig(env, args)
-  return startServer(config)
+
+  if (args.host !== undefined) {
+    return startServer(config)
+  }
+
+  const remoteConfig = await readRemoteConfig()
+  if (remoteConfig === null) {
+    throw new Error(
+      'No remote config found. Run `colive setup` first, or pass `--host <ip>` manually.',
+    )
+  }
+
+  const tsState = await detectTailscale(exec)
+  if (tsState.state !== 'running') {
+    const hint =
+      tsState.state === 'not-installed'
+        ? 'Tailscale is not installed. Run `colive setup` for installation guidance.'
+        : `Tailscale is not connected (state: ${tsState.backendState}). Run \`tailscale up\` or open the menu bar app.`
+    throw new Error(hint)
+  }
+
+  const advertiseHost = resolveRemoteHost(remoteConfig)
+  return startServer({ ...config, host: '0.0.0.0', advertiseHost })
 }
 
 /** Parsed `colive desk` flags. All optional; env/defaults fill the gaps. */
@@ -185,9 +219,22 @@ export async function main(argv: string[]): Promise<void> {
         process.exitCode = 1
       }
       return
+    case 'setup': {
+      const io = createDefaultIO()
+      try {
+        await runSetup({ io })
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(err instanceof Error ? err.message : String(err))
+        process.exitCode = 1
+      } finally {
+        io.close()
+      }
+      return
+    }
     default:
       // eslint-disable-next-line no-console
-      console.error('Usage: colive <serve|desk> [options]')
+      console.error('Usage: colive <serve|desk|setup> [options]')
       process.exitCode = 1
       return
   }

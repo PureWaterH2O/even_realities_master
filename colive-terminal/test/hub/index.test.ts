@@ -95,7 +95,7 @@ describe('runServe (real http boot, bounded)', () => {
     'boots on an ephemeral port and serves an authed /api/info, then closes',
     async () => {
       running = await runServe(
-        ['--port', '0', '--project-dir', realpathSync(tmpdir())],
+        ['--host', '127.0.0.1', '--port', '0', '--project-dir', realpathSync(tmpdir())],
         // Inject a deterministic token via env so the test does not depend on
         // (or leak) a randomly generated one.
         { BRIDGE_TOKEN: 'tok-cli' },

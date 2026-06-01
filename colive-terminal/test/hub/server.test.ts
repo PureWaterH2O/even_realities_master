@@ -10,6 +10,21 @@ describe('buildQrPayload (🧪 verified Even-app connect URL)', () => {
     const payload = buildQrPayload({ host: '127.0.0.1', port: 4321, token: 'abc' })
     expect(payload).toBe('http://127.0.0.1:4321?token=abc&defaultProvider=claude')
   })
+
+  it('uses advertiseHost instead of host when provided', () => {
+    const payload = buildQrPayload({
+      host: '0.0.0.0',
+      port: 3456,
+      token: 'tok',
+      advertiseHost: 'my-mac.tailnet.ts.net',
+    })
+    expect(payload).toBe('http://my-mac.tailnet.ts.net:3456?token=tok&defaultProvider=claude')
+  })
+
+  it('uses host when advertiseHost is not provided', () => {
+    const payload = buildQrPayload({ host: '192.168.1.5', port: 3456, token: 'tok' })
+    expect(payload).toBe('http://192.168.1.5:3456?token=tok&defaultProvider=claude')
+  })
 })
 
 describe('startServer (real http, bounded)', () => {

@@ -45,6 +45,7 @@ export interface ResolvedConfig {
   port: number
   token: string
   projectDir: string
+  advertiseHost?: string
 }
 
 /** The complete set of valid SDK PermissionMode values. */
