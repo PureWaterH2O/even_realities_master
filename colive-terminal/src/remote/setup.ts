@@ -91,7 +91,7 @@ export async function runSetup(deps: SetupDeps): Promise<SetupResult> {
   return { config, configPath }
 }
 
-export function createDefaultIO(): WizardIO {
+export function createDefaultIO(): WizardIO & { close(): void } {
   const rl = createInterface({ input: process.stdin, output: process.stdout })
   return {
     print: (msg: string) => console.log(msg),
@@ -99,5 +99,6 @@ export function createDefaultIO(): WizardIO {
       const answer = await rl.question(msg)
       return answer
     },
+    close: () => rl.close(),
   }
 }

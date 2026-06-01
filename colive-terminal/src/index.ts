@@ -21,6 +21,7 @@ import { createHubClient } from './desk/client'
 import { App } from './desk/app'
 import { readRemoteConfig, resolveRemoteHost } from './remote/config'
 import { detectTailscale, type ShellExec } from './remote/tailscale'
+import { runSetup, createDefaultIO } from './remote/setup'
 
 /**
  * Parse `colive serve` flags into a {@link ConfigArgs}.
@@ -218,9 +219,22 @@ export async function main(argv: string[]): Promise<void> {
         process.exitCode = 1
       }
       return
+    case 'setup': {
+      const io = createDefaultIO()
+      try {
+        await runSetup({ io })
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(err instanceof Error ? err.message : String(err))
+        process.exitCode = 1
+      } finally {
+        io.close()
+      }
+      return
+    }
     default:
       // eslint-disable-next-line no-console
-      console.error('Usage: colive <serve|desk> [options]')
+      console.error('Usage: colive <serve|desk|setup> [options]')
       process.exitCode = 1
       return
   }
