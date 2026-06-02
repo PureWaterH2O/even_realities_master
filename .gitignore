@@ -24,3 +24,4 @@ build/
 
 # even-terminal bridge runtime logs
 even-terminal-*.log
+.superpowers/
