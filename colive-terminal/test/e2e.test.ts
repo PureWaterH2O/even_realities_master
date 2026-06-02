@@ -72,6 +72,40 @@ function makePromptQuery(): QueryFn {
 }
 
 /**
+ * A happy turn that ALSO streams a thinking content block before the answer,
+ * mirroring test/core/session.test.ts's content_block_delta { thinking } shape.
+ * The Core maps the thinking delta to a desk-only `thinking_delta` event; the
+ * normal text_delta stream is intact.
+ */
+function thinkingMessages(text: string, thinking: string): unknown[] {
+  return [
+    { type: 'system', subtype: 'init', session_id: SESSION_ID },
+    { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } },
+    { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking } } },
+    { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
+    { type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text' } } },
+    { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text } } },
+    { type: 'stream_event', event: { type: 'content_block_stop', index: 1 } },
+    {
+      type: 'result',
+      subtype: 'success',
+      session_id: SESSION_ID,
+      result: text,
+      total_cost_usd: 0,
+      num_turns: 1,
+      duration_ms: 1,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+  ]
+}
+
+/** A fake query whose turn streams a thinking delta then the assistant text. */
+function makeThinkingQuery(thinking: string): QueryFn {
+  return (({ prompt }: { prompt: string }) =>
+    turn(thinkingMessages(`reply to: ${prompt}`, thinking))) as unknown as QueryFn
+}
+
+/**
  * A fake query that exercises a TOOL PERMISSION mid-turn: after init it invokes
  * the SDK-supplied canUseTool (our broker), awaits the client decision, then
  * streams the outcome. Drives the desk->glasses permission loop through the real
@@ -365,6 +399,51 @@ describe('Phase 4.1 — e2e co-live loop (desk + glasses on one session)', () =>
       await waitUntil(() => A.events.length === B.events.length, 4000, 'streams converge')
       expect(A.events.length).toBeGreaterThan(0)
       expect(B.events).toEqual(A.events)
+    },
+    15000,
+  )
+
+  it(
+    'a turn that streams thinking reaches a desk subscriber as thinking_delta; a co-live subscriber that ignores unknown types keeps the normal stream intact',
+    async () => {
+      const THINKING = 'pondering the e2e proof'
+      const { baseUrl, token } = await boot(makeThinkingQuery(THINKING))
+      const desk: HubClient = createHubClient({ baseUrl, token })
+      const glasses: HubClient = createHubClient({ baseUrl, token })
+
+      const created = await desk.sendPrompt({ text: 'think it through', cwd: '/tmp' })
+      expect(created.sessionId).toBe(SESSION_ID)
+      const sid = created.sessionId!
+
+      // The desk subscriber collects everything (it renders thinking on the HUD-less TUI).
+      const received: CoLiveEvent[] = []
+      // The co-live (glasses) subscriber models the closed Even app: it IGNORES
+      // event types it doesn't understand, so thinking_delta never lands in its list.
+      const KNOWN = new Set<CoLiveEvent['type']>([
+        'user_prompt',
+        'text_delta',
+        'status',
+        'result',
+        'notification',
+        'error',
+      ])
+      const otherReceived: CoLiveEvent[] = []
+      handles.push(desk.subscribe(sid, (e) => received.push(e), { needReplay: true }))
+      handles.push(
+        glasses.subscribe(sid, (e) => { if (KNOWN.has(e.type)) otherReceived.push(e) }, { needReplay: true }),
+      )
+
+      await waitUntil(() => countType(received, 'result') >= 1, 4000, 'desk sees result')
+      await waitUntil(() => countType(otherReceived, 'result') >= 1, 4000, 'co-live sees result')
+
+      // the desk subscriber receives a thinking_delta carrying the text
+      expect(received.some((e) => e.type === 'thinking_delta' && e.text === THINKING)).toBe(true)
+      // a co-live subscriber that ignores unknown types still gets the normal stream intact
+      expect(otherReceived.filter((e) => e.type === 'text_delta').length).toBeGreaterThan(0)
+      // and the ignored thinking never leaked into the assistant text either client sees
+      expect(received.some((e) => e.type === 'text_delta' && e.text.includes(THINKING))).toBe(false)
+      // the broadcast-and-ignore co-live client never saw the unknown thinking_delta
+      expect(otherReceived.some((e) => e.type === 'thinking_delta')).toBe(false)
     },
     15000,
   )
