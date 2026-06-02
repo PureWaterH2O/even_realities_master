@@ -24,8 +24,8 @@
  * NO permission logic and makes NO network/model calls of its own; tests pass a
  * fake `query` and a stub `canUseTool`.
  *
- * Thinking text is NEVER broadcast (M0 🧪): `thinking_delta` produces no event,
- * and thinking content blocks surface only as `think_start`/`think_end` status.
+ * Thinking text is emitted as a desk-only 'thinking_delta' event (the closed Even
+ * app ignores it); think_start/think_end status still bracket it.
  */
 import { realpathSync } from 'node:fs'
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'
@@ -445,8 +445,9 @@ export class ClaudeSession {
 
   /**
    * Handle one streaming delta (`SDKPartialAssistantMessage.event`). We map by
-   * `event.type`, reading only string fields. Thinking content is surfaced as
-   * status only; its text is NEVER emitted.
+   * `event.type`, reading only string fields. Thinking content is bracketed by
+   * think_start/think_end status, and its text is emitted as a desk-only
+   * 'thinking_delta' event (the closed Even app ignores unknown event types).
    */
   private handleStreamEvent(event: unknown): void {
     if (!isRecord(event)) return
@@ -475,8 +476,12 @@ export class ClaudeSession {
         if (!isRecord(delta)) return
         if (delta.type === 'text_delta') {
           this.emit({ type: 'text_delta', text: asString(delta.text) })
+        } else if (delta.type === 'thinking_delta') {
+          // 🧪 thinking text lives in delta.thinking (not delta.text). Emitted for
+          // DESK-ONLY render; the closed Even app ignores unknown event types.
+          this.emit({ type: 'thinking_delta', text: asString(delta.thinking) })
         }
-        // thinking_delta and input_json_delta: NO event (never leak thinking).
+        // input_json_delta: still NO event.
         return
       }
       case 'content_block_stop': {
@@ -524,10 +529,13 @@ export class ClaudeSession {
         const toolId = asString(block.id)
         const name = asString(block.name)
         // Record the {name, input} so the matching tool_result can pair into a
-        // tool_end even when this tool was only surfaced in the final message.
-        if (!this.openTools.has(toolId)) {
-          this.openTools.set(toolId, { name, input: block.input })
-        }
+        // tool_end. 🧪 OVERWRITE unconditionally: a streaming content_block_start
+        // stored an EMPTY {} input (the real args stream via input_json_delta,
+        // which we don't reassemble); this final assistant message carries the
+        // COMPLETE input, so it must replace the placeholder — otherwise
+        // tool_end.detail.input stays {} and the desk's diff + Ctrl-O verbose are
+        // blank. (The tool_start dedup below is independent of this.)
+        this.openTools.set(toolId, { name, input: block.input })
         // Skip any tool already announced via a streaming content_block_start
         // this turn (includePartialMessages double-surfaces the same tool_use).
         if (this.announcedToolIds.has(toolId)) continue

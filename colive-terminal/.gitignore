@@ -4,3 +4,6 @@ dist/
 .DS_Store
 docs/wf-*.mjs
 .remember/
+
+# Preview harness frame dumps (controller iteration artifacts)
+preview-out/

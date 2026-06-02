@@ -50,6 +50,20 @@ already flows; only the **text** is dropped.
 3. **Hub:** no change. `src/hub/sse.ts:72` serializes any event via `JSON.stringify(event)` — 🧪 **no allowlist**,
    so the new type flows to subscribers automatically. The Even app ignores unknown `type`s (verified by **UAT B2**).
 
+> **🧪 Updated on hardware (2026-06-02):** the plan above promised *exactly one* Core change. The build needed
+> **two more**, both confined to the same two files (`events.ts` + `session.ts`), both **additive/corrective with
+> no change to any existing event's wire shape**, so the co-live invariant (§4) still holds:
+> 1. **Real tool input capture** — `content_block_start` stored an empty `{}` placeholder (the real args stream
+>    via `input_json_delta`, which we don't reassemble); the final assistant message now **overwrites** it with the
+>    complete input. Without this, `tool_end.detail.input` stayed `{}` and the desk's inline diff (A2) + Ctrl-O
+>    verbose (A3) were blank. (Found in UAT round 1.)
+> 2. **`tool_start` dedup** — `includePartialMessages` double-surfaces the same `tool_use` (once streamed, once in
+>    the final message); the Core now skips a tool already announced this turn (`announcedToolIds`). Without this,
+>    tools rendered twice.
+>
+> Net Core surface: **2 files, ~28 insertions** — `thinking_delta` (planned) + the two fixes above. The Hub is
+> still untouched, no existing event shape changed, and the desk is still a pure Hub client.
+
 Everything else in this spec lives under `src/desk/`.
 
 ## 3. Desk architecture
@@ -64,7 +78,7 @@ The reducer produces **`Block[]`** instead of `Line[]`. A `Block` is a discrimin
 | `assistant` | `text_delta` (accumulated), closed by `text_end`/`result` | **markdown→ANSI** (marked-terminal) once closed; streamed *raw* while open (prettified on close to avoid half-parsed flicker) |
 | `tool` | `tool_start` → `tool_end` (keyed by `toolId`) | one-line summary always; **edit-family** (Edit/MultiEdit/Write) also renders an inline colored +/- **diff**; holds `detail.{input,output}` for the Ctrl-O verbose view |
 | `thinking` | `thinking_delta` (accumulated), bracketed by `think_start`/`think_end` status | distinct dim/italic block, header `💭 thinking`; visually separate from the answer; **always streams live** while the model is thinking; once closed it collapses to a stub (`💭 thinking (N lines) — Ctrl-O`) unless verbose is on |
-| `todos` | `tool_start`/`tool_end` for **TodoWrite** | a checklist rendered from `detail.input.todos`; **updates in place** — a new TodoWrite replaces the prior `todos` block (keyed), not appends |
+| `todos` | `tool_start`/`tool_end` for **TodoWrite** *and* (🧪 found on hardware, UAT A5) **`TaskCreate`/`TaskUpdate`/`TaskList`** — this SDK build manages its task list via the Task* tools (discovered via `ToolSearch`), not `TodoWrite`, so the panel consumes **both** vocabularies (`blocks.ts` `PANEL_TOOLS`; TaskCreate upserts by id, TaskUpdate sets status by id) | a checklist rendered from `detail.input.todos` (TodoWrite) or the accumulated Task* items; **updates in place** — keyed singleton, replaced not appended |
 | `note` | `permission_result`, `error`, slash hints/notes, notifications | unchanged dimmed line |
 
 Block-keying: `tool` blocks are keyed by `toolId` so `tool_start` then `tool_end` mutate the **same** block
@@ -80,9 +94,14 @@ Block-keying: `tool` blocks are keyed by `toolId` so `tool_start` then `tool_end
   back to the bottom) re-pins. New streaming content while unpinned does **not** yank the view.
 - **Keys:** `PageUp`/`PageDown` = scroll one page; `End` = jump to bottom / re-pin; `Ctrl-O` = toggle global
   verbose (**default OFF** = tool blocks show one-liners and closed thinking shows a stub; ON = full tool
-  input/output and expanded thinking). Live-streaming thinking is shown regardless of the toggle. Arrow keys are
-  **left untouched** (reserved for M3.2 history/editor). Mouse-wheel scroll is **not** supported (ink mouse mode
-  fights terminal text selection) — accepted ceiling.
+  input/output and expanded thinking). Live-streaming thinking is shown regardless of the toggle.
+  - **🧪 Updated on hardware (2026-06-02, UAT A1):** the original plan left arrow keys inert and declared
+    mouse-wheel unsupported. Reality on macOS/VS Code: `PageUp`/`PageDown` alone did **not** reach the app, and
+    the only reliable scroll affordance was the arrow keys. So the desk now (a) enters the **alternate screen**
+    at the CLI entry point (full-screen, like `less`/`vim`), and (b) binds **`↑`/`↓` to scroll `WHEEL_STEP` (3)
+    rows each** (`app.tsx`). Because terminals map the mouse wheel to `↑`/`↓` inside the alt-screen, **trackpad/
+    mouse-wheel scroll now works for free** — the earlier "not supported" ceiling no longer applies. Arrow-key
+    *editing/history* is still deferred to M3.2; in M3.1 the arrows are scroll-only.
 - **Indicator:** `rows 412–438 of 901 ▲▼` (and a `(pinned ▼)` marker when at bottom).
 
 ### 3.3 Rendering helpers (new `src/desk/render/` modules)

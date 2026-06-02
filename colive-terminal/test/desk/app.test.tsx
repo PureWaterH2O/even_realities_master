@@ -23,6 +23,7 @@ import type {
   TranscriptEntry,
 } from '../../src/desk/client'
 import type { CoLiveEvent } from '../../src/core/events'
+import { stripAnsi } from '../../src/desk/render/ansi'
 
 /** A fake HubClient that records calls and exposes the captured onEvent. */
 interface FakeHub extends HubClient {
@@ -174,13 +175,14 @@ describe('desk App', () => {
       type: 'tool_end',
       name: 'Read',
       toolId: 't1',
-      summary: 'read 12 lines of foo.ts',
-      detail: { input: {}, output: {} },
+      summary: 'Read completed',
+      detail: { input: { file_path: 'foo.ts' }, output: {} },
     })
     await flush()
-    const frame = lastFrame() ?? ''
-    expect(frame).toContain('Read')
-    expect(frame).toContain('read 12 lines of foo.ts')
+    const frame = stripAnsi(lastFrame() ?? '')
+    // Native-style header: Name(keyArg), not the generic Core summary.
+    expect(frame).toContain('Read(foo.ts)')
+    expect(frame).not.toContain('Read completed')
   })
 
   it('shows a status line from status + running_stats', async () => {
@@ -320,6 +322,18 @@ describe('desk App', () => {
     expect(fake.prompts[0]?.sessionId).toBe('s1')
   })
 
+  it('renders a desk-sent prompt ONCE despite the Hub broadcasting it back (UAT B1)', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'count to ten') // optimistic local echo + sendPrompt
+    await write(stdin, '\r')
+    // the Hub fans the prompt back to ALL clients (incl. this desk)
+    act(() => { fake.emit({ type: 'user_prompt', text: 'count to ten' }) })
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame.split('count to ten').length - 1).toBe(1) // exactly one copy
+  })
+
   it('does NOT post a slash command; /help shows the help view locally', async () => {
     const fake = makeFakeHub()
     const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
@@ -386,5 +400,75 @@ describe('desk App', () => {
     await flush()
     await write(stdin, '1')
     expect(fake.permissions[0]?.sessionId).toBe('resolved-42')
+  })
+
+  it('renders streamed assistant text in the viewport', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      act(() => { hub.emit({ type: 'text_delta', text: 'hello viewport' }) })
+      expect(lastFrame()).toContain('hello viewport')
+    } finally { unmount() }
+  })
+
+  it('arrow keys scroll the viewport (↑ unpins, ↓ re-pins) — wheel/trackpad', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, stdin, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      // Overflow the 20-row test viewport so the scroll footer appears.
+      const long = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')
+      act(() => { hub.emit({ type: 'text_delta', text: long }) })
+      expect(lastFrame()).toContain('(pinned ▼)') // starts pinned at bottom
+
+      act(() => { stdin.write('\x1B[A') }) // Up arrow -> scroll up one line
+      const up = lastFrame() ?? ''
+      expect(up).not.toContain('(pinned ▼)') // unpinned now
+      expect(up).toContain('PgUp/PgDn') // unpinned hint shows
+
+      act(() => { stdin.write('\x1B[B') }) // Down arrow -> back to bottom, re-pins
+      expect(lastFrame()).toContain('(pinned ▼)')
+    } finally { unmount() }
+  })
+
+  it('Ctrl-O toggles tool verbose detail', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, stdin, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      act(() => {
+        hub.emit({ type: 'tool_start', name: 'Read', toolId: 't1' })
+        hub.emit({ type: 'tool_end', name: 'Read', toolId: 't1', summary: 'read', detail: { input: { file_path: '/a' }, output: 'SECRET_OUTPUT' } })
+      })
+      expect(lastFrame()).not.toContain('SECRET_OUTPUT')
+      act(() => { stdin.write('\x0f') }) // Ctrl-O
+      expect(lastFrame()).toContain('SECRET_OUTPUT')
+    } finally { unmount() }
+  })
+
+  it('renders an inline diff for an Edit tool', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      act(() => {
+        hub.emit({ type: 'tool_start', name: 'Edit', toolId: 'e1' })
+        hub.emit({ type: 'tool_end', name: 'Edit', toolId: 'e1', summary: 'edit', detail: { input: { file_path: '/a.ts', old_string: 'OLDLINE', new_string: 'NEWLINE' }, output: 'ok' } })
+      })
+      const f = lastFrame() ?? ''
+      expect(f).toContain('OLDLINE')
+      expect(f).toContain('NEWLINE')
+    } finally { unmount() }
+  })
+
+  it('renders thinking text on the desk, distinct from the answer', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      act(() => { hub.emit({ type: 'thinking_delta', text: 'pondering deeply' }) })
+      expect(lastFrame()).toContain('pondering deeply')
+    } finally { unmount() }
   })
 })

@@ -3,9 +3,93 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
-## 2026-06-01
+## 2026-06-02
 
-### Co-Live Terminal M3.1 — ✅ spec + plan LOCKED (Readable transcript); awaiting plan review → build
+### Co-Live Terminal M3.1 — 🟨 CANDIDATE built (Readable transcript); awaiting hardware UAT
+
+- **Built via subagent-driven development on branch `colive-terminal-m3.1`** (Opus 4.8 ultracode). Task 1 (deps)
+  + the de-risking probes done by the controller directly; **Tasks 2–12 executed as a sequential workflow** (35
+  agents, ~59 min) — each task: implement (TDD) → independent spec-compliance review (re-runs the tests) → fix-loop
+  → code-quality review (full `npm test` + typecheck) → fix-loop. **Controller re-verified from a clean tree**
+  (`npm ci` → typecheck → test), NOT agent self-report: **279 tests pass (was 237, +42), typecheck clean, 0 vulns.**
+- **Shipped (desk-side only):** flatten-to-ANSI-rows render layer (`src/desk/render/` — `ansi`/`wrap`/`highlight`/
+  `markdown`/`diff`/`blocks`/`rows`/`window`) + `app.tsx` rewired to a scrollback **viewport** (PgUp/PgDn/End,
+  pin-to-bottom, exact `rows X–Y of N` indicator), **inline +/- diffs** (Edit/Write/MultiEdit), **syntax
+  highlighting** (cli-highlight), **markdown** (marked + marked-terminal), **Ctrl-O global verbose toggle**, a
+  **todos panel** (in-place), and **desk-only thinking display**.
+- **One Core change only** (`src/core/events.ts` + `src/core/session.ts`): a new `thinking_delta` event sourced
+  from the SDK's `content_block_delta.delta.thinking`. **Hub untouched** — it serializes any event via
+  `JSON.stringify` (no allowlist), so the new type flows to subscribers automatically and the closed Even app
+  ignores it. An e2e test boots the real Core+Hub and proves the broadcast-and-ignore invariant (UAT B2) in software.
+- **🧪 Findings surfaced while building (verified by the controller, fed to the build agents):** (1) `marked-terminal`
+  defaults `showSectionPrefix:true`, which keeps the heading `#` — must pass `showSectionPrefix:false`. (2) `chalk`
+  gates ANSI on TTY, so `marked-terminal`/`cli-highlight` emit **no color under vitest** (non-TTY) — set
+  `FORCE_COLOR=3` in `vitest.config.ts` so tests exercise the same colored path the live `colive desk` terminal
+  uses (verified the prior 237 stayed green). (3) `cli-highlight` **throws** on an unknown language → the
+  `highlight.ts` try/catch fallback is load-bearing. (4) ink's `Key` has real `pageUp`/`pageDown`/`end` booleans.
+- **Invariants preserved:** desk client stays a **pure Hub client** (DI'd `HubClient`, no SDK); the M1 co-live
+  permission-dismiss fix, Esc-interrupt, Ctrl-C, `/clear`, slash handling, and transcript seeding are all intact.
+- **NOT done (spec §0):** green tests are the precondition only. **M3.1 is DONE only when the user runs
+  `projects/colive-terminal/m3.1-uat-runbook.md` on the real G2 + R1 and signs off.** No merge before that.
+- **Next:** user hardware UAT (Part A A1–A6 desk features + Part B B1–B4 co-live regression). Bugs → fix → re-UAT.
+
+### Co-Live Terminal M3.1 — hardware UAT round-3 (desk Part A) — in progress
+
+- **A1–A4 PASS on hardware.** A1 scroll fixed by (a) entering the **alternate screen** at the CLI entry point on the
+  real `process.stdout` — the earlier React-effect version silently no-op'd because ink's stdout wrapper hid `isTTY`
+  (`c04d5c7`); and (b) adding **arrow-key + trackpad/mouse-wheel scrolling** (`scrollLine`; terminals map wheel→↑/↓ in
+  the alt screen), tuned to `WHEEL_STEP=3` rows/notch after "a little slow" feedback (`c77557c`, `21f5d7a`). A2 inline
+  diff + A3 Ctrl-O verbose confirmed once `serve` was restarted (the empty-`input:{}` was a stale-process artifact, the
+  Core fix was correct). A4 markdown (heading/bold/lists/table/fenced code) clean.
+- **A5 todos panel — polished toward native parity** (`7050d17`): the single panel now **repositions to the latest
+  activity** (was frozen at first-appearance, so the final all-done state rendered *above* the steps that produced it),
+  and plain `[x]/[~]/[ ]` became colored glyphs (green ✔ done / yellow ▶ active / dim ☐ pending). **287 tests.**
+- **A6 thinking — DECISION (2026-06-02): defer "liveness".** Native's animated status line ("Forging… 9s · ↓506
+  tokens": spinner + elapsed timer + live token counter) is a **cross-cutting status-line concern, not transcript
+  rendering** → out of M3.1 scope; logged as a **Cockpit liveness rung (M3.x)** in `ideas/backlog.md`. M3.1 keeps the
+  readable-transcript pass criterion (thinking *text* streams then collapses to a Ctrl-O stub) — to confirm on a clean run.
+- **Still open:** Part B (B1–B4) glasses co-live regression; then user sign-off → merge.
+
+### Co-Live Terminal M3.1 — cosmetics + Tier-3 + adversarial audit (2026-06-02, ultracode)
+
+- **Minor cosmetics** (screenshot-verified): fenced code now has a dim `│` left border (custom marked code
+  renderer reusing our cli-highlight wrapper); collapsed the stray blank line marked-terminal leaves between
+  nested bullet items (ANSI-tolerant gap matcher). `scripts/screenshots.sh` rewritten to one VHS run per frame
+  (the single multi-Screenshot tape raced → mislabeled frames).
+- **Tier-3 record/replay** (`src/desk/record.ts`): `recordingClient` tees every desk event to a JSONL fixture
+  (gated on `COLIVE_RECORD`; best-effort), `loadEvents` replays it; the harness renders a recording deterministically
+  — closes the loop on Core data-shape bugs. README documents Tiers 1/2/3.
+- **UAT walk** (`test/preview/uat.preview.test.tsx`): one canonical captured frame per runbook item A1–A6, each
+  screenshot-mapped. Scenarios end a turn with running_stats+result+status:idle, so the status line reads
+  "[idle · N tokens]" like hardware (desk relies on the Core's emitIdle() in the turn finally — verified, not a bug).
+- **Adversarial audit workflow** (18 agents: 9 reviewers + per-finding skeptics over frames + render source) →
+  4 real render bugs, all fixed TDD: (1) wrap.ts hard-split severed ANSI escapes on long highlighted tokens →
+  visible-char split; (2) extractEditDiff returned a diff for null input → phantom blank row (guard + caller skips
+  no-op diff); (3) TaskUpdate-before-TaskCreate lost status → upsert by id; (4) tool-header ANSI boundary nit.
+  Removed dead highlight()+stripAnsi() in diff.ts + corrected its docstring. **311 tests, typecheck clean.**
+- **Self-driven loop proven:** render → screenshot (Read PNG) → fix, plus an adversarial workflow, caught bugs unit
+  tests missed (thinking-never-collapsing; 4 audit bugs) BEFORE hardware. See [[self-test-tui-before-uat]].
+- **Next:** user validates the A1–A6 screenshot walk, then Part B (glasses) → sign-off → merge.
+
+### Co-Live Terminal M3.1 — self-test rig + autonomous polish pass (2026-06-02)
+
+- **Built a render-and-screenshot self-test rig** so the desk TUI can be iterated WITHOUT hardware (user
+  request: "test it live and look at the results … iterate until requirements met, THEN I UAT"). Tier 1
+  (`test/preview/`, zero deps): a replay `HubClient` drives the REAL `App` against scripted/curated event
+  scenarios via the injected-client seam; captures exact frames (windowed + full-flatten) to `preview-out/`
+  under `PREVIEW=1`. Tier 2 (`scripts/screenshots.sh` + `.tape`, needs `brew install vhs`): renders the
+  full-colour `.ansi` frames to PNGs the controller reads. See [[self-test-tui-before-uat]].
+- **The rig immediately caught a real bug** unit tests missed: a thinking block only collapsed on an explicit
+  `status: think_end`; when assistant text followed directly the tracking index reset without marking it
+  closed → thinking stayed expanded forever. Fixed (text/thinking deltas now `closeOpen()` on transition).
+- **Autonomous polish pass toward native parity** (screenshot → assess → fix, judged against native Claude):
+  (1) markdown — `tab` 4→2, `* `→`•` bullets, blockquote now a gray `▌` bar + dim italic; (2) tool headers —
+  the generic Core summary ("Bash completed") replaced by native-style `⏺ Name(keyArg)` (green dot / red on
+  fail; arg = command/file_path/pattern/url/query); (3) `(N line[s])` pluralization. Todos panel (earlier
+  this session) repositions to latest activity + colored ✔/▶/☐ glyphs. **294 tests, typecheck clean.**
+- **Still desk-side only; no merge.** Next: hand the polished build back for a fresh Part-A UAT, then Part B.
+
+### Co-Live Terminal M3.1 — ✅ spec + plan LOCKED (Readable transcript); plan reviewed → built
 
 - **Brainstorm (4.8, visual companion):** locked five decisions for the desk "readable transcript" rung —
   **(D1)** render architecture = **flatten-to-ANSI-rows** viewport (chosen over entry-windowing via an A/B

@@ -23,8 +23,16 @@ on-wire traffic. Full audit trail: [`../../research/2026-05-30-terminal-mode-liv
 - **App behavior:** on connect → `GET /api/info`,`/api/sessions`,`/api/update-check`; then **polls `/api/sessions`
   every ~10 s with no `cwd`** (list spans *all* projects); on open → SSE `/api/events?sessionId=` + `/sessions/:id/history?limit=10`.
 - **Live SSE vocabulary** (bridge-driven): `user_prompt`, `status`(`busy|think_start|think_end|text_start|text_end|idle`),
-  `tool_start`, `tool_end{summary,detail}`, `text_delta` (streamed text; **thinking is NOT streamed**),
-  `running_stats`, `result{costUsd…}`, `permission_request`, `permission_result`, plus `notification`,`task_progress`,`user_question`.
+  `tool_start`, `tool_end{summary,detail}`, `text_delta` (streamed text), `running_stats`, `result{costUsd…}`,
+  `permission_request`, `permission_result`, plus `notification`,`task_progress`,`user_question`.
+  - 🧪 **Update 2026-06-02 (M3.1):** our Core now ALSO emits a **`thinking_delta{text}`** event, sourced from the
+    SDK's `content_block_delta.delta.thinking`. It is **desk-only by convention**: the Hub broadcasts it to every
+    subscriber (no allowlist — `src/hub/sse.ts` `JSON.stringify`), and the **closed Even app ignores unknown event
+    types**, so thinking still never renders on the glasses HUD. (Supersedes the earlier "thinking is NOT streamed"
+    note — thinking text IS now on the wire, but only the desk TUI renders it; hardware B2 UAT pending to confirm
+    the app truly ignores it.) The desk client renders the live stream via a **flatten-to-ANSI-rows** viewport
+    (`src/desk/render/*`): markdown, syntax-highlighted inline diffs, a Ctrl-O verbose toggle, a todos panel, and
+    collapsible thinking.
 - **Ring round-trip works:** single **tap = `allow`** (`POST /api/permission-response{decision}` → `permission_result` → tool runs; verified a real file was created). Permission **60 s default-DENY**, AskUserQuestion **120 s default-SKIP**.
 - **Dictation = raw speech-to-text** ("touch /tmp/x" → "touch slash temp slash x"); the agent must infer intent.
   **Natural-language instructions beat dictating exact syntax.**

@@ -56,6 +56,16 @@ export interface TextDeltaEvent {
   text: string
 }
 
+/**
+ * A streamed chunk of assistant *thinking* text. Desk-only by convention: the
+ * closed Even app ignores unknown event types, so the glasses never render it.
+ * 🧪 Sourced from the SDK's `content_block_delta` `delta.thinking` (NOT `text`).
+ */
+export interface ThinkingDeltaEvent {
+  type: 'thinking_delta'
+  text: string
+}
+
 /** Periodic in-turn stats (emitted roughly every 10s during a turn). */
 export interface RunningStatsEvent {
   type: 'running_stats'
@@ -150,6 +160,7 @@ export type CoLiveEvent =
   | ToolStartEvent
   | ToolEndEvent
   | TextDeltaEvent
+  | ThinkingDeltaEvent
   | RunningStatsEvent
   | ResultEvent
   | PermissionRequestEvent

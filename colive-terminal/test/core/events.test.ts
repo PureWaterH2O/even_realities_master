@@ -6,6 +6,7 @@ import type {
   ToolStartEvent,
   ToolEndEvent,
   TextDeltaEvent,
+  ThinkingDeltaEvent,
   RunningStatsEvent,
   ResultEvent,
   PermissionRequestEvent,
@@ -30,6 +31,7 @@ describe('CoLiveEvent vocabulary', () => {
         detail: { input: { path: '/x' }, output: 'contents' },
       } satisfies ToolEndEvent,
       { type: 'text_delta', text: 'hello' } satisfies TextDeltaEvent,
+      { type: 'thinking_delta', text: 'hmm' } satisfies ThinkingDeltaEvent,
       {
         type: 'running_stats',
         durationMs: 1000,
@@ -101,6 +103,7 @@ describe('CoLiveEvent vocabulary', () => {
         'tool_start',
         'tool_end',
         'text_delta',
+        'thinking_delta',
         'running_stats',
         'result',
         'permission_request',
