@@ -5,7 +5,25 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-02
 
-### Co-Live Terminal M3.1 — 🟨 CANDIDATE built (Readable transcript); awaiting hardware UAT
+### Co-Live Terminal M3.1 "Readable transcript" — ✅ DONE, hardware-signed-off, MERGED to `main`
+
+- **Merged to `main` 2026-06-02** as a `--no-ff` merge commit **`fda7e26`** (branch `colive-terminal-m3.1`).
+  **314 tests, typecheck clean, 0 vulns — controller re-verified from a clean tree** (`npm ci` → `typecheck` →
+  `test`), not agent self-report.
+- **Shipped (desk-side only):** flatten-to-ANSI-rows render layer + viewport (PgUp/PgDn/End **+ arrow/wheel
+  scroll**, exact `rows X–Y of N`), inline syntax-highlighted **diffs**, **markdown** (with a `│` code border +
+  `▌` blockquote bar), **Ctrl-O** global verbose, **todos panel** (repositions to latest activity; live ✔/▶/☐
+  glyphs), native-style **`⏺ Tool(arg)`** headers, and **desk-only thinking** (one additive `thinking_delta`
+  event; Hub untouched, so the closed Even app ignores it).
+- **Hardware UAT (real G2 + R1, 2026-06-02):** Part A A1–A6 reviewed ("looks good"); Part B B1–B4 all PASS
+  (live HUD stream; thinking stayed desk-only; ring dictation → same session; ring permission tap). One bug
+  found on hardware (desk-sent prompt double-rendered — optimistic echo + Hub broadcast) **fixed + re-glanced**.
+- **Process wins this rung:** a self-test rig (replay harness + VHS screenshots + Tier-3 record/replay) let the
+  controller *see* the desk before UAT; an 18-agent adversarial audit workflow caught **4 real render bugs**
+  (ANSI-severing wrap, phantom diff row, lost TaskUpdate status, header nit) unit tests had missed — all fixed
+  pre-merge. See [[self-test-tui-before-uat]].
+- **Next rung (M3.2) is scoped by the planner chat — no M3.2 work until then.**
+
 
 - **Built via subagent-driven development on branch `colive-terminal-m3.1`** (Opus 4.8 ultracode). Task 1 (deps)
   + the de-risking probes done by the controller directly; **Tasks 2–12 executed as a sequential workflow** (35
