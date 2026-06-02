@@ -20,6 +20,18 @@ describe('renderBlockRows', () => {
     expect(verbose).toContain('contents')
   })
 
+  it('tool head shows the key argument native-style, not the redundant summary', () => {
+    const bash: Block = { kind: 'tool', toolId: 't1', name: 'Bash', summary: 'Bash completed', detail: { input: { command: 'touch /tmp/x' }, output: '' } }
+    const head = renderBlockRows(bash, opts).map(stripAnsi).join('\n')
+    expect(head).toContain('Bash(touch /tmp/x)')
+    expect(head).not.toContain('Bash completed') // drop the generic Core summary
+  })
+
+  it('tool head extracts file_path for read/edit-family tools', () => {
+    const read: Block = { kind: 'tool', toolId: 't1', name: 'Read', summary: 'Read completed', detail: { input: { file_path: '/a/b.ts' }, output: 'x' } }
+    expect(renderBlockRows(read, opts).map(stripAnsi).join('\n')).toContain('Read(/a/b.ts)')
+  })
+
   it('edit-family tool renders an inline diff regardless of verbose', () => {
     const block: Block = { kind: 'tool', toolId: 't2', name: 'Edit', summary: 'edit /a.ts', detail: { input: { file_path: '/a.ts', old_string: 'x', new_string: 'y' }, output: 'ok' } }
     const rows = renderBlockRows(block, { width: 80, verbose: false }).map(stripAnsi).join('\n')

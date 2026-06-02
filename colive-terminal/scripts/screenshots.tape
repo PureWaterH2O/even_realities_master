@@ -30,3 +30,9 @@ Type "clear && cat preview-out/cockpit-01-window-default.ansi" Enter
 Show
 Sleep 600ms
 Screenshot preview-out/shot-cockpit-window.png
+
+Hide
+Type "clear && cat preview-out/markdown-01-full.ansi" Enter
+Show
+Sleep 600ms
+Screenshot preview-out/shot-markdown.png

@@ -70,18 +70,54 @@ export const cockpit: CoLiveEvent[] = [
   ...taskCreate('c3', 'Read back and confirm contents', '3'),
   ...taskUpdate('u1', '1', 'in_progress'),
   toolStart('Bash', 'b1'),
-  toolEnd('Bash', 'b1', 'create the file', { command: 'touch /tmp/m31todo.txt', description: 'Create the file' }, { stdout: '', stderr: '', interrupted: false }),
+  toolEnd('Bash', 'b1', 'Bash completed', { command: 'touch /tmp/m31todo.txt', description: 'Create the file' }, { stdout: '', stderr: '', interrupted: false }),
   ...taskUpdate('u2', '1', 'completed'),
   ...taskUpdate('u3', '2', 'in_progress'),
   toolStart('Edit', 'e1'),
-  toolEnd('Edit', 'e1', 'append a line', { file_path: '/tmp/m31todo.txt', old_string: 'placeholder', new_string: 'hello from m3.1' }, { ok: true }),
+  toolEnd('Edit', 'e1', 'Edit completed', { file_path: '/tmp/m31todo.txt', old_string: 'placeholder', new_string: 'hello from m3.1' }, { ok: true }),
   ...taskUpdate('u4', '2', 'completed'),
   ...taskUpdate('u5', '3', 'in_progress'),
   toolStart('Read', 'r1'),
-  toolEnd('Read', 'r1', 'read it back', { file_path: '/tmp/m31todo.txt' }, 'hello from m3.1'),
+  toolEnd('Read', 'r1', 'Read completed', { file_path: '/tmp/m31todo.txt' }, 'hello from m3.1'),
   ...taskUpdate('u6', '3', 'completed'),
   { type: 'text_delta', text: MARKDOWN_ANSWER },
   RESULT,
+]
+
+const MARKDOWN_DOC = [
+  '## Heading two',
+  '',
+  'A paragraph with **bold**, *italic*, and `inline code` plus a [link](https://x).',
+  '',
+  '### Heading three',
+  '',
+  '- First bullet',
+  '- Second bullet with a bit more text that should wrap cleanly at the edge',
+  '  - Nested bullet one',
+  '  - Nested bullet two',
+  '- Third bullet',
+  '',
+  '1. First step',
+  '2. Second step',
+  '3. Third step',
+  '',
+  '> A blockquote line, for emphasis.',
+  '',
+  '| Lang | Speed | Notes |',
+  '|------|-------|-------|',
+  '| Rust | fast  | safe  |',
+  '| Go   | fast  | simple|',
+  '',
+  '```ts',
+  'export const add = (a: number, b: number): number => a + b',
+  '```',
+].join('\n')
+
+/** Markdown-only answer to iterate on rendering of every block type. */
+export const markdownDoc: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Show me every markdown element rendered.' },
+  { type: 'text_delta', text: MARKDOWN_DOC },
+  { ...RESULT, text: MARKDOWN_DOC },
 ]
 
 /** A tall transcript to exercise scrolling: 40 raw lines (kept open so they stay

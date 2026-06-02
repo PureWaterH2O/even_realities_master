@@ -23,6 +23,7 @@ import type {
   TranscriptEntry,
 } from '../../src/desk/client'
 import type { CoLiveEvent } from '../../src/core/events'
+import { stripAnsi } from '../../src/desk/render/ansi'
 
 /** A fake HubClient that records calls and exposes the captured onEvent. */
 interface FakeHub extends HubClient {
@@ -174,13 +175,14 @@ describe('desk App', () => {
       type: 'tool_end',
       name: 'Read',
       toolId: 't1',
-      summary: 'read 12 lines of foo.ts',
-      detail: { input: {}, output: {} },
+      summary: 'Read completed',
+      detail: { input: { file_path: 'foo.ts' }, output: {} },
     })
     await flush()
-    const frame = lastFrame() ?? ''
-    expect(frame).toContain('Read')
-    expect(frame).toContain('read 12 lines of foo.ts')
+    const frame = stripAnsi(lastFrame() ?? '')
+    // Native-style header: Name(keyArg), not the generic Core summary.
+    expect(frame).toContain('Read(foo.ts)')
+    expect(frame).not.toContain('Read completed')
   })
 
   it('shows a status line from status + running_stats', async () => {

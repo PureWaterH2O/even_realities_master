@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { capture, flattenAll, emit, snap, key, KEYS, type Frame } from './replay'
-import { cockpit, tall } from './scenarios'
+import { cockpit, tall, markdownDoc } from './scenarios'
 
 const WRITE = process.env.PREVIEW === '1'
 const OUT = resolve(__dirname, '../../preview-out')
@@ -56,9 +56,20 @@ describe('desk preview', () => {
     expect(full.plain).toMatch(/✔/) // a completed todo glyph
     // The diff for the Edit tool shows the new line.
     expect(full.plain).toContain('hello from m3.1')
-    // Verbose reveals tool input that is hidden by default.
-    expect(full.plain).not.toContain('touch /tmp/m31todo.txt')
-    expect(fullVerbose.plain).toContain('touch /tmp/m31todo.txt')
+    // Native-style tool header surfaces the command by default.
+    expect(full.plain).toContain('Bash(touch /tmp/m31todo.txt)')
+    // Verbose adds the full pretty-printed input/output (e.g. the description field
+    // that the collapsed header omits).
+    expect(full.plain).not.toContain('Create the file')
+    expect(fullVerbose.plain).toContain('Create the file')
+  })
+
+  it('markdown: every block type renders', async () => {
+    const full = flattenAll(markdownDoc)
+    dump('markdown', [full])
+    expect(full.plain).toContain('Heading two')
+    expect(full.plain).not.toContain('## Heading two')
+    expect(full.plain).toContain('First bullet')
   })
 
   it('tall: scrolls up from the pinned bottom', async () => {

@@ -1,6 +1,6 @@
 // src/desk/render/rows.ts
 import type { Block, TodoItem } from './blocks'
-import { cyan, green, gray, yellow, dim, italic, bold } from './ansi'
+import { cyan, green, red, gray, yellow, dim, italic, bold } from './ansi'
 import { wrapAnsi } from './wrap'
 import { renderMarkdown } from './markdown'
 import { extractEditDiff, renderDiff } from './diff'
@@ -22,6 +22,36 @@ const TODO_STYLE: Record<TodoItem['status'], { glyph: string; line: (s: string) 
   completed: { glyph: green('✔'), line: gray },
   in_progress: { glyph: yellow('▶'), line: bold },
   pending: { glyph: dim('☐'), line: dim },
+}
+
+/** The most relevant input key to surface per tool, native-style: Name(arg). */
+const TOOL_ARG_KEYS: Record<string, string[]> = {
+  Bash: ['command'],
+  Read: ['file_path'],
+  Edit: ['file_path'],
+  Write: ['file_path'],
+  MultiEdit: ['file_path'],
+  NotebookEdit: ['notebook_path', 'file_path'],
+  Glob: ['pattern'],
+  Grep: ['pattern'],
+  LS: ['path'],
+  WebFetch: ['url'],
+  WebSearch: ['query'],
+}
+const ARG_FALLBACK = ['file_path', 'command', 'pattern', 'path', 'url', 'query']
+
+/** Pull the key argument from a tool's input, collapsed to one line + capped. */
+function toolArg(name: string, input: unknown): string {
+  if (input === null || typeof input !== 'object') return ''
+  const rec = input as Record<string, unknown>
+  for (const k of TOOL_ARG_KEYS[name] ?? ARG_FALLBACK) {
+    const v = rec[k]
+    if (typeof v === 'string' && v.trim().length > 0) {
+      const oneLine = v.replace(/\s+/g, ' ').trim()
+      return oneLine.length > 60 ? `${oneLine.slice(0, 59)}…` : oneLine
+    }
+  }
+  return ''
 }
 
 export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
@@ -47,8 +77,15 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
     }
 
     case 'tool': {
-      const head = `${dim('⚙')} ${block.name}${block.summary ? ` — ${block.summary}` : ''}`
-      const rows = toRows(dim(head), width)
+      // Native-style header: a status dot + Name(keyArg). The Core summary is
+      // generic ("Bash completed"), so we surface the actual argument instead
+      // and only fall back to the bare name when no arg is extractable.
+      const isErr = /\bfailed\b/i.test(block.summary ?? '')
+      const arg = block.detail ? toolArg(block.name, block.detail.input) : ''
+      const dot = isErr ? red('⏺') : green('⏺')
+      const name = isErr ? red(block.name) : block.name
+      const head = arg ? `${dot} ${name}${dim(`(${arg})`)}` : `${dot} ${name}`
+      const rows = toRows(head, width)
       // inline diff for edit-family tools (always, not just verbose)
       const diffs = block.detail ? extractEditDiff(block.name, block.detail.input) : undefined
       if (diffs) for (const d of diffs) rows.push(...toRows(renderDiff(d, width), width))
