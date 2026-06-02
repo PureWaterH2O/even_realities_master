@@ -48,7 +48,28 @@ built, what we decided. Newest entries on top.
   tokens": spinner + elapsed timer + live token counter) is a **cross-cutting status-line concern, not transcript
   rendering** → out of M3.1 scope; logged as a **Cockpit liveness rung (M3.x)** in `ideas/backlog.md`. M3.1 keeps the
   readable-transcript pass criterion (thinking *text* streams then collapses to a Ctrl-O stub) — to confirm on a clean run.
-- **Still open:** confirm A6 thinking text streams; Part B (B1–B4) glasses co-live regression; then user sign-off → merge.
+- **Still open:** Part B (B1–B4) glasses co-live regression; then user sign-off → merge.
+
+### Co-Live Terminal M3.1 — cosmetics + Tier-3 + adversarial audit (2026-06-02, ultracode)
+
+- **Minor cosmetics** (screenshot-verified): fenced code now has a dim `│` left border (custom marked code
+  renderer reusing our cli-highlight wrapper); collapsed the stray blank line marked-terminal leaves between
+  nested bullet items (ANSI-tolerant gap matcher). `scripts/screenshots.sh` rewritten to one VHS run per frame
+  (the single multi-Screenshot tape raced → mislabeled frames).
+- **Tier-3 record/replay** (`src/desk/record.ts`): `recordingClient` tees every desk event to a JSONL fixture
+  (gated on `COLIVE_RECORD`; best-effort), `loadEvents` replays it; the harness renders a recording deterministically
+  — closes the loop on Core data-shape bugs. README documents Tiers 1/2/3.
+- **UAT walk** (`test/preview/uat.preview.test.tsx`): one canonical captured frame per runbook item A1–A6, each
+  screenshot-mapped. Scenarios end a turn with running_stats+result+status:idle, so the status line reads
+  "[idle · N tokens]" like hardware (desk relies on the Core's emitIdle() in the turn finally — verified, not a bug).
+- **Adversarial audit workflow** (18 agents: 9 reviewers + per-finding skeptics over frames + render source) →
+  4 real render bugs, all fixed TDD: (1) wrap.ts hard-split severed ANSI escapes on long highlighted tokens →
+  visible-char split; (2) extractEditDiff returned a diff for null input → phantom blank row (guard + caller skips
+  no-op diff); (3) TaskUpdate-before-TaskCreate lost status → upsert by id; (4) tool-header ANSI boundary nit.
+  Removed dead highlight()+stripAnsi() in diff.ts + corrected its docstring. **311 tests, typecheck clean.**
+- **Self-driven loop proven:** render → screenshot (Read PNG) → fix, plus an adversarial workflow, caught bugs unit
+  tests missed (thinking-never-collapsing; 4 audit bugs) BEFORE hardware. See [[self-test-tui-before-uat]].
+- **Next:** user validates the A1–A6 screenshot walk, then Part B (glasses) → sign-off → merge.
 
 ### Co-Live Terminal M3.1 — self-test rig + autonomous polish pass (2026-06-02)
 
