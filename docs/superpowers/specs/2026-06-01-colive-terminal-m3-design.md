@@ -68,6 +68,9 @@ as *another* Hub client without touching Core/Hub. Accepted terminal ceilings: i
 - 🌟 **Session command-center** — a dashboard of all chats with live status badges (thinking · blocked-on-permission
   · idle · done) to glance and jump.
 - **Live file-watch pane** — files updating as the agent edits them.
+- **Message source tags** — each user message in the transcript shows a colored origin tag (e.g. `[glasses]` /
+  `[mac]`) so it's clear where it came from. A co-live presence/provenance cue; generalizes to any client.
+  *(Added post-lock 2026-06-01.)*
 
 **Parked backlog (explicitly out of M3, kept so they're not lost):** conversation rewind/checkpoint,
 auto-compact at context limit, cross-session search, diff/review queue, saved prompt templates, workflow launcher
@@ -95,6 +98,9 @@ command-center**, **file-watch pane**.
   Fix: add a `thinking_delta` event to the vocabulary + emit it + render it **on the desk only** (the closed Even
   app ignores unknown events, so the glasses are unaffected). *Small change.*
 - **The runtime-control layer** — see §5; gated on the streaming-input upgrade.
+- **Message source/provenance** — the `user_prompt` event carries no origin today (`{type,text}` in
+  `src/core/events.ts`); add a `source` field + Hub logic to label it (our desk client marks itself; a prompt
+  POST without that marker ⇒ glasses). Feeds the M3.4 message source tags. *Small.*
 
 ### 🔴 Blocked / verify-in-build
 - **`/workflows`** — reachable *only if* it appears in the SDK's `supportedCommands()` once we're in
@@ -146,7 +152,7 @@ Each rung carries a written UAT run-book; bugs found on hardware are fixed and r
 | **M3.1 — Readable transcript** | scrollback viewport, diff/syntax, Ctrl-O expand, markdown, todos panel, **thinking display** | tiny (thinking event) | read a real multi-tool session end-to-end: scroll back, expand a tool, see a diff + the thinking |
 | **M3.2 — Input & autocomplete** | editor (cursor / history / multiline / paste), slash menu, `@`-file autocomplete, `!`bash | none | compose a real multiline prompt with file refs without friction; recall history |
 | **M3.3 — Streaming-input Core + controls** | **the refactor** → `/compact`, `/model`, mode toggle / plan mode, MCP, **image paste**, clean interrupt, `settingSources` flip (+ skills loading) | **big** | flip mode mid-session, switch model, run `/compact`, paste an image, load a skill — all on hardware |
-| **M3.4 — Multi-session** | session command-center (status badges) + live file-watch pane | some | run ≥2 chats; glance the dashboard; jump between; watch files change |
+| **M3.4 — Multi-session** | session command-center (status badges) + live file-watch pane + **message source tags** (`[glasses]`/`[mac]` provenance; adds `source` to `user_prompt`) | some (+ `source` event field) | run ≥2 chats; glance the dashboard; jump between; watch files change; **see colored source tags distinguishing glasses- vs desk-sent messages** |
 | **M3.5 — Aesthetic pass** | theming / polish gate (aesthetics also folded into each rung) | none | "I want to look at this all day" sign-off |
 
 After **M3.1 + M3.2** the cockpit is a usable daily driver (readable + typeable) *before* the risky refactor.
