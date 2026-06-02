@@ -1,0 +1,70 @@
+import { describe, it, expect } from 'vitest'
+import { reduceBlocks, initialBlockState } from '../../../src/desk/render/blocks'
+import type { BlockState } from '../../../src/desk/render/blocks'
+
+const run = (events: any[]): BlockState =>
+  events.reduce((s, event) => reduceBlocks(s, { type: 'event', event }), initialBlockState())
+
+describe('reduceBlocks', () => {
+  it('accumulates text_delta into one open assistant block', () => {
+    const s = run([
+      { type: 'text_delta', text: 'Hel' },
+      { type: 'text_delta', text: 'lo' },
+    ])
+    expect(s.blocks).toEqual([{ kind: 'assistant', text: 'Hello', closed: false }])
+  })
+
+  it('folds tool_start then tool_end into ONE keyed tool block', () => {
+    const s = run([
+      { type: 'tool_start', name: 'Read', toolId: 't1' },
+      { type: 'tool_end', name: 'Read', toolId: 't1', summary: 'read a', detail: { input: { file_path: '/a' }, output: 'x' } },
+    ])
+    const tools = s.blocks.filter((b) => b.kind === 'tool')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({ kind: 'tool', toolId: 't1', name: 'Read', summary: 'read a' })
+  })
+
+  it('accumulates thinking_delta into a thinking block, even with no think_start', () => {
+    const s = run([
+      { type: 'thinking_delta', text: 'mulling ' },
+      { type: 'thinking_delta', text: 'it over' },
+    ])
+    expect(s.blocks).toEqual([{ kind: 'thinking', text: 'mulling it over', closed: false }])
+  })
+
+  it('closes the open assistant on result so the next reply starts fresh', () => {
+    const s = run([
+      { type: 'text_delta', text: 'a' },
+      { type: 'result', success: true, text: 'a', sessionId: 's', costUsd: 0, provider: 'claude', turns: 1, durationMs: 1, inputTokens: 1, outputTokens: 1 },
+      { type: 'text_delta', text: 'b' },
+    ])
+    const assistants = s.blocks.filter((b) => b.kind === 'assistant')
+    expect(assistants).toHaveLength(2)
+    // the first (pre-result) assistant is CLOSED so it renders markdown, not raw text
+    expect((assistants[0] as { closed: boolean }).closed).toBe(true)
+  })
+
+  it('renders TodoWrite as a single todos block that updates in place', () => {
+    const s = run([
+      { type: 'tool_start', name: 'TodoWrite', toolId: 'td1' },
+      { type: 'tool_end', name: 'TodoWrite', toolId: 'td1', summary: '', detail: { input: { todos: [{ content: 'A', status: 'pending' }] }, output: '' } },
+      { type: 'tool_start', name: 'TodoWrite', toolId: 'td2' },
+      { type: 'tool_end', name: 'TodoWrite', toolId: 'td2', summary: '', detail: { input: { todos: [{ content: 'A', status: 'completed' }] }, output: '' } },
+    ])
+    const todos = s.blocks.filter((b) => b.kind === 'todos')
+    expect(todos).toHaveLength(1)
+    expect(todos[0]).toEqual({ kind: 'todos', items: [{ content: 'A', status: 'completed' }] })
+  })
+
+  it('clear empties the blocks; reset seeds from transcript entries', () => {
+    const seeded = reduceBlocks(initialBlockState(), {
+      type: 'reset',
+      entries: [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'yo' }],
+    })
+    expect(seeded.blocks).toEqual([
+      { kind: 'user', text: 'hi' },
+      { kind: 'assistant', text: 'yo', closed: true },
+    ])
+    expect(reduceBlocks(seeded, { type: 'clear' }).blocks).toEqual([])
+  })
+})
