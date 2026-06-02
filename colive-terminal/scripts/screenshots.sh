@@ -18,6 +18,7 @@ FRAMES=(
   "markdown-01-full:shot-markdown"
   "inprogress-01-full:shot-inprogress"
   "tall-01-bottom:shot-tall"
+  "recording-01-full:shot-recording"
 )
 
 echo "[1/2] capturing frames (PREVIEW=1 vitest test/preview)…"

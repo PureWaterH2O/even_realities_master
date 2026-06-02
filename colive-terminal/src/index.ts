@@ -18,6 +18,7 @@ import { render as inkRender } from 'ink'
 import { resolveConfig, type ConfigArgs, type ConfigEnv } from './core/config'
 import { startServer, type RunningServer } from './hub/server'
 import { createHubClient } from './desk/client'
+import { recordingClient, fileEventSink } from './desk/record'
 import { App } from './desk/app'
 import { readRemoteConfig, resolveRemoteHost } from './remote/config'
 import { detectTailscale, type ShellExec } from './remote/tailscale'
@@ -145,6 +146,8 @@ export interface DeskEnv {
   HOST?: string
   PORT?: string
   BRIDGE_TOKEN?: string
+  /** When set, append every received event to this JSONL file (Tier-3 record). */
+  COLIVE_RECORD?: string
 }
 
 /** The resolved connection params for the desk client. */
@@ -194,7 +197,13 @@ export function runDesk(
   render: RenderFn = inkRender as unknown as RenderFn,
 ): void {
   const conn = buildDeskClient(parseDeskArgs(argv), env)
-  const client = createHubClient({ baseUrl: conn.baseUrl, token: conn.token })
+  const base = createHubClient({ baseUrl: conn.baseUrl, token: conn.token })
+  // Tier-3 record: with COLIVE_RECORD set, tee every event to a JSONL fixture the
+  // preview harness can replay deterministically (catches Core data-shape bugs).
+  const client =
+    env.COLIVE_RECORD !== undefined && env.COLIVE_RECORD !== ''
+      ? recordingClient(base, fileEventSink(env.COLIVE_RECORD))
+      : base
 
   // Full-screen via the terminal's ALTERNATE SCREEN BUFFER (like vim/less/htop).
   // Entered here at the entry point on the real process.stdout — NOT in a React

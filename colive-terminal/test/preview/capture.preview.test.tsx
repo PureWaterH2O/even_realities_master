@@ -7,9 +7,10 @@
  *   npx vitest run test/preview               # just the smoke assertions
  */
 import { afterAll, describe, expect, it } from 'vitest'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { capture, flattenAll, emit, snap, key, KEYS, type Frame } from './replay'
+import { loadEvents } from '../../src/desk/record'
 import { cockpit, tall, markdownDoc, inProgress } from './scenarios'
 
 const WRITE = process.env.PREVIEW === '1'
@@ -80,6 +81,16 @@ describe('desk preview', () => {
     expect(full.plain).toContain('Heading two')
     expect(full.plain).not.toContain('## Heading two')
     expect(full.plain).toContain('First bullet')
+  })
+
+  it('recording: replays a real captured session if one is present (Tier-3)', () => {
+    // Record a real session with: COLIVE_RECORD=preview-out/recording.jsonl colive desk
+    // then this renders it deterministically. Skips silently when absent.
+    const path = process.env.COLIVE_REPLAY ?? resolve(OUT, 'recording.jsonl')
+    if (!existsSync(path)) return
+    const full = flattenAll(loadEvents(path))
+    dump('recording', [full])
+    expect(full.plain.length).toBeGreaterThan(0)
   })
 
   it('tall: scrolls up from the pinned bottom', async () => {
