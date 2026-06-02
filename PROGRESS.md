@@ -33,6 +33,23 @@ built, what we decided. Newest entries on top.
   `projects/colive-terminal/m3.1-uat-runbook.md` on the real G2 + R1 and signs off.** No merge before that.
 - **Next:** user hardware UAT (Part A A1–A6 desk features + Part B B1–B4 co-live regression). Bugs → fix → re-UAT.
 
+### Co-Live Terminal M3.1 — hardware UAT round-3 (desk Part A) — in progress
+
+- **A1–A4 PASS on hardware.** A1 scroll fixed by (a) entering the **alternate screen** at the CLI entry point on the
+  real `process.stdout` — the earlier React-effect version silently no-op'd because ink's stdout wrapper hid `isTTY`
+  (`c04d5c7`); and (b) adding **arrow-key + trackpad/mouse-wheel scrolling** (`scrollLine`; terminals map wheel→↑/↓ in
+  the alt screen), tuned to `WHEEL_STEP=3` rows/notch after "a little slow" feedback (`c77557c`, `21f5d7a`). A2 inline
+  diff + A3 Ctrl-O verbose confirmed once `serve` was restarted (the empty-`input:{}` was a stale-process artifact, the
+  Core fix was correct). A4 markdown (heading/bold/lists/table/fenced code) clean.
+- **A5 todos panel — polished toward native parity** (`7050d17`): the single panel now **repositions to the latest
+  activity** (was frozen at first-appearance, so the final all-done state rendered *above* the steps that produced it),
+  and plain `[x]/[~]/[ ]` became colored glyphs (green ✔ done / yellow ▶ active / dim ☐ pending). **287 tests.**
+- **A6 thinking — DECISION (2026-06-02): defer "liveness".** Native's animated status line ("Forging… 9s · ↓506
+  tokens": spinner + elapsed timer + live token counter) is a **cross-cutting status-line concern, not transcript
+  rendering** → out of M3.1 scope; logged as a **Cockpit liveness rung (M3.x)** in `ideas/backlog.md`. M3.1 keeps the
+  readable-transcript pass criterion (thinking *text* streams then collapses to a Ctrl-O stub) — to confirm on a clean run.
+- **Still open:** confirm A6 thinking text streams; Part B (B1–B4) glasses co-live regression; then user sign-off → merge.
+
 ### Co-Live Terminal M3.1 — ✅ spec + plan LOCKED (Readable transcript); plan reviewed → built
 
 - **Brainstorm (4.8, visual companion):** locked five decisions for the desk "readable transcript" rung —
