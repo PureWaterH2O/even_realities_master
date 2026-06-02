@@ -5,6 +5,31 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-01
 
+### Co-Live Terminal M3.1 — ✅ spec + plan LOCKED (Readable transcript); awaiting plan review → build
+
+- **Brainstorm (4.8, visual companion):** locked five decisions for the desk "readable transcript" rung —
+  **(D1)** render architecture = **flatten-to-ANSI-rows** viewport (chosen over entry-windowing via an A/B
+  terminal mockup: a tall block must be reachable row-by-row, not all-or-nothing per entry); **(D2)** add focused
+  ANSI libs `marked`+`marked-terminal`, `cli-highlight`, `diff`/jsdiff (departs from the M1/M2 zero-dep ethos
+  deliberately — real syntax highlighting + markdown are impractical to hand-roll); **(D3)** Ctrl-O = **global**
+  verbose toggle (default off, matches native, avoids a selection cursor); **(D4)** diffs render **inline** the
+  moment an edit lands (not behind expand); **(D5)** thinking **broadcasts** to all subscribers and the closed
+  Even app ignores it (UAT B2 proves it on hardware; server-side filter is the fallback).
+- **🧪 Verified while planning:** the SDK carries thinking text in `content_block_delta` `delta.thinking` (NOT
+  `delta.text`) — confirmed in `test/core/session.test.ts` happyTurn (`thinking:'secret'`); the Hub serializes any
+  event via `JSON.stringify` with **no allowlist** (`src/hub/sse.ts:72`) so a new event type flows automatically;
+  no event-exhaustive `never` switch exists in app code, so the additive union member is safe. The **only**
+  non-desk change is one `thinking_delta` event (`events.ts` union + `session.ts:473-481` emit).
+- **Spec:** `docs/superpowers/specs/2026-06-01-colive-terminal-m3.1-design.md` (accepted). **Plan:**
+  `docs/superpowers/plans/2026-06-01-colive-terminal-m3.1-readable-transcript.md` — 13-task TDD, subagent-driven,
+  new desk `src/desk/render/` layer (ansi/wrap/highlight/markdown/diff/blocks/rows/window) + `app.tsx` viewport &
+  PgUp/PgDn/End/Ctrl-O. **UAT run-book finalized** (`projects/colive-terminal/m3.1-uat-runbook.md`) to match.
+- **Governing rule (spec §0) restated:** green tests + clean typecheck are the *precondition only*; the build
+  produces a **CANDIDATE**; **M3.1 is DONE only when the user runs the run-book on the real G2 + R1 and signs
+  off.** No merge before hardware sign-off.
+- **Next:** user reviews spec + plan (4.8 planning chat) → then `/ultracode` build in a separate session →
+  controller re-verifies from a clean tree → user hardware UAT.
+
 ### Co-Live Terminal M3.0 — ✅ LOCKED: "Desk Cockpit" parity inventory + roadmap
 
 - **Locked 2026-06-01** after a user-requested tweak: §0 makes **real-hardware UAT + user sign-off the non-negotiable definition of done** (green tests are only the precondition; build agents produce candidates, not "done"; M1/M2's "merge-before-testing" failure mode designed out).
