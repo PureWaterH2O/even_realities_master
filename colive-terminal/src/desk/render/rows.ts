@@ -43,7 +43,7 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
         return [header, ...body].flatMap((line) => wrapAnsi(line, width))
       }
       const n = block.text.split('\n').length
-      return toRows(dim(`💭 thinking (${n} lines) — Ctrl-O`), width)
+      return toRows(dim(`💭 thinking (${n} line${n === 1 ? '' : 's'}) — Ctrl-O`), width)
     }
 
     case 'tool': {

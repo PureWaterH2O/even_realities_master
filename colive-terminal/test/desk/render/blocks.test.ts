@@ -32,6 +32,17 @@ describe('reduceBlocks', () => {
     expect(s.blocks).toEqual([{ kind: 'thinking', text: 'mulling it over', closed: false }])
   })
 
+  it('collapses the thinking block when assistant text follows it directly', () => {
+    // Don't depend on a `status: think_end` arriving — moving to assistant text
+    // must close thinking so it collapses to its Ctrl-O stub (rows gate on closed).
+    const s = run([
+      { type: 'thinking_delta', text: 'pondering the approach' },
+      { type: 'text_delta', text: 'here is the answer' },
+    ])
+    const thinking = s.blocks.find((b) => b.kind === 'thinking') as { closed: boolean }
+    expect(thinking.closed).toBe(true)
+  })
+
   it('closes the open assistant on result so the next reply starts fresh', () => {
     const s = run([
       { type: 'text_delta', text: 'a' },

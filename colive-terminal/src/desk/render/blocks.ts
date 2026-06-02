@@ -170,23 +170,28 @@ function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
       return { blocks: [...closeOpen(state), { kind: 'user', text: event.text }], openAssistant: -1, openThinking: -1 }
 
     case 'text_delta': {
-      const next = blocks.slice()
-      if (state.openAssistant >= 0 && next[state.openAssistant]?.kind === 'assistant') {
+      if (state.openAssistant >= 0 && blocks[state.openAssistant]?.kind === 'assistant') {
+        const next = blocks.slice()
         const open = next[state.openAssistant] as Extract<Block, { kind: 'assistant' }>
         next[state.openAssistant] = { ...open, text: open.text + event.text }
         return { ...state, blocks: next }
       }
+      // Starting a fresh assistant segment: close any open thinking/assistant
+      // first so thinking collapses even without a `status: think_end`.
+      const next = closeOpen(state)
       next.push({ kind: 'assistant', text: event.text, closed: false })
       return { ...state, blocks: next, openAssistant: next.length - 1, openThinking: -1 }
     }
 
     case 'thinking_delta': {
-      const next = blocks.slice()
-      if (state.openThinking >= 0 && next[state.openThinking]?.kind === 'thinking') {
+      if (state.openThinking >= 0 && blocks[state.openThinking]?.kind === 'thinking') {
+        const next = blocks.slice()
         const open = next[state.openThinking] as Extract<Block, { kind: 'thinking' }>
         next[state.openThinking] = { ...open, text: open.text + event.text }
         return { ...state, blocks: next }
       }
+      // Starting a fresh thinking segment: close any open assistant first.
+      const next = closeOpen(state)
       next.push({ kind: 'thinking', text: event.text, closed: false })
       return { ...state, blocks: next, openThinking: next.length - 1, openAssistant: -1 }
     }
