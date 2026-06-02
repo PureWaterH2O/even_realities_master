@@ -5,6 +5,14 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-01
 
+### Co-Live Terminal M3.0 — design/spec written + accepted-pending-review: "Desk Cockpit" parity inventory + roadmap
+
+- **Spec:** `docs/superpowers/specs/2026-06-01-colive-terminal-m3-design.md` — the M3.0 deliverable (wishlist + feasibility sort + sequenced roadmap M3.1→M3.5 + parked backlog). No M3.1+ planning until reviewed.
+- **🔑 Headline finding (✅ verified vs `@anthropic-ai/claude-agent-sdk@0.3.158` `sdk.d.ts`):** our Core runs the SDK in **string-prompt mode**; the SDK's runtime controls — `setModel` (2186), `setPermissionMode` (2179), `supportedCommands` (2237), `mcpServerStatus` (2255), `setMaxThinkingTokens` (2203), real `interrupt` (2172), image-content prompts — exist **only in streaming-input mode** (`query({prompt: AsyncIterable<SDKUserMessage>})`, 2391). So `/model`, mode toggle/plan, `/compact`, MCP, image paste, clean interrupt all hinge on **one Core refactor** (string-prompt → streaming-input). Isolated as M3.3, the riskiest rung; reading/input/multi-session ship first.
+- **🧪 Other findings:** Ctrl-O expand detail is *already* in `tool_end.detail` (client just doesn't render it); thinking text *is* streamed by the SDK but the Core deliberately drops it (M0 anti-HUD-leak) → small new event for desk-only render; `settingSources:[]` means skills/hooks/CLAUDE.md don't load — **decided to flip to `project`+`user`** (user needs skills), accepting the latency and rendering startup/hook output in the desk transcript.
+- **Scope locked:** M3 = DESK experience only; glasses/HUD UX + KB/Obsidian = future milestones; push-to-glasses = Blocked (pull-based Hub + closed Even app). Parked backlog: rewind/checkpoint, auto-compact, cross-session search, diff/review queue, saved templates, workflow launcher, bookmarks.
+- **Next:** user reviews the M3.0 spec → then brainstorm M3.1 (readable transcript) as its own spec→plan→build→hardware-UAT cycle.
+
 ### Co-Live Terminal M3 — brainstorm underway: "Desk Cockpit" (native-parity daily driver), decisions locked
 
 - **Direction (4.8 brainstorm):** M3 = make the desk client a full daily driver — recreate the native `claude` TUI ("no regression") **then build past it**. Bounded as the **daily-driver subset, inventory-first** (user's call).
