@@ -84,11 +84,17 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
       const arg = block.detail ? toolArg(block.name, block.detail.input) : ''
       const dot = isErr ? red('⏺') : green('⏺')
       const name = isErr ? red(block.name) : block.name
-      const head = arg ? `${dot} ${name}${dim(`(${arg})`)}` : `${dot} ${name}`
+      const head = arg ? `${dot} ${name}(${dim(arg)})` : `${dot} ${name}`
       const rows = toRows(head, width)
-      // inline diff for edit-family tools (always, not just verbose)
+      // inline diff for edit-family tools (always, not just verbose); a no-op
+      // diff renders nothing (skip the empty string so no phantom blank row).
       const diffs = block.detail ? extractEditDiff(block.name, block.detail.input) : undefined
-      if (diffs) for (const d of diffs) rows.push(...toRows(renderDiff(d, width), width))
+      if (diffs) {
+        for (const d of diffs) {
+          const rendered = renderDiff(d, width)
+          if (rendered !== '') rows.push(...toRows(rendered, width))
+        }
+      }
       // verbose: full input/output for any tool (Ctrl-O), pretty-printed + capped
       // so a huge tool result stays scannable instead of one giant JSON line.
       if (verbose && block.detail) {

@@ -1,7 +1,6 @@
 // src/desk/render/diff.ts
 import { diffLines } from 'diff'
-import { green, red, gray, stripAnsi } from './ansi'
-import { highlight } from './highlight'
+import { green, red, gray } from './ansi'
 
 export interface DiffInput {
   oldStr: string
@@ -31,6 +30,9 @@ const rec = (v: unknown): Record<string, unknown> =>
  * as a plain tool line).
  */
 export function extractEditDiff(toolName: string, input: unknown): DiffInput[] | undefined {
+  // Only real tool-input objects yield a diff; null/garbage must NOT render an
+  // (empty) diff — that leaks a phantom blank row under the tool line.
+  if (input === null || typeof input !== 'object') return undefined
   const i = rec(input)
   const lang = langOf(i.file_path)
   switch (toolName) {
@@ -51,9 +53,12 @@ export function extractEditDiff(toolName: string, input: unknown): DiffInput[] |
 }
 
 /**
- * Render a single (old,new) diff as colored ANSI lines: removed lines red with
- * a "- " gutter, added lines green with "+ ", context dim with "  ". Code is
- * syntax-highlighted per `lang` (added/context lines; removed lines are dimmed).
+ * Render a single (old,new) diff as colored ANSI lines, git-style: removed lines
+ * red with a "- " gutter, added lines green with "+ ", unchanged context dim with
+ * "  ". Each line is uniformly tinted (no per-token syntax highlighting — the
+ * red/green/gray wrapper and inner highlight colors don't compose cleanly; the
+ * +/- gutter + tint is the clearer, native-looking choice). `lang` is reserved
+ * for a future highlighted variant. Returns '' for a no-op diff (no rows).
  */
 export function renderDiff(d: DiffInput, _width: number): string {
   const parts = diffLines(d.oldStr, d.newStr)
@@ -62,7 +67,7 @@ export function renderDiff(d: DiffInput, _width: number): string {
     const lines = part.value.split('\n')
     if (lines[lines.length - 1] === '') lines.pop() // drop trailing empty
     for (const line of lines) {
-      if (part.added) out.push(green('+ ' + stripAnsi(highlight(line, d.lang))))
+      if (part.added) out.push(green('+ ' + line))
       else if (part.removed) out.push(red('- ' + line))
       else out.push(gray('  ' + line))
     }

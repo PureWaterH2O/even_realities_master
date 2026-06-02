@@ -20,4 +20,18 @@ describe('wrapAnsi', () => {
   it('preserves an empty line as a single empty row', () => {
     expect(wrapAnsi('', 10)).toEqual([''])
   })
+
+  it('hard-splits a colored token WITHOUT severing an ANSI escape', () => {
+    const ESC = String.fromCharCode(27)
+    const rows = wrapAnsi(green('aaaaaaaa'), 4) // 8 visible cols, one colored word
+    // no visible content lost or invented
+    expect(stripAnsi(rows.join(''))).toBe('aaaaaaaa')
+    expect(rows.every((r) => stripAnsi(r).length <= 4)).toBe(true)
+    // every ESC in every row begins a COMPLETE SGR ("[…m") — never cut mid-escape
+    for (const r of rows) {
+      for (const after of r.split(ESC).slice(1)) {
+        expect(after).toMatch(/^\[[0-9;]*m/)
+      }
+    }
+  })
 })

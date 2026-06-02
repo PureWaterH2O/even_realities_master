@@ -114,6 +114,30 @@ describe('reduceBlocks', () => {
     ])
   })
 
+  it('applies a TaskUpdate that arrives before its TaskCreate (no lost status)', () => {
+    // Out-of-order arrival must not silently drop the status (upsert by id).
+    const s = run([
+      { type: 'tool_end', name: 'TaskUpdate', toolId: 'u1', summary: '', detail: { input: { taskId: '1', status: 'in_progress' }, output: {} } },
+      { type: 'tool_end', name: 'TaskCreate', toolId: 'c1', summary: '', detail: { input: { subject: 'My task' }, output: { id: '1' } } },
+    ])
+    const todos = s.blocks.filter((b) => b.kind === 'todos')
+    expect((todos[0] as Extract<typeof todos[0], { kind: 'todos' }>).items).toEqual([
+      { id: '1', content: 'My task', status: 'in_progress' },
+    ])
+  })
+
+  it('TaskUpdate status:deleted removes the matching item', () => {
+    const s = run([
+      { type: 'tool_end', name: 'TaskCreate', toolId: 'c1', summary: '', detail: { input: { subject: 'A' }, output: { id: '1' } } },
+      { type: 'tool_end', name: 'TaskCreate', toolId: 'c2', summary: '', detail: { input: { subject: 'B' }, output: { id: '2' } } },
+      { type: 'tool_end', name: 'TaskUpdate', toolId: 'u1', summary: '', detail: { input: { taskId: '1', status: 'deleted' }, output: {} } },
+    ])
+    const todos = s.blocks.filter((b) => b.kind === 'todos')
+    expect((todos[0] as Extract<typeof todos[0], { kind: 'todos' }>).items).toEqual([
+      { id: '2', content: 'B', status: 'pending' },
+    ])
+  })
+
   it('clear empties the blocks; reset seeds from transcript entries', () => {
     const seeded = reduceBlocks(initialBlockState(), {
       type: 'reset',

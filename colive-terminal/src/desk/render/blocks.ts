@@ -93,7 +93,11 @@ function taskIdFromOutput(output: unknown, fallback: string): string {
   return fallback
 }
 
-/** TaskCreate → append a pending item (id from output, else creation-order index). */
+/**
+ * TaskCreate → upsert a pending item (id from output, else creation-order index).
+ * If a stub already exists for this id (a TaskUpdate arrived first), fill in its
+ * content and KEEP the status that update set — don't reset it to pending.
+ */
 function applyTaskCreate(items: TodoItem[], detail?: { input: unknown; output: unknown }): TodoItem[] {
   const input = rec(detail?.input)
   const content =
@@ -101,18 +105,28 @@ function applyTaskCreate(items: TodoItem[], detail?: { input: unknown; output: u
     : typeof input.description === 'string' ? input.description
     : ''
   const id = taskIdFromOutput(detail?.output, String(items.length + 1))
+  const existing = items.findIndex((it) => it.id === id)
+  if (existing >= 0) {
+    const copy = items.slice()
+    copy[existing] = { ...copy[existing], content }
+    return copy
+  }
   return [...items, { id, content, status: 'pending' }]
 }
 
-/** TaskUpdate → set status / delete the matching item by taskId. */
+/**
+ * TaskUpdate → set status / delete the matching item by taskId. If the item does
+ * not exist yet (update arrived before its create), insert a content-less stub so
+ * the status is not lost — a later TaskCreate fills in the content.
+ */
 function applyTaskUpdate(items: TodoItem[], detail?: { input: unknown; output: unknown }): TodoItem[] {
   const input = rec(detail?.input)
   const taskId = input.taskId != null ? String(input.taskId) : ''
   const status = input.status
   const ti = items.findIndex((it) => it.id === taskId)
-  if (ti < 0) return items
-  if (status === 'deleted') return items.filter((_, i) => i !== ti)
+  if (status === 'deleted') return ti < 0 ? items : items.filter((_, i) => i !== ti)
   if (status === 'pending' || status === 'in_progress' || status === 'completed') {
+    if (ti < 0) return [...items, { id: taskId, content: '', status }]
     const copy = items.slice()
     copy[ti] = { ...copy[ti], status }
     return copy

@@ -21,6 +21,11 @@ describe('extractEditDiff', () => {
   it('returns undefined for a non-edit tool', () => {
     expect(extractEditDiff('Bash', { command: 'ls' })).toBeUndefined()
   })
+  it('returns undefined for null / non-object input (no phantom empty diff)', () => {
+    expect(extractEditDiff('Edit', null)).toBeUndefined()
+    expect(extractEditDiff('Edit', undefined)).toBeUndefined()
+    expect(extractEditDiff('Edit', 'not an object')).toBeUndefined()
+  })
 })
 
 describe('renderDiff', () => {
