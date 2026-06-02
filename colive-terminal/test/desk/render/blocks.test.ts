@@ -138,6 +138,20 @@ describe('reduceBlocks', () => {
     ])
   })
 
+  it('dedupes a desk-echoed prompt against its own broadcast user_prompt (no double)', () => {
+    // The desk optimistically echoes the prompt (localUser) the instant you submit;
+    // the Hub then broadcasts user_prompt back to ALL clients. The desk must render
+    // its own prompt ONCE, not twice. UAT B1.
+    let s = reduceBlocks(initialBlockState(), { type: 'localUser', text: 'hello there' })
+    s = reduceBlocks(s, { type: 'event', event: { type: 'user_prompt', text: 'hello there' } })
+    expect(s.blocks.filter((b) => b.kind === 'user')).toHaveLength(1)
+  })
+
+  it('still renders a remote (glasses) prompt that was never locally echoed', () => {
+    const s = reduceBlocks(initialBlockState(), { type: 'event', event: { type: 'user_prompt', text: 'from glasses' } })
+    expect(s.blocks.filter((b) => b.kind === 'user')).toEqual([{ kind: 'user', text: 'from glasses' }])
+  })
+
   it('clear empties the blocks; reset seeds from transcript entries', () => {
     const seeded = reduceBlocks(initialBlockState(), {
       type: 'reset',

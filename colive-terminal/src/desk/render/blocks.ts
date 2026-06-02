@@ -33,9 +33,22 @@ export interface BlockState {
   openAssistant: number
   /** Index of the open thinking block (thinking_delta target), or -1. */
   openThinking: number
+  /**
+   * Texts the desk optimistically echoed (localUser) that are awaiting their own
+   * broadcast `user_prompt`. The Hub fans every prompt back to ALL clients, so a
+   * desk-sent prompt would otherwise render twice; we consume one pending entry
+   * when its matching broadcast arrives. (Glasses-sent prompts aren't echoed, so
+   * they have no pending entry and render once.) UAT B1.
+   */
+  pendingLocalUser: string[]
 }
 
-export const initialBlockState = (): BlockState => ({ blocks: [], openAssistant: -1, openThinking: -1 })
+export const initialBlockState = (): BlockState => ({
+  blocks: [],
+  openAssistant: -1,
+  openThinking: -1,
+  pendingLocalUser: [],
+})
 
 export type BlockAction =
   | { type: 'reset'; entries: TranscriptEntry[] }
@@ -143,13 +156,21 @@ function entryToBlock(entry: TranscriptEntry): Block {
 export function reduceBlocks(state: BlockState, action: BlockAction): BlockState {
   switch (action.type) {
     case 'reset':
-      return { blocks: action.entries.map(entryToBlock), openAssistant: -1, openThinking: -1 }
+      return { blocks: action.entries.map(entryToBlock), openAssistant: -1, openThinking: -1, pendingLocalUser: [] }
     case 'clear':
       return initialBlockState()
     case 'note':
       return { ...state, blocks: [...state.blocks, { kind: 'note', text: action.text }], openAssistant: -1, openThinking: -1 }
     case 'localUser':
-      return { ...state, blocks: [...state.blocks, { kind: 'user', text: action.text }], openAssistant: -1, openThinking: -1 }
+      // Optimistic echo + remember the text so the matching broadcast user_prompt
+      // doesn't render it a second time.
+      return {
+        ...state,
+        blocks: [...state.blocks, { kind: 'user', text: action.text }],
+        pendingLocalUser: [...state.pendingLocalUser, action.text],
+        openAssistant: -1,
+        openThinking: -1,
+      }
     case 'event':
       return applyEvent(state, action.event)
     default:
@@ -179,9 +200,19 @@ function closeOpen(state: BlockState): Block[] {
 function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
   const blocks = state.blocks
   switch (event.type) {
-    case 'user_prompt':
+    case 'user_prompt': {
       // close any open assistant/thinking from the prior turn before the new prompt
-      return { blocks: [...closeOpen(state), { kind: 'user', text: event.text }], openAssistant: -1, openThinking: -1 }
+      const closed = closeOpen(state)
+      // If this is the broadcast of a prompt the desk already echoed locally,
+      // consume the pending echo and DON'T add a duplicate user block (UAT B1).
+      const at = state.pendingLocalUser.indexOf(event.text)
+      if (at >= 0) {
+        const pending = state.pendingLocalUser.slice()
+        pending.splice(at, 1)
+        return { ...state, blocks: closed, pendingLocalUser: pending, openAssistant: -1, openThinking: -1 }
+      }
+      return { ...state, blocks: [...closed, { kind: 'user', text: event.text }], openAssistant: -1, openThinking: -1 }
+    }
 
     case 'text_delta': {
       if (state.openAssistant >= 0 && blocks[state.openAssistant]?.kind === 'assistant') {
@@ -224,7 +255,7 @@ function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
     case 'tool_start': {
       if (PANEL_TOOLS.has(event.name)) return state // todos/tasks panel is built on tool_end
       // close the open assistant/thinking first so a pre-tool answer segment renders markdown
-      return { blocks: [...closeOpen(state), { kind: 'tool', toolId: event.toolId, name: event.name }], openAssistant: -1, openThinking: -1 }
+      return { ...state, blocks: [...closeOpen(state), { kind: 'tool', toolId: event.toolId, name: event.name }], openAssistant: -1, openThinking: -1 }
     }
 
     case 'tool_end': {

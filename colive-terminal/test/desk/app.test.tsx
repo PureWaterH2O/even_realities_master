@@ -322,6 +322,18 @@ describe('desk App', () => {
     expect(fake.prompts[0]?.sessionId).toBe('s1')
   })
 
+  it('renders a desk-sent prompt ONCE despite the Hub broadcasting it back (UAT B1)', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'count to ten') // optimistic local echo + sendPrompt
+    await write(stdin, '\r')
+    // the Hub fans the prompt back to ALL clients (incl. this desk)
+    act(() => { fake.emit({ type: 'user_prompt', text: 'count to ten' }) })
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame.split('count to ten').length - 1).toBe(1) // exactly one copy
+  })
+
   it('does NOT post a slash command; /help shows the help view locally', async () => {
     const fake = makeFakeHub()
     const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
