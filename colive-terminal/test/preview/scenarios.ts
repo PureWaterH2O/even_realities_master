@@ -120,6 +120,23 @@ export const markdownDoc: CoLiveEvent[] = [
   { ...RESULT, text: MARKDOWN_DOC },
 ]
 
+/** Mid-stream snapshot: thinking still open, one task in-progress, one pending —
+ *  so the live palette (open thinking, yellow ▶ active, dim ☐ pending) is visible,
+ *  not just the all-completed end state. */
+export const inProgress: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Refactor the parser and add tests.' },
+  { type: 'status', state: 'busy' },
+  ...taskCreate('c1', 'Refactor the tokenizer', '1'),
+  ...taskCreate('c2', 'Add parser tests', '2'),
+  ...taskCreate('c3', 'Update the changelog', '3'),
+  ...taskUpdate('u1', '1', 'completed'),
+  ...taskUpdate('u2', '2', 'in_progress'),
+  toolStart('Edit', 'e1'),
+  toolEnd('Edit', 'e1', 'Edit completed', { file_path: 'src/parser/tokenizer.ts', old_string: 'const x = 1', new_string: 'const x = 2' }, { ok: true }),
+  { type: 'thinking_delta', text: 'Now I should add a test that covers the new token type ' },
+  { type: 'thinking_delta', text: 'and a regression for the empty-input edge case.' },
+]
+
 /** A tall transcript to exercise scrolling: 40 raw lines (kept open so they stay
  *  one-per-row; a `result` would collapse them into a single markdown paragraph). */
 export const tall: CoLiveEvent[] = [

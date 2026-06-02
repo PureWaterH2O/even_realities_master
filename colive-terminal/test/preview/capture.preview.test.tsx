@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { capture, flattenAll, emit, snap, key, KEYS, type Frame } from './replay'
-import { cockpit, tall, markdownDoc } from './scenarios'
+import { cockpit, tall, markdownDoc, inProgress } from './scenarios'
 
 const WRITE = process.env.PREVIEW === '1'
 const OUT = resolve(__dirname, '../../preview-out')
@@ -62,6 +62,16 @@ describe('desk preview', () => {
     // that the collapsed header omits).
     expect(full.plain).not.toContain('Create the file')
     expect(fullVerbose.plain).toContain('Create the file')
+  })
+
+  it('in-progress: open thinking + mixed todo states (▶ active / ☐ pending)', async () => {
+    const full = flattenAll(inProgress)
+    dump('inprogress', [full])
+    expect(full.plain).toMatch(/✔/) // completed task
+    expect(full.plain).toMatch(/▶/) // in-progress task
+    expect(full.plain).toMatch(/☐/) // pending task
+    expect(full.plain).toContain('💭 thinking') // open thinking shows its text
+    expect(full.plain).toContain('add a test') // ...not collapsed to a stub
   })
 
   it('markdown: every block type renders', async () => {
