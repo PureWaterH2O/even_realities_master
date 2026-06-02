@@ -58,6 +58,14 @@ const RESULT: CoLiveEvent = {
   outputTokens: 506,
 }
 
+// A realistic turn ends with a running_stats (so the status line shows tokens)
+// and the Core's terminal `status: idle` — emitted right after `result`, so the
+// desk returns to "[idle · N tokens]" exactly as it does on real hardware.
+const STATS: CoLiveEvent = { type: 'running_stats', durationMs: 4200, inputTokens: 1960, outputTokens: 506 }
+const IDLE: CoLiveEvent = { type: 'status', state: 'idle' }
+/** The tail every completed turn shares: stats heartbeat → result → idle. */
+const endTurn = (text: string): CoLiveEvent[] => [STATS, { ...RESULT, text }, IDLE]
+
 /** Full cockpit run: thinking → tasks → tools (with a diff) → markdown answer. */
 export const cockpit: CoLiveEvent[] = [
   { type: 'user_prompt', text: 'Plan and run a 3-step task with your todo list, then summarize in markdown.' },
@@ -81,7 +89,7 @@ export const cockpit: CoLiveEvent[] = [
   toolEnd('Read', 'r1', 'Read completed', { file_path: '/tmp/m31todo.txt' }, 'hello from m3.1'),
   ...taskUpdate('u6', '3', 'completed'),
   { type: 'text_delta', text: MARKDOWN_ANSWER },
-  RESULT,
+  ...endTurn(MARKDOWN_ANSWER),
 ]
 
 const MARKDOWN_DOC = [
@@ -117,7 +125,7 @@ const MARKDOWN_DOC = [
 export const markdownDoc: CoLiveEvent[] = [
   { type: 'user_prompt', text: 'Show me every markdown element rendered.' },
   { type: 'text_delta', text: MARKDOWN_DOC },
-  { ...RESULT, text: MARKDOWN_DOC },
+  ...endTurn(MARKDOWN_DOC),
 ]
 
 /** Mid-stream snapshot: thinking still open, one task in-progress, one pending —
@@ -135,6 +143,33 @@ export const inProgress: CoLiveEvent[] = [
   toolEnd('Edit', 'e1', 'Edit completed', { file_path: 'src/parser/tokenizer.ts', old_string: 'const x = 1', new_string: 'const x = 2' }, { ok: true }),
   { type: 'thinking_delta', text: 'Now I should add a test that covers the new token type ' },
   { type: 'thinking_delta', text: 'and a regression for the empty-input edge case.' },
+]
+
+/** A2 — a multi-line Edit so the inline +/- diff is substantial. */
+export const diffEdit: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Make the greeting take a name.' },
+  toolStart('Edit', 'e1'),
+  toolEnd(
+    'Edit',
+    'e1',
+    'Edit completed',
+    {
+      file_path: 'src/greet.ts',
+      old_string: 'export function greet() {\n  return "hello"\n}',
+      new_string: 'export function greet(name: string) {\n  return `hello, ${name}`\n}',
+    },
+    { ok: true },
+  ),
+]
+
+/** A6 — thinking streams, then an answer (thinking collapses), then result. */
+export const thinking: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Solve the 12-ball balance puzzle; show your reasoning first.' },
+  { type: 'status', state: 'busy' },
+  { type: 'thinking_delta', text: 'Split the 12 balls into three groups of four. ' },
+  { type: 'thinking_delta', text: 'Weigh group A against group B.\nIf they balance, the odd ball is in C; otherwise it is on the heavier/lighter pan.\nEach weighing trisects the remaining candidates, so 3 weighings cover 12.' },
+  { type: 'text_delta', text: '## Strategy\n\nWeigh **4 vs 4**, then narrow to the odd ball — and whether it is heavy or light — within **3 weighings**.' },
+  ...endTurn('## Strategy\n\nWeigh **4 vs 4**, then narrow to the odd ball — and whether it is heavy or light — within **3 weighings**.'),
 ]
 
 /** A tall transcript to exercise scrolling: 40 raw lines (kept open so they stay

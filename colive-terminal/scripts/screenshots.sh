@@ -19,6 +19,14 @@ FRAMES=(
   "inprogress-01-full:shot-inprogress"
   "tall-01-bottom:shot-tall"
   "recording-01-full:shot-recording"
+  # UAT walk (A1–A6), one canonical frame per runbook item
+  "uat-a1-scroll-02-paged-up:shot-uat-a1-scroll"
+  "uat-a2-diff-01-full:shot-uat-a2-diff"
+  "uat-a3-verbose-02-full-verbose:shot-uat-a3-verbose"
+  "uat-a4-markdown-01-full:shot-uat-a4-markdown"
+  "uat-a5-todos-01-full:shot-uat-a5-todos"
+  "uat-a6-thinking-01-open:shot-uat-a6-thinking-open"
+  "uat-a6-thinking-02-collapsed:shot-uat-a6-thinking-collapsed"
 )
 
 echo "[1/2] capturing frames (PREVIEW=1 vitest test/preview)…"
