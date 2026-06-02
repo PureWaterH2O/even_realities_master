@@ -24,12 +24,11 @@
  *    selection calls client.respondPermission(sessionId, option.key, toolUseId)
  *    / client.respondQuestion(sessionId, answer, toolUseId). Esc interrupts.
  */
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { Box, Text, useApp, useInput } from 'ink'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { Box, Text, useApp, useInput, useStdout } from 'ink'
 import type {
   HubClient,
   SubscriptionHandle,
-  TranscriptEntry,
 } from './client'
 import type {
   CoLiveEvent,
@@ -38,6 +37,10 @@ import type {
   UserQuestionEvent,
 } from '../core/events'
 import { interpretInput } from './slash'
+import { reduceBlocks, initialBlockState } from './render/blocks'
+import { flattenRows } from './render/rows'
+import { computeWindow, scrollPage, pinBottom, afterContentChange, initialViewport } from './render/window'
+import type { ViewportState } from './render/window'
 
 /** Optional construction config for the app. */
 export interface AppConfig {
@@ -53,112 +56,6 @@ export interface AppProps {
   /** Target session; omit to start a new session on the first prompt. */
   sessionId?: string
   config?: AppConfig
-}
-
-/* ------------------------------------------------------------------ */
-/* Transcript model                                                    */
-/* ------------------------------------------------------------------ */
-
-/** One rendered line in the scrollback. */
-type Line =
-  | { kind: 'user'; text: string }
-  | { kind: 'assistant'; text: string }
-  | { kind: 'tool'; name: string; summary?: string }
-  | { kind: 'note'; text: string }
-
-interface TranscriptState {
-  lines: Line[]
-  /** Index of the open assistant turn that text_delta appends to, or -1. */
-  openAssistant: number
-}
-
-type TranscriptAction =
-  | { type: 'reset'; lines: Line[] }
-  | { type: 'clear' }
-  | { type: 'event'; event: CoLiveEvent }
-  | { type: 'note'; text: string }
-  | { type: 'localUser'; text: string }
-
-/** Map a seeded transcript entry to a rendered line. */
-function entryToLine(entry: TranscriptEntry): Line {
-  if (entry.role === 'assistant') return { kind: 'assistant', text: entry.text }
-  if (entry.role === 'user') return { kind: 'user', text: entry.text }
-  return { kind: 'note', text: `${entry.role}: ${entry.text}` }
-}
-
-function transcriptReducer(state: TranscriptState, action: TranscriptAction): TranscriptState {
-  switch (action.type) {
-    case 'reset':
-      return { lines: action.lines, openAssistant: -1 }
-    case 'clear':
-      return { lines: [], openAssistant: -1 }
-    case 'note':
-      return { lines: [...state.lines, { kind: 'note', text: action.text }], openAssistant: -1 }
-    case 'localUser':
-      return {
-        lines: [...state.lines, { kind: 'user', text: action.text }],
-        openAssistant: -1,
-      }
-    case 'event':
-      return applyEvent(state, action.event)
-    default:
-      return state
-  }
-}
-
-/** Fold a single live event into the transcript model. */
-function applyEvent(state: TranscriptState, event: CoLiveEvent): TranscriptState {
-  switch (event.type) {
-    case 'user_prompt': {
-      return {
-        lines: [...state.lines, { kind: 'user', text: event.text }],
-        openAssistant: -1,
-      }
-    }
-    case 'text_delta': {
-      const lines = state.lines.slice()
-      if (state.openAssistant >= 0 && lines[state.openAssistant]?.kind === 'assistant') {
-        const open = lines[state.openAssistant] as { kind: 'assistant'; text: string }
-        lines[state.openAssistant] = { kind: 'assistant', text: open.text + event.text }
-        return { lines, openAssistant: state.openAssistant }
-      }
-      lines.push({ kind: 'assistant', text: event.text })
-      return { lines, openAssistant: lines.length - 1 }
-    }
-    case 'tool_start': {
-      return {
-        lines: [...state.lines, { kind: 'tool', name: event.name }],
-        openAssistant: -1,
-      }
-    }
-    case 'tool_end': {
-      return {
-        lines: [...state.lines, { kind: 'tool', name: event.name, summary: event.summary }],
-        openAssistant: -1,
-      }
-    }
-    case 'result': {
-      // The final assistant text is already streamed via text_delta; close the
-      // open assistant turn so the next reply starts fresh.
-      return { lines: state.lines, openAssistant: -1 }
-    }
-    case 'notification': {
-      return {
-        lines: [...state.lines, { kind: 'note', text: `${event.title}: ${event.message}` }],
-        openAssistant: -1,
-      }
-    }
-    case 'error': {
-      return {
-        lines: [...state.lines, { kind: 'note', text: `error: ${event.message}` }],
-        openAssistant: -1,
-      }
-    }
-    default:
-      // status / running_stats / permission_request / user_question /
-      // permission_result / task_progress are handled outside the transcript.
-      return state
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -196,10 +93,13 @@ type Pending =
 export function App({ client, sessionId: initialSessionId, config }: AppProps): React.ReactElement {
   const { exit } = useApp()
 
-  const [transcript, dispatch] = useReducer(transcriptReducer, {
-    lines: [],
-    openAssistant: -1,
-  })
+  const [transcript, dispatch] = useReducer(reduceBlocks, undefined, initialBlockState)
+  const [verbose, setVerbose] = useState(false)
+  const [viewport, setViewport] = useState<ViewportState>(initialViewport)
+  const { stdout } = useStdout()
+  const width = (stdout?.columns ?? 80)
+  const reserved = 3 // status line + input line + prompt chrome
+  const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
   const [status, setStatus] = useState<StatusInfo>({ state: 'idle' })
   const [pending, setPending] = useState<Pending | undefined>(undefined)
   const [input, setInput] = useState('')
@@ -271,10 +171,10 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       try {
         const seeded = await client.fetchTranscript(subSessionId)
         if (cancelled) return
-        dispatch({ type: 'reset', lines: seeded.map(entryToLine) })
+        dispatch({ type: 'reset', entries: seeded })
       } catch {
         // A failed seed must not crash the UI — just start with an empty scroll.
-        if (!cancelled) dispatch({ type: 'reset', lines: [] })
+        if (!cancelled) dispatch({ type: 'reset', entries: [] })
       }
       if (cancelled) return
       handle = client.subscribe(
@@ -374,6 +274,20 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     [client, pending],
   )
 
+  /* ------------------------- rows + window ------------------------- */
+
+  // MEMOIZE the flatten so marked + cli-highlight don't re-run over every block
+  // on each keystroke / 10s running_stats tick. transcript.blocks only changes
+  // on a transcript event (not on input edits), so the memo skips the expensive
+  // work while typing.
+  const rows = useMemo(
+    () => flattenRows(transcript.blocks, { width, verbose }),
+    [transcript.blocks, width, verbose],
+  )
+  // follow bottom while streaming; hold position when scrolled up
+  useEffect(() => { setViewport((vp) => afterContentChange(vp, rows.length, height)) }, [rows.length, height])
+  const win = computeWindow(rows, height, viewport)
+
   /* ------------------------- input ------------------------- */
 
   useInput((ch, key) => {
@@ -419,6 +333,11 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       exit()
       return
     }
+    if (key.pageUp)   { setViewport((vp) => scrollPage(vp, rows.length, height, -1)); return }
+    if (key.pageDown) { setViewport((vp) => scrollPage(vp, rows.length, height, 1)); return }
+    if (key.ctrl && (ch === 'o' || ch === 'O')) { setVerbose((v) => !v); return }
+    // End key: ink exposes it as key.end on most terminals
+    if (key.end) { setViewport(pinBottom(rows.length, height)); return }
     // Printable characters (ignore control combos) extend the input buffer.
     if (ch && !key.ctrl && !key.meta) {
       setInput((s) => s + ch)
@@ -437,10 +356,17 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   return (
     <Box flexDirection="column">
       <Box flexDirection="column">
-        {transcript.lines.map((line, i) => (
-          <TranscriptLine key={i} line={line} />
+        {win.visible.map((row, i) => (
+          <Text key={win.offset + i} wrap="truncate-end">{row}</Text>
         ))}
       </Box>
+      {rows.length > height ? (
+        <Box>
+          <Text dimColor>
+            rows {win.offset + 1}–{Math.min(win.offset + height, win.total)} of {win.total} {win.pinned ? '(pinned ▼)' : '▲▼ PgUp/PgDn · End'}
+          </Text>
+        </Box>
+      ) : null}
 
       {pending ? <PendingPrompt pending={pending} input={input} /> : null}
 
@@ -458,34 +384,6 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       )}
     </Box>
   )
-}
-
-/** Render one scrollback line. */
-function TranscriptLine({ line }: { line: Line }): React.ReactElement {
-  switch (line.kind) {
-    case 'user':
-      return (
-        <Text>
-          <Text color="cyan">you</Text> {line.text}
-        </Text>
-      )
-    case 'assistant':
-      return (
-        <Text>
-          <Text color="green">claude</Text> {line.text}
-        </Text>
-      )
-    case 'tool':
-      return (
-        <Text dimColor>
-          ⚙ {line.name}
-          {line.summary ? ` — ${line.summary}` : ''}
-        </Text>
-      )
-    case 'note':
-    default:
-      return <Text dimColor>{line.text}</Text>
-  }
 }
 
 /** Render the inline permission / question prompt. */

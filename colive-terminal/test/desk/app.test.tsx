@@ -387,4 +387,54 @@ describe('desk App', () => {
     await write(stdin, '1')
     expect(fake.permissions[0]?.sessionId).toBe('resolved-42')
   })
+
+  it('renders streamed assistant text in the viewport', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      act(() => { hub.emit({ type: 'text_delta', text: 'hello viewport' }) })
+      expect(lastFrame()).toContain('hello viewport')
+    } finally { unmount() }
+  })
+
+  it('Ctrl-O toggles tool verbose detail', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, stdin, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      act(() => {
+        hub.emit({ type: 'tool_start', name: 'Read', toolId: 't1' })
+        hub.emit({ type: 'tool_end', name: 'Read', toolId: 't1', summary: 'read', detail: { input: { file_path: '/a' }, output: 'SECRET_OUTPUT' } })
+      })
+      expect(lastFrame()).not.toContain('SECRET_OUTPUT')
+      act(() => { stdin.write('\x0f') }) // Ctrl-O
+      expect(lastFrame()).toContain('SECRET_OUTPUT')
+    } finally { unmount() }
+  })
+
+  it('renders an inline diff for an Edit tool', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      act(() => {
+        hub.emit({ type: 'tool_start', name: 'Edit', toolId: 'e1' })
+        hub.emit({ type: 'tool_end', name: 'Edit', toolId: 'e1', summary: 'edit', detail: { input: { file_path: '/a.ts', old_string: 'OLDLINE', new_string: 'NEWLINE' }, output: 'ok' } })
+      })
+      const f = lastFrame() ?? ''
+      expect(f).toContain('OLDLINE')
+      expect(f).toContain('NEWLINE')
+    } finally { unmount() }
+  })
+
+  it('renders thinking text on the desk, distinct from the answer', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      act(() => { hub.emit({ type: 'thinking_delta', text: 'pondering deeply' }) })
+      expect(lastFrame()).toContain('pondering deeply')
+    } finally { unmount() }
+  })
 })
