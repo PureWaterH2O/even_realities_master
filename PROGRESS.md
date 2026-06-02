@@ -3,9 +3,37 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
-## 2026-06-01
+## 2026-06-02
 
-### Co-Live Terminal M3.1 — ✅ spec + plan LOCKED (Readable transcript); awaiting plan review → build
+### Co-Live Terminal M3.1 — 🟨 CANDIDATE built (Readable transcript); awaiting hardware UAT
+
+- **Built via subagent-driven development on branch `colive-terminal-m3.1`** (Opus 4.8 ultracode). Task 1 (deps)
+  + the de-risking probes done by the controller directly; **Tasks 2–12 executed as a sequential workflow** (35
+  agents, ~59 min) — each task: implement (TDD) → independent spec-compliance review (re-runs the tests) → fix-loop
+  → code-quality review (full `npm test` + typecheck) → fix-loop. **Controller re-verified from a clean tree**
+  (`npm ci` → typecheck → test), NOT agent self-report: **279 tests pass (was 237, +42), typecheck clean, 0 vulns.**
+- **Shipped (desk-side only):** flatten-to-ANSI-rows render layer (`src/desk/render/` — `ansi`/`wrap`/`highlight`/
+  `markdown`/`diff`/`blocks`/`rows`/`window`) + `app.tsx` rewired to a scrollback **viewport** (PgUp/PgDn/End,
+  pin-to-bottom, exact `rows X–Y of N` indicator), **inline +/- diffs** (Edit/Write/MultiEdit), **syntax
+  highlighting** (cli-highlight), **markdown** (marked + marked-terminal), **Ctrl-O global verbose toggle**, a
+  **todos panel** (in-place), and **desk-only thinking display**.
+- **One Core change only** (`src/core/events.ts` + `src/core/session.ts`): a new `thinking_delta` event sourced
+  from the SDK's `content_block_delta.delta.thinking`. **Hub untouched** — it serializes any event via
+  `JSON.stringify` (no allowlist), so the new type flows to subscribers automatically and the closed Even app
+  ignores it. An e2e test boots the real Core+Hub and proves the broadcast-and-ignore invariant (UAT B2) in software.
+- **🧪 Findings surfaced while building (verified by the controller, fed to the build agents):** (1) `marked-terminal`
+  defaults `showSectionPrefix:true`, which keeps the heading `#` — must pass `showSectionPrefix:false`. (2) `chalk`
+  gates ANSI on TTY, so `marked-terminal`/`cli-highlight` emit **no color under vitest** (non-TTY) — set
+  `FORCE_COLOR=3` in `vitest.config.ts` so tests exercise the same colored path the live `colive desk` terminal
+  uses (verified the prior 237 stayed green). (3) `cli-highlight` **throws** on an unknown language → the
+  `highlight.ts` try/catch fallback is load-bearing. (4) ink's `Key` has real `pageUp`/`pageDown`/`end` booleans.
+- **Invariants preserved:** desk client stays a **pure Hub client** (DI'd `HubClient`, no SDK); the M1 co-live
+  permission-dismiss fix, Esc-interrupt, Ctrl-C, `/clear`, slash handling, and transcript seeding are all intact.
+- **NOT done (spec §0):** green tests are the precondition only. **M3.1 is DONE only when the user runs
+  `projects/colive-terminal/m3.1-uat-runbook.md` on the real G2 + R1 and signs off.** No merge before that.
+- **Next:** user hardware UAT (Part A A1–A6 desk features + Part B B1–B4 co-live regression). Bugs → fix → re-UAT.
+
+### Co-Live Terminal M3.1 — ✅ spec + plan LOCKED (Readable transcript); plan reviewed → built
 
 - **Brainstorm (4.8, visual companion):** locked five decisions for the desk "readable transcript" rung —
   **(D1)** render architecture = **flatten-to-ANSI-rows** viewport (chosen over entry-windowing via an A/B

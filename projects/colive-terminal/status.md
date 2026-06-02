@@ -1,6 +1,14 @@
 # Co-Live Terminal — Status
 
-**Current state:** ✅ **M2 COMPLETE** — Tailscale remote access hardware-validated end-to-end (setup→serve→glasses→walk-away→tool-use) and **merged to `main`**. 237 tests, typecheck clean. Glasses work from anywhere on the tailnet (cellular+Tailscale, no LAN required). **Next milestones:** M3 (full native parity — see plan's deferred scope). Deferred follow-ups carried forward: fast-`202`, filter internal sessions from the list, per-poll perf, desk single-slot concurrent-permission disambiguation, `bin:{colive}` before any real install/distribution, daemon-not-running vs not-installed distinction (see `knowledge/terminal-mode/tailscale-detection.md` open questions).
+**Current state:** 🟨 **M3.1 CANDIDATE — awaiting hardware UAT.** On branch `colive-terminal-m3.1` (NOT merged):
+the "Readable transcript" rung is built — desk scrollback viewport (PgUp/PgDn/End), inline syntax-highlighted
+diffs, markdown, Ctrl-O verbose toggle, todos panel, and desk-only thinking display; one Core change (a
+`thinking_delta` event; Hub untouched). **279 tests pass, typecheck clean, 0 vulns — controller-verified from a
+clean tree** (`npm ci`), not agent self-report. Per spec §0 this is the *precondition only*: **DONE requires the
+user to run `m3.1-uat-runbook.md` on the real G2 + R1 and sign off** (Part A A1–A6 + Part B B1–B4 co-live
+regression). Bugs found on hardware → fix → re-UAT. **Do not merge before sign-off.**
+
+_Previously:_ ✅ **M2 COMPLETE** — Tailscale remote access hardware-validated end-to-end (setup→serve→glasses→walk-away→tool-use) and **merged to `main`**. 237 tests, typecheck clean. Glasses work from anywhere on the tailnet (cellular+Tailscale, no LAN required). Deferred follow-ups carried forward: fast-`202`, filter internal sessions from the list, per-poll perf, desk single-slot concurrent-permission disambiguation, `bin:{colive}` before any real install/distribution, daemon-not-running vs not-installed distinction (see `knowledge/terminal-mode/tailscale-detection.md` open questions).
 
 ---
 _History below is the M1 build log._
