@@ -98,7 +98,14 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const [viewport, setViewport] = useState<ViewportState>(initialViewport)
   const { stdout } = useStdout()
   const width = (stdout?.columns ?? 80)
-  const reserved = 3 // status line + input line + prompt chrome
+  // Reserve lines for the chrome (scroll indicator + status + input) PLUS one
+  // line of headroom. The headroom is load-bearing: ink redraws by moving the
+  // cursor up N lines and overwriting in place; if our total output exactly
+  // fills the terminal, the final newline scrolls the terminal up by one, ink's
+  // cursor math drifts, and every streamed frame leaks a (raw) line into the
+  // host scrollback. Keeping output strictly shorter than the terminal keeps the
+  // viewport a clean fixed region (no scrollback fighting — UAT A1).
+  const reserved = 4 // indicator + status + input + 1 line headroom
   const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
   const [status, setStatus] = useState<StatusInfo>({ state: 'idle' })
   const [pending, setPending] = useState<Pending | undefined>(undefined)
