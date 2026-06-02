@@ -445,8 +445,9 @@ export class ClaudeSession {
 
   /**
    * Handle one streaming delta (`SDKPartialAssistantMessage.event`). We map by
-   * `event.type`, reading only string fields. Thinking content is surfaced as
-   * status only; its text is NEVER emitted.
+   * `event.type`, reading only string fields. Thinking content is bracketed by
+   * think_start/think_end status, and its text is emitted as a desk-only
+   * 'thinking_delta' event (the closed Even app ignores unknown event types).
    */
   private handleStreamEvent(event: unknown): void {
     if (!isRecord(event)) return
