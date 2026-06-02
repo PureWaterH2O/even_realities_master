@@ -463,8 +463,10 @@ import { markedTerminal } from 'marked-terminal'
  */
 export function renderMarkdown(md: string, width: number): string {
   const m = new marked.Marked()
-  // marked-terminal returns a renderer extension; options control wrapping width.
-  m.use(markedTerminal({ width, reflowText: true }) as Parameters<typeof m.use>[0])
+  // 🧪 VERIFIED (marked 12.0.2 + marked-terminal 7.3.0): `showSectionPrefix: false`
+  // is REQUIRED — it defaults true, which PREPENDS the literal "# " to headings
+  // (so UAT A4 "not raw #" fails without it). reflowText wraps to `width`.
+  m.use(markedTerminal({ width, reflowText: true, showSectionPrefix: false }) as Parameters<typeof m.use>[0])
   const out = m.parse(md, { async: false }) as string
   // marked appends a trailing newline; trim it so row-flattening is exact.
   return out.replace(/\n+$/,'')
