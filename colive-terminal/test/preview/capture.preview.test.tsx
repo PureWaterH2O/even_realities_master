@@ -21,8 +21,10 @@ function dump(scenario: string, frames: Frame[]): void {
   mkdirSync(OUT, { recursive: true })
   frames.forEach((f, i) => {
     const base = `${scenario}-${String(i + 1).padStart(2, '0')}-${f.label}`
-    writeFileSync(resolve(OUT, `${base}.txt`), f.plain, 'utf8')
-    writeFileSync(resolve(OUT, `${base}.ansi`), f.ansi, 'utf8')
+    // Trailing newline so `cat`-ing the frame doesn't butt the shell prompt
+    // against the last rendered line in screenshots.
+    writeFileSync(resolve(OUT, `${base}.txt`), `${f.plain}\n`, 'utf8')
+    writeFileSync(resolve(OUT, `${base}.ansi`), `${f.ansi}\n`, 'utf8')
     written.push(base)
   })
 }
