@@ -50,6 +50,24 @@ built, what we decided. Newest entries on top.
   readable-transcript pass criterion (thinking *text* streams then collapses to a Ctrl-O stub) — to confirm on a clean run.
 - **Still open:** confirm A6 thinking text streams; Part B (B1–B4) glasses co-live regression; then user sign-off → merge.
 
+### Co-Live Terminal M3.1 — self-test rig + autonomous polish pass (2026-06-02)
+
+- **Built a render-and-screenshot self-test rig** so the desk TUI can be iterated WITHOUT hardware (user
+  request: "test it live and look at the results … iterate until requirements met, THEN I UAT"). Tier 1
+  (`test/preview/`, zero deps): a replay `HubClient` drives the REAL `App` against scripted/curated event
+  scenarios via the injected-client seam; captures exact frames (windowed + full-flatten) to `preview-out/`
+  under `PREVIEW=1`. Tier 2 (`scripts/screenshots.sh` + `.tape`, needs `brew install vhs`): renders the
+  full-colour `.ansi` frames to PNGs the controller reads. See [[self-test-tui-before-uat]].
+- **The rig immediately caught a real bug** unit tests missed: a thinking block only collapsed on an explicit
+  `status: think_end`; when assistant text followed directly the tracking index reset without marking it
+  closed → thinking stayed expanded forever. Fixed (text/thinking deltas now `closeOpen()` on transition).
+- **Autonomous polish pass toward native parity** (screenshot → assess → fix, judged against native Claude):
+  (1) markdown — `tab` 4→2, `* `→`•` bullets, blockquote now a gray `▌` bar + dim italic; (2) tool headers —
+  the generic Core summary ("Bash completed") replaced by native-style `⏺ Name(keyArg)` (green dot / red on
+  fail; arg = command/file_path/pattern/url/query); (3) `(N line[s])` pluralization. Todos panel (earlier
+  this session) repositions to latest activity + colored ✔/▶/☐ glyphs. **294 tests, typecheck clean.**
+- **Still desk-side only; no merge.** Next: hand the polished build back for a fresh Part-A UAT, then Part B.
+
 ### Co-Live Terminal M3.1 — ✅ spec + plan LOCKED (Readable transcript); plan reviewed → built
 
 - **Brainstorm (4.8, visual companion):** locked five decisions for the desk "readable transcript" rung —
