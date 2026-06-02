@@ -5,7 +5,9 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-01
 
-### Co-Live Terminal M3.0 — design/spec written + accepted-pending-review: "Desk Cockpit" parity inventory + roadmap
+### Co-Live Terminal M3.0 — ✅ LOCKED: "Desk Cockpit" parity inventory + roadmap
+
+- **Locked 2026-06-01** after a user-requested tweak: §0 makes **real-hardware UAT + user sign-off the non-negotiable definition of done** (green tests are only the precondition; build agents produce candidates, not "done"; M1/M2's "merge-before-testing" failure mode designed out).
 
 - **Spec:** `docs/superpowers/specs/2026-06-01-colive-terminal-m3-design.md` — the M3.0 deliverable (wishlist + feasibility sort + sequenced roadmap M3.1→M3.5 + parked backlog). No M3.1+ planning until reviewed.
 - **🔑 Headline finding (✅ verified vs `@anthropic-ai/claude-agent-sdk@0.3.158` `sdk.d.ts`):** our Core runs the SDK in **string-prompt mode**; the SDK's runtime controls — `setModel` (2186), `setPermissionMode` (2179), `supportedCommands` (2237), `mcpServerStatus` (2255), `setMaxThinkingTokens` (2203), real `interrupt` (2172), image-content prompts — exist **only in streaming-input mode** (`query({prompt: AsyncIterable<SDKUserMessage>})`, 2391). So `/model`, mode toggle/plan, `/compact`, MCP, image paste, clean interrupt all hinge on **one Core refactor** (string-prompt → streaming-input). Isolated as M3.3, the riskiest rung; reading/input/multi-session ship first.

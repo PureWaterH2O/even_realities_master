@@ -1,6 +1,6 @@
 # Co-Live Terminal — M3 "Desk Cockpit" design (M3.0 parity inventory + roadmap)
 
-> **Status:** design approved in brainstorm 2026-06-01 (4.8). This document **is** the M3.0 deliverable:
+> **Status:** ✅ **LOCKED** — accepted by the user 2026-06-01 (brainstorm w/ 4.8). This document **is** the M3.0 deliverable:
 > the feature wishlist, the feasibility classification, and the sequenced milestone roadmap. No M3.1+
 > implementation planning happens until this is reviewed and accepted.
 > **Relates to:** the original Co-Live design `2026-05-30-colive-terminal-design.md` (§6 "full native parity",
