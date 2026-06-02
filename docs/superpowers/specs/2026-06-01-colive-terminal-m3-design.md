@@ -7,6 +7,24 @@
 > §7 sequencing — this refines its M3). M1 + M2 are complete and merged (`4881ca4`).
 > **Confidence legend:** 🧪 self-verified (read our code) · ✅ verified (SDK type defs) · 🟡 community · 🔴 unverified.
 
+## 0. Definition of done — non-negotiable: real hardware UAT + user validation
+
+**This is the governing rule for every M3 rung. It overrides any agent's or session's claim of completion.**
+
+- **"Code complete + green tests + clean typecheck" is NOT done.** It is the *precondition* for UAT, nothing more.
+  Automated tests prove the software side; they do not prove the feature works on the glasses in the user's hand.
+- **A rung is DONE only after the user personally exercises it on the real G2 + R1 hardware and signs off.**
+  No rung is merged, marked complete, or built upon before that hardware-UAT sign-off. (Both M1 and M2 build
+  sessions tried to merge immediately after the last code task, before any real testing — the user blocked both.
+  That failure mode is explicitly designed out here.)
+- **Build (ultracode) agents must NOT self-declare "done."** Their output is a *candidate*. The controller
+  re-verifies tests/typecheck from a clean tree (never on agent self-report), then the work goes to the **user
+  for hardware UAT**. Only the user closes a rung.
+- **Every rung ships with a written UAT run-book** (concrete steps the user performs on hardware) and a place to
+  record the sign-off + any bugs found. Bugs found in UAT are fixed and **re-UAT'd**, not waved through.
+- The per-rung "Acceptance" entries in §7 are the *hardware* acceptance criteria — what the user must see work
+  on the real device for that rung to count.
+
 ## 1. Goal
 
 Make the **desk client** a daily driver: recreate the native `claude` Code TUI experience ("no regression"),
@@ -119,7 +137,9 @@ rather than leaking to the glasses. Open sub-questions for M3.3: whether to make
 ## 7. Milestone roadmap (recommended order — revisitable)
 
 Each rung is its own spec → plan → build → **hardware-UAT** cycle. Method: 4.8 brainstorm/plan → Opus 4.8
-ultracode execute → 4.6 validate. **"Done" = hardware UAT sign-off on the real G2 + R1**, not just green tests.
+ultracode execute → 4.6 validate → **user hardware UAT sign-off**. Per **§0 (non-negotiable)**: green tests are
+only the precondition; a rung is **done only when the user has exercised it on the real G2 + R1 and signed off**.
+Each rung carries a written UAT run-book; bugs found on hardware are fixed and re-UAT'd, never waved through.
 
 | Rung | Contents | Core change | Acceptance (hardware-UAT) |
 |---|---|---|---|
