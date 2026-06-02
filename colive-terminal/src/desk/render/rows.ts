@@ -49,10 +49,11 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
       // inline diff for edit-family tools (always, not just verbose)
       const diffs = block.detail ? extractEditDiff(block.name, block.detail.input) : undefined
       if (diffs) for (const d of diffs) rows.push(...toRows(renderDiff(d, width), width))
-      // verbose: raw input/output for any tool
+      // verbose: full input/output for any tool (Ctrl-O), pretty-printed + capped
+      // so a huge tool result stays scannable instead of one giant JSON line.
       if (verbose && block.detail) {
-        rows.push(...toRows(gray('  input:  ' + safeJson(block.detail.input)), width))
-        rows.push(...toRows(gray('  output: ' + safeJson(block.detail.output)), width))
+        rows.push(...renderDetail('input', block.detail.input, width))
+        rows.push(...renderDetail('output', block.detail.output, width))
       }
       return rows
     }
@@ -72,12 +73,27 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
   }
 }
 
-function safeJson(v: unknown): string {
-  try {
-    return typeof v === 'string' ? v : JSON.stringify(v)
-  } catch {
-    return String(v)
+/** Render one labelled detail field (input/output) as indented, capped rows. */
+function renderDetail(label: string, v: unknown, width: number): string[] {
+  const out = [gray(`  ${label}:`)]
+  for (const line of previewLines(v, 40)) out.push(gray('    ' + line))
+  return out.flatMap((l) => wrapAnsi(l, width))
+}
+
+/** A value as pretty-printed lines, capped at `maxLines` with a "…(N more)" tail. */
+function previewLines(v: unknown, maxLines: number): string[] {
+  let s: string
+  if (typeof v === 'string') s = v
+  else {
+    try {
+      s = JSON.stringify(v, null, 2) ?? String(v)
+    } catch {
+      s = String(v)
+    }
   }
+  const lines = s.split('\n')
+  if (lines.length <= maxLines) return lines
+  return [...lines.slice(0, maxLines), `…(${lines.length - maxLines} more lines)`]
 }
 
 /** Flatten every block to a single ANSI row buffer (the viewport input). */

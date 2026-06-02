@@ -253,6 +253,44 @@ describe('ClaudeSession — event normalization', () => {
     expect(emitted).toContainEqual({ type: 'status', state: 'think_end' })
   })
 
+  it('tool_end.detail.input carries the COMPLETE input, not the empty streaming placeholder', async () => {
+    // 🧪 Regression: content_block_start surfaces a tool_use with an EMPTY {} input
+    // (the real args stream later via input_json_delta, which we don't reassemble).
+    // The final assistant message carries the COMPLETE input and must overwrite the
+    // placeholder, so tool_end.detail.input is the real input (desk diff + Ctrl-O).
+    const fullInput = { file_path: '/a.ts', old_string: 'x', new_string: 'y' }
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'sess-tool' },
+      {
+        type: 'stream_event',
+        event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tool-9', name: 'Edit', input: {} } },
+      },
+      { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
+      { type: 'stream_event', event: { type: 'message_stop' } },
+      // final assistant message re-carries the SAME tool_use, now with full input
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-9', name: 'Edit', input: fullInput }] } },
+      // the SDK delivers the result as a type:'user' tool_result → pairs into tool_end
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-9', content: 'ok', is_error: false }] } },
+      { type: 'result', subtype: 'success', session_id: 'sess-tool', result: 'done', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 1, output_tokens: 1 } },
+    ]
+    const emitted: CoLiveEvent[] = []
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('edit it')
+
+    const end = emitted.find((e) => e.type === 'tool_end')
+    expect(end).toBeDefined()
+    expect((end as Extract<CoLiveEvent, { type: 'tool_end' }>).detail.input).toEqual(fullInput)
+    // exactly one tool_start despite the double-surfacing (stream + final message)
+    expect(emitted.filter((e) => e.type === 'tool_start')).toHaveLength(1)
+  })
+
   it('emits status idle on session_state_changed idle', async () => {
     const emitted: CoLiveEvent[] = []
     const messages = [

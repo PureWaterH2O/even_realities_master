@@ -198,6 +198,21 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, subSessionId])
 
+  // Full-screen (alternate screen buffer): the viewport owns the screen like
+  // vim/less/htop. In a real TTY this stops VS Code's integrated terminal from
+  // stealing PageUp/PageDown for its OWN scrollback (the alt buffer has none, so
+  // the keys reach the app) and prevents streamed frames from leaking into the
+  // host scrollback. Restored to the normal shell on exit. Skipped when stdout is
+  // not a TTY (tests / pipes) so those environments are unaffected.
+  useEffect(() => {
+    const out = stdout
+    if (!out || !out.isTTY) return
+    out.write('\x1b[?1049h') // enter alternate screen buffer
+    return () => {
+      out.write('\x1b[?1049l') // leave on unmount → restore the shell
+    }
+  }, [stdout])
+
   /* ------------------------- actions ------------------------- */
 
   const submitLine = useCallback(

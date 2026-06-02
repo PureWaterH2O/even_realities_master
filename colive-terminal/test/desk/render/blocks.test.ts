@@ -56,6 +56,38 @@ describe('reduceBlocks', () => {
     expect(todos[0]).toEqual({ kind: 'todos', items: [{ content: 'A', status: 'completed' }] })
   })
 
+  it('builds the panel from TaskCreate/TaskUpdate and suppresses their one-liners', () => {
+    // 🧪 This SDK build drives the task list via Task* tools, not TodoWrite.
+    const s = run([
+      { type: 'tool_start', name: 'TaskCreate', toolId: 'c1' },
+      { type: 'tool_end', name: 'TaskCreate', toolId: 'c1', summary: '', detail: { input: { subject: 'Step one', description: 'do one' }, output: { id: '1' } } },
+      { type: 'tool_start', name: 'TaskCreate', toolId: 'c2' },
+      { type: 'tool_end', name: 'TaskCreate', toolId: 'c2', summary: '', detail: { input: { subject: 'Step two', description: 'do two' }, output: { id: '2' } } },
+      { type: 'tool_start', name: 'TaskUpdate', toolId: 'u1' },
+      { type: 'tool_end', name: 'TaskUpdate', toolId: 'u1', summary: '', detail: { input: { taskId: '1', status: 'in_progress' }, output: {} } },
+      { type: 'tool_start', name: 'TaskUpdate', toolId: 'u2' },
+      { type: 'tool_end', name: 'TaskUpdate', toolId: 'u2', summary: '', detail: { input: { taskId: '1', status: 'completed' }, output: {} } },
+    ])
+    const todos = s.blocks.filter((b) => b.kind === 'todos')
+    expect(todos).toHaveLength(1)
+    expect(s.blocks.some((b) => b.kind === 'tool')).toBe(false) // Task* not rendered as tool lines
+    expect((todos[0] as Extract<typeof todos[0], { kind: 'todos' }>).items).toEqual([
+      { id: '1', content: 'Step one', status: 'completed' },
+      { id: '2', content: 'Step two', status: 'pending' },
+    ])
+  })
+
+  it('falls back to creation-order ids when TaskCreate output has no id', () => {
+    const s = run([
+      { type: 'tool_end', name: 'TaskCreate', toolId: 'c1', summary: '', detail: { input: { subject: 'A' }, output: 'Created task 1' } },
+      { type: 'tool_end', name: 'TaskUpdate', toolId: 'u1', summary: '', detail: { input: { taskId: '1', status: 'completed' }, output: {} } },
+    ])
+    const todos = s.blocks.filter((b) => b.kind === 'todos')
+    expect((todos[0] as Extract<typeof todos[0], { kind: 'todos' }>).items).toEqual([
+      { id: '1', content: 'A', status: 'completed' },
+    ])
+  })
+
   it('clear empties the blocks; reset seeds from transcript entries', () => {
     const seeded = reduceBlocks(initialBlockState(), {
       type: 'reset',
