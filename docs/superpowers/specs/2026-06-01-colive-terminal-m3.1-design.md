@@ -40,7 +40,9 @@ already flows; only the **text** is dropped.
 2. **`src/core/session.ts`** — in the `content_block_delta` case, alongside the existing `text_delta` branch:
    ```ts
    } else if (delta.type === 'thinking_delta') {
-     this.emit({ type: 'thinking_delta', text: asString(delta.text) })
+     // 🧪 the SDK carries thinking text in `delta.thinking`, NOT `delta.text`
+     // (verified in test/core/session.test.ts happyTurn). Our event field is `text`.
+     this.emit({ type: 'thinking_delta', text: asString(delta.thinking) })
    }
    ```
    Leave `think_start`/`think_end` and the `input_json_delta` drop unchanged. Update the file-header comment
