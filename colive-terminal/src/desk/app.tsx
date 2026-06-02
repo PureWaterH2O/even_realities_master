@@ -62,6 +62,9 @@ export interface AppProps {
 /* Status model                                                        */
 /* ------------------------------------------------------------------ */
 
+/** Rows moved per arrow key / mouse-wheel notch (1 felt sluggish for trackpads). */
+const WHEEL_STEP = 3
+
 const STATUS_LABEL: Record<StatusState, string> = {
   busy: 'busy',
   think_start: 'thinking',
@@ -340,11 +343,12 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       exit()
       return
     }
-    // Arrow keys scroll one row. In the alternate screen the terminal maps
+    // Arrow keys scroll a few rows. In the alternate screen the terminal maps
     // mouse-wheel / trackpad scrolling to ↑/↓ keystrokes, so this also gives
-    // natural wheel scrolling (like less/man) — UAT A1.
-    if (key.upArrow)   { setViewport((vp) => scrollLine(vp, rows.length, height, -1)); return }
-    if (key.downArrow) { setViewport((vp) => scrollLine(vp, rows.length, height, 1)); return }
+    // natural wheel scrolling (like less/man) — UAT A1. WHEEL_STEP > 1 because
+    // a terminal emits one ↑/↓ per wheel notch; 1 row/notch felt sluggish.
+    if (key.upArrow)   { setViewport((vp) => scrollLine(vp, rows.length, height, -1, WHEEL_STEP)); return }
+    if (key.downArrow) { setViewport((vp) => scrollLine(vp, rows.length, height, 1, WHEEL_STEP)); return }
     if (key.pageUp)   { setViewport((vp) => scrollPage(vp, rows.length, height, -1)); return }
     if (key.pageDown) { setViewport((vp) => scrollPage(vp, rows.length, height, 1)); return }
     if (key.ctrl && (ch === 'o' || ch === 'O')) { setVerbose((v) => !v); return }

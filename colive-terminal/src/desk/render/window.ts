@@ -42,9 +42,18 @@ export function scrollPage(vp: ViewportState, total: number, height: number, dir
   return scrollBy(vp, total, height, dir * height)
 }
 
-/** Scroll by one row (arrow keys / mouse-wheel); dir -1 = up, +1 = down. */
-export function scrollLine(vp: ViewportState, total: number, height: number, dir: -1 | 1): ViewportState {
-  return scrollBy(vp, total, height, dir)
+/**
+ * Scroll by `lines` rows (default 1); dir -1 = up, +1 = down. Arrow keys and the
+ * mouse-wheel land here — bumping `lines` makes a wheel notch travel further.
+ */
+export function scrollLine(
+  vp: ViewportState,
+  total: number,
+  height: number,
+  dir: -1 | 1,
+  lines = 1,
+): ViewportState {
+  return scrollBy(vp, total, height, dir * lines)
 }
 
 /** After the row buffer changes: follow bottom if pinned, else hold (clamped). */

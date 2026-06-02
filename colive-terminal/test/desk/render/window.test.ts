@@ -59,6 +59,12 @@ describe('viewport window', () => {
     expect(vp.offset).toBe(89)
   })
 
+  it('scrollLine takes an optional row count (wheel sensitivity)', () => {
+    const vp = scrollLine(pinBottom(100, 10), 100, 10, -1, 3)
+    expect(vp.offset).toBe(87) // 90 - 3
+    expect(vp.pinned).toBe(false)
+  })
+
   it('scrollLine clamps and re-pins at the bottom edge', () => {
     // already at top: up stays at 0
     expect(scrollLine({ offset: 0, pinned: false }, 50, 10, -1).offset).toBe(0)
