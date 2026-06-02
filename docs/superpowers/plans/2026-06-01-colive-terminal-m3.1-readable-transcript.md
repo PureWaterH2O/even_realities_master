@@ -99,6 +99,19 @@ it('emits thinking_delta carrying the SDK thinking text (desk-only render)', asy
 })
 ```
 
+- [ ] **Step 1b: REWRITE the pre-existing contradictory test (REQUIRED)**
+
+`test/core/session.test.ts:~220` `it('never emits a thinking_delta as any event', ...)` encodes the OLD
+desk-leak-suppression behavior and **will fail** once the Core emits `thinking_delta` (its
+`expect(serialized).not.toContain('top secret reasoning')` inverts). **Delete that whole test** — the Step-1
+test above already covers the positive assertion. To keep its still-valid coverage, append these two lines to the
+Step-1 test body (status still brackets thinking, no thinking-as-text):
+```ts
+  expect(emitted).toContainEqual({ type: 'status', state: 'think_start' })
+  expect(emitted).toContainEqual({ type: 'status', state: 'think_end' })
+```
+**Net:** 1 existing test rewritten/removed (it tested the now-reversed behavior), not "all unchanged."
+
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `npm test -- test/core/session.test.ts`
@@ -151,7 +164,7 @@ Also update the file-header comment (lines 27-28) to: `Thinking text is emitted 
 - [ ] **Step 5: Run the Core test to verify it passes**
 
 Run: `npm test -- test/core/session.test.ts`
-Expected: PASS (new test + all existing session tests green — the `streamSeq` and `no-secret-in-text` assertions are unaffected).
+Expected: PASS — the new thinking test passes and all OTHER session tests stay green. (The old `never emits a thinking_delta as any event` test was **rewritten/removed in Step 1b**, not left as-is — it asserted the now-reversed behavior. Net: 1 test rewritten, the rest unchanged.)
 
 - [ ] **Step 6: Extend the vocabulary test**
 
@@ -663,6 +676,8 @@ describe('reduceBlocks', () => {
     ])
     const assistants = s.blocks.filter((b) => b.kind === 'assistant')
     expect(assistants).toHaveLength(2)
+    // the first (pre-result) assistant is CLOSED so it renders markdown, not raw text
+    expect((assistants[0] as { closed: boolean }).closed).toBe(true)
   })
 
   it('renders TodoWrite as a single todos block that updates in place', () => {
@@ -771,11 +786,31 @@ export function reduceBlocks(state: BlockState, action: BlockAction): BlockState
   }
 }
 
+/**
+ * Mark the currently-open assistant + thinking blocks `closed: true`, so a finished
+ * assistant renders markdown (rows.ts gates markdown on `closed`) and finished
+ * thinking collapses to its stub. Pure — returns a new blocks array. Call this
+ * whenever we move off an open block.
+ */
+function closeOpen(state: BlockState): Block[] {
+  const next = state.blocks.slice()
+  if (state.openAssistant >= 0 && next[state.openAssistant]?.kind === 'assistant') {
+    const a = next[state.openAssistant] as Extract<Block, { kind: 'assistant' }>
+    next[state.openAssistant] = { ...a, closed: true }
+  }
+  if (state.openThinking >= 0 && next[state.openThinking]?.kind === 'thinking') {
+    const t = next[state.openThinking] as Extract<Block, { kind: 'thinking' }>
+    next[state.openThinking] = { ...t, closed: true }
+  }
+  return next
+}
+
 function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
   const blocks = state.blocks
   switch (event.type) {
     case 'user_prompt':
-      return { blocks: [...blocks, { kind: 'user', text: event.text }], openAssistant: -1, openThinking: -1 }
+      // close any open assistant/thinking from the prior turn before the new prompt
+      return { blocks: [...closeOpen(state), { kind: 'user', text: event.text }], openAssistant: -1, openThinking: -1 }
 
     case 'text_delta': {
       const next = blocks.slice()
@@ -812,7 +847,8 @@ function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
 
     case 'tool_start': {
       if (event.name === 'TodoWrite') return state // panel is built on tool_end
-      return { blocks: [...blocks, { kind: 'tool', toolId: event.toolId, name: event.name }], openAssistant: -1, openThinking: -1 }
+      // close the open assistant/thinking first so a pre-tool answer segment renders markdown
+      return { blocks: [...closeOpen(state), { kind: 'tool', toolId: event.toolId, name: event.name }], openAssistant: -1, openThinking: -1 }
     }
 
     case 'tool_end': {
@@ -834,7 +870,9 @@ function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
     }
 
     case 'result':
-      return { ...state, openAssistant: -1, openThinking: -1 }
+      // close the open assistant + thinking so the finished answer renders markdown
+      // (rows.ts gates markdown on `closed`) and thinking collapses to its stub.
+      return { ...state, blocks: closeOpen(state), openAssistant: -1, openThinking: -1 }
 
     case 'notification':
       return { ...state, blocks: [...blocks, { kind: 'note', text: `${event.title}: ${event.message}` }], openAssistant: -1, openThinking: -1 }
@@ -912,6 +950,14 @@ describe('renderBlockRows', () => {
     expect(rows).toContain('A')
     expect(rows).toContain('B')
     expect(rows).toMatch(/\[x\]|✔|done/i)
+  })
+
+  it('assistant renders raw while open, markdown once closed', () => {
+    const open = renderBlockRows({ kind: 'assistant', text: '# Title', closed: false }, opts).map(stripAnsi).join('\n')
+    expect(open).toContain('# Title') // raw passthrough while streaming (no flicker)
+    const closed = renderBlockRows({ kind: 'assistant', text: '# Title', closed: true }, opts).map(stripAnsi).join('\n')
+    expect(closed).toContain('Title')
+    expect(closed).not.toContain('# Title') // markdown-rendered: the raw # marker is gone
   })
 })
 
@@ -1259,9 +1305,15 @@ const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
 
 3. **Dispatch shape** — the reducer actions changed names: `{ type:'reset', entries }` (was `lines`), `{ type:'localUser', text }`, `{ type:'note', text }`, `{ type:'clear' }`, `{ type:'event', event }`. Update the four call sites accordingly (e.g. `dispatch({ type: 'reset', entries: seeded })` instead of mapping to lines).
 
-4. **Rows + window** — compute every render:
+4. **Rows + window** — compute each render, but **MEMOIZE the flatten** so `marked` + `cli-highlight`
+   don't re-run over every block on each keystroke / 10s `running_stats` tick. `transcript.blocks` only
+   changes on a transcript event (not on input edits), so the memo skips the expensive work while typing.
+   **Add `useMemo` to the existing `react` import.**
 ```ts
-const rows = flattenRows(transcript.blocks, { width, verbose })
+const rows = useMemo(
+  () => flattenRows(transcript.blocks, { width, verbose }),
+  [transcript.blocks, width, verbose],
+)
 // follow bottom while streaming; hold position when scrolled up
 useEffect(() => { setViewport((vp) => afterContentChange(vp, rows.length, height)) }, [rows.length, height])
 const win = computeWindow(rows, height, viewport)
@@ -1385,3 +1437,7 @@ Per spec §0: green tests are the precondition, **not done**. The build produces
 - **Spec coverage:** scrollback viewport → Tasks 9-11; diff inline → Tasks 7,9 + app test; syntax highlight → Tasks 5,6,7; markdown → Task 6,9; Ctrl-O global verbose → Tasks 9,11; todos in place → Tasks 8,9; thinking (Core event + desk render + collapse) → Tasks 2,8,9,11; broadcast-and-ignore (B2) → Task 12; deps → Task 1; invariants/237-green + clean-tree gate → Tasks 11,13; UAT hand-off → Task 13.
 - **Placeholders:** none — every code step has full code; the two library-API caveats (marked-terminal `use` signature in Task 6; ink `key.end`/`key.pageUp` names in Task 11) name the exact file to check and the observable contract to satisfy, not a vague "handle it."
 - **Type consistency:** `Block`, `BlockState`, `BlockAction`, `reduceBlocks`, `initialBlockState`, `RenderOpts`, `flattenRows`, `renderBlockRows`, `ViewportState`, `computeWindow`, `scrollPage`, `pinBottom`, `afterContentChange`, `DiffInput`, `extractEditDiff`, `renderDiff`, `wrapAnsi`, `highlight`, `renderMarkdown`, `ThinkingDeltaEvent`{text} are used identically across tasks.
+- **Planner-review patches (2026-06-01, Opus 4.8 validator) — 3 fixes applied to this plan:**
+  1. **Task 2 Step 1b:** rewrites/removes the pre-existing `never emits a thinking_delta as any event` test (`session.test.ts:~220`), which the new desk-only behavior inverts — without this an existing test fails and "237 stay green" is false. Invariant restated as "1 rewritten, rest unchanged."
+  2. **Task 8:** the reducer now marks the open assistant/thinking `closed: true` on `result` / `tool_start` / `user_prompt` via a new pure `closeOpen()` helper — without this, **live answers never render markdown** (only seeded history did), failing UAT A4. Covered by a reducer assertion (closed===true) + a `rows` test (raw-while-open, markdown-once-closed).
+  3. **Task 11:** `app.tsx` memoizes `flattenRows` (`useMemo` on `[transcript.blocks, width, verbose]`) so markdown/syntax-highlight don't re-run on every keystroke / 10s tick — perf for long daily-driver sessions.
