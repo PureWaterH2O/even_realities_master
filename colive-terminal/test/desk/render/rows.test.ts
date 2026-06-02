@@ -35,11 +35,15 @@ describe('renderBlockRows', () => {
     expect(closed).not.toContain('\nb')
   })
 
-  it('todos block renders a checklist with status markers', () => {
-    const rows = renderBlockRows({ kind: 'todos', items: [{ content: 'A', status: 'completed' }, { content: 'B', status: 'in_progress' }] }, opts).map(stripAnsi).join('\n')
-    expect(rows).toContain('A')
-    expect(rows).toContain('B')
-    expect(rows).toMatch(/\[x\]|✔|done/i)
+  it('todos block renders distinct glyphs per status (✔ / ▶ / ☐)', () => {
+    const rows = renderBlockRows({ kind: 'todos', items: [
+      { content: 'Adone', status: 'completed' },
+      { content: 'Bnow', status: 'in_progress' },
+      { content: 'Csoon', status: 'pending' },
+    ] }, opts).map(stripAnsi).join('\n')
+    expect(rows).toMatch(/✔\s+Adone/)  // completed
+    expect(rows).toMatch(/▶\s+Bnow/)   // in-progress, highlighted
+    expect(rows).toMatch(/☐\s+Csoon/)  // pending
   })
 
   it('assistant renders raw while open, markdown once closed', () => {

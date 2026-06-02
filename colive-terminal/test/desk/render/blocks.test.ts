@@ -77,6 +77,21 @@ describe('reduceBlocks', () => {
     ])
   })
 
+  it('moves the todos panel to the latest activity, not its first appearance', () => {
+    // The panel must render its CURRENT state in context (next to recent work),
+    // not sit frozen at the top showing the final state above the steps. UAT A5.
+    const s = run([
+      { type: 'tool_end', name: 'TaskCreate', toolId: 'c1', summary: '', detail: { input: { subject: 'A' }, output: { id: '1' } } },
+      { type: 'tool_start', name: 'Bash', toolId: 'b1' },
+      { type: 'tool_end', name: 'Bash', toolId: 'b1', summary: 'ran', detail: { input: {}, output: 'ok' } },
+      { type: 'tool_end', name: 'TaskUpdate', toolId: 'u1', summary: '', detail: { input: { taskId: '1', status: 'completed' }, output: {} } },
+    ])
+    const todoIdx = s.blocks.findIndex((b) => b.kind === 'todos')
+    const bashIdx = s.blocks.findIndex((b) => b.kind === 'tool' && (b as { name: string }).name === 'Bash')
+    expect(s.blocks.filter((b) => b.kind === 'todos')).toHaveLength(1) // still a single panel
+    expect(todoIdx).toBeGreaterThan(bashIdx) // followed the work downward
+  })
+
   it('falls back to creation-order ids when TaskCreate output has no id', () => {
     const s = run([
       { type: 'tool_end', name: 'TaskCreate', toolId: 'c1', summary: '', detail: { input: { subject: 'A' }, output: 'Created task 1' } },

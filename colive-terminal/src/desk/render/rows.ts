@@ -1,6 +1,6 @@
 // src/desk/render/rows.ts
 import type { Block, TodoItem } from './blocks'
-import { cyan, green, gray, dim, italic, bold } from './ansi'
+import { cyan, green, gray, yellow, dim, italic, bold } from './ansi'
 import { wrapAnsi } from './wrap'
 import { renderMarkdown } from './markdown'
 import { extractEditDiff, renderDiff } from './diff'
@@ -15,10 +15,13 @@ export interface RenderOpts {
 const toRows = (s: string, width: number): string[] =>
   s.split('\n').flatMap((line) => wrapAnsi(line, width))
 
-const TODO_MARK: Record<TodoItem['status'], string> = {
-  completed: '[x]',
-  in_progress: '[~]',
-  pending: '[ ]',
+/** Per-status glyph + line styling for the todos panel (mirrors native's look:
+ *  a green check for done, a highlighted arrow for the active item, a dim box
+ *  for what's queued). Each entry colors the glyph and the whole line. */
+const TODO_STYLE: Record<TodoItem['status'], { glyph: string; line: (s: string) => string }> = {
+  completed: { glyph: green('✔'), line: gray },
+  in_progress: { glyph: yellow('▶'), line: bold },
+  pending: { glyph: dim('☐'), line: dim },
 }
 
 export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
@@ -61,8 +64,9 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
     case 'todos': {
       const header = bold('Todos')
       const items = block.items.map((t) => {
-        const line = `  ${TODO_MARK[t.status]} ${t.content}`
-        return t.status === 'completed' ? gray(line) : t.status === 'in_progress' ? green(line) : line
+        const { glyph, line } = TODO_STYLE[t.status]
+        // glyph keeps its own color; the rest of the line gets the status style.
+        return `  ${glyph} ${line(t.content)}`
       })
       return [header, ...items].flatMap((line) => wrapAnsi(line, width))
     }

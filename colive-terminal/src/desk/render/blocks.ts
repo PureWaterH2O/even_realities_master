@@ -64,12 +64,15 @@ function currentTodos(blocks: Block[]): TodoItem[] {
   return b ? (b as Extract<Block, { kind: 'todos' }>).items : []
 }
 
-/** Replace/insert the single todos panel with `items`, in place. */
+/**
+ * Set the single todos panel to `items`, repositioned to the END so it renders
+ * its current state next to the most recent activity (like native), instead of
+ * staying frozen at its first-appearance index — where the final all-done state
+ * would otherwise show ABOVE the steps that produced it. UAT A5.
+ */
 function setTodos(blocks: Block[], items: TodoItem[]): Block[] {
-  const next = blocks.slice()
-  const idx = next.findIndex((b) => b.kind === 'todos')
-  if (idx >= 0) next[idx] = { kind: 'todos', items }
-  else next.push({ kind: 'todos', items })
+  const next: Block[] = blocks.filter((b) => b.kind !== 'todos')
+  next.push({ kind: 'todos', items })
   return next
 }
 
