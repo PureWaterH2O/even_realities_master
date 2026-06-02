@@ -217,20 +217,22 @@ describe('ClaudeSession — event normalization', () => {
     expect(calls[0].options.resume).toBeUndefined()
   })
 
-  it('never emits a thinking_delta as any event', async () => {
+  it('emits thinking_delta carrying the SDK thinking text (desk-only render)', async () => {
     const emitted: CoLiveEvent[] = []
+    // A turn that opens a real thinking content block and streams thinking:'secret'
+    // (the shared happyTurnMessages fixture deliberately omits think_start/end).
     const messages = [
-      { type: 'system', subtype: 'init', session_id: 's1' },
+      { type: 'system', subtype: 'init', session_id: 'sess-think' },
       {
         type: 'stream_event',
         event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
       },
       {
         type: 'stream_event',
-        event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'top secret reasoning' } },
+        event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'secret' } },
       },
       { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
-      { type: 'result', subtype: 'success', session_id: 's1', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
+      { type: 'result', subtype: 'success', session_id: 'sess-think', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } },
     ]
     const { fn } = fakeQuery([messages])
     const session = new ClaudeSession({
@@ -240,13 +242,13 @@ describe('ClaudeSession — event normalization', () => {
       query: fn,
     })
     await session.start(undefined, realpathSync(tmpdir()))
-    await session.run('think please')
+    await session.run('think hard')
 
-    // no event anywhere carries the thinking text
-    const serialized = JSON.stringify(emitted)
-    expect(serialized).not.toContain('top secret reasoning')
-    // think_start / think_end status is fine; text_delta for thinking is NOT
-    expect(emitted.filter((e) => e.type === 'text_delta')).toEqual([])
+    // the turn streams a thinking_delta with thinking:'secret'
+    expect(emitted).toContainEqual({ type: 'thinking_delta', text: 'secret' })
+    // and it is STILL never surfaced as assistant text
+    expect(emitted.some((e) => e.type === 'text_delta' && e.text.includes('secret'))).toBe(false)
+    // status still brackets thinking (no thinking-as-text)
     expect(emitted).toContainEqual({ type: 'status', state: 'think_start' })
     expect(emitted).toContainEqual({ type: 'status', state: 'think_end' })
   })

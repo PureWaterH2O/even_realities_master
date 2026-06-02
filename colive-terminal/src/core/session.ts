@@ -24,8 +24,8 @@
  * NO permission logic and makes NO network/model calls of its own; tests pass a
  * fake `query` and a stub `canUseTool`.
  *
- * Thinking text is NEVER broadcast (M0 🧪): `thinking_delta` produces no event,
- * and thinking content blocks surface only as `think_start`/`think_end` status.
+ * Thinking text is emitted as a desk-only 'thinking_delta' event (the closed Even
+ * app ignores it); think_start/think_end status still bracket it.
  */
 import { realpathSync } from 'node:fs'
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'
@@ -475,8 +475,12 @@ export class ClaudeSession {
         if (!isRecord(delta)) return
         if (delta.type === 'text_delta') {
           this.emit({ type: 'text_delta', text: asString(delta.text) })
+        } else if (delta.type === 'thinking_delta') {
+          // 🧪 thinking text lives in delta.thinking (not delta.text). Emitted for
+          // DESK-ONLY render; the closed Even app ignores unknown event types.
+          this.emit({ type: 'thinking_delta', text: asString(delta.thinking) })
         }
-        // thinking_delta and input_json_delta: NO event (never leak thinking).
+        // input_json_delta: still NO event.
         return
       }
       case 'content_block_stop': {
