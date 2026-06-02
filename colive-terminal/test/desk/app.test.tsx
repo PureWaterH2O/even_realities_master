@@ -398,6 +398,26 @@ describe('desk App', () => {
     } finally { unmount() }
   })
 
+  it('arrow keys scroll the viewport (↑ unpins, ↓ re-pins) — wheel/trackpad', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, stdin, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await act(async () => {})
+      // Overflow the 20-row test viewport so the scroll footer appears.
+      const long = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')
+      act(() => { hub.emit({ type: 'text_delta', text: long }) })
+      expect(lastFrame()).toContain('(pinned ▼)') // starts pinned at bottom
+
+      act(() => { stdin.write('\x1B[A') }) // Up arrow -> scroll up one line
+      const up = lastFrame() ?? ''
+      expect(up).not.toContain('(pinned ▼)') // unpinned now
+      expect(up).toContain('PgUp/PgDn') // unpinned hint shows
+
+      act(() => { stdin.write('\x1B[B') }) // Down arrow -> back to bottom, re-pins
+      expect(lastFrame()).toContain('(pinned ▼)')
+    } finally { unmount() }
+  })
+
   it('Ctrl-O toggles tool verbose detail', async () => {
     const hub = makeFakeHub()
     const { lastFrame, stdin, unmount } = render(<App client={hub} sessionId="s1" />)

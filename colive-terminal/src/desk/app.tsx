@@ -39,7 +39,7 @@ import type {
 import { interpretInput } from './slash'
 import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
-import { computeWindow, scrollPage, pinBottom, afterContentChange, initialViewport } from './render/window'
+import { computeWindow, scrollPage, scrollLine, pinBottom, afterContentChange, initialViewport } from './render/window'
 import type { ViewportState } from './render/window'
 
 /** Optional construction config for the app. */
@@ -340,6 +340,11 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       exit()
       return
     }
+    // Arrow keys scroll one row. In the alternate screen the terminal maps
+    // mouse-wheel / trackpad scrolling to ↑/↓ keystrokes, so this also gives
+    // natural wheel scrolling (like less/man) — UAT A1.
+    if (key.upArrow)   { setViewport((vp) => scrollLine(vp, rows.length, height, -1)); return }
+    if (key.downArrow) { setViewport((vp) => scrollLine(vp, rows.length, height, 1)); return }
     if (key.pageUp)   { setViewport((vp) => scrollPage(vp, rows.length, height, -1)); return }
     if (key.pageDown) { setViewport((vp) => scrollPage(vp, rows.length, height, 1)); return }
     if (key.ctrl && (ch === 'o' || ch === 'O')) { setVerbose((v) => !v); return }

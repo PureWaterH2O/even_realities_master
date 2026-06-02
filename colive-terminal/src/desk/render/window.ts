@@ -29,12 +29,22 @@ export function computeWindow(rows: string[], height: number, vp: ViewportState)
   return { visible: rows.slice(off, off + height), offset: off, total, pinned: vp.pinned }
 }
 
-/** Scroll by one page; dir -1 = up, +1 = down. Re-pins when it lands at bottom. */
-export function scrollPage(vp: ViewportState, total: number, height: number, dir: -1 | 1): ViewportState {
+/** Scroll by `step` rows; negative = up, positive = down. Re-pins at the bottom. */
+function scrollBy(vp: ViewportState, total: number, height: number, step: number): ViewportState {
   const max = maxOffset(total, height)
   const base = vp.pinned ? max : vp.offset
-  const offset = clamp(base + dir * height, 0, max)
+  const offset = clamp(base + step, 0, max)
   return { offset, pinned: offset >= max }
+}
+
+/** Scroll by one page; dir -1 = up, +1 = down. Re-pins when it lands at bottom. */
+export function scrollPage(vp: ViewportState, total: number, height: number, dir: -1 | 1): ViewportState {
+  return scrollBy(vp, total, height, dir * height)
+}
+
+/** Scroll by one row (arrow keys / mouse-wheel); dir -1 = up, +1 = down. */
+export function scrollLine(vp: ViewportState, total: number, height: number, dir: -1 | 1): ViewportState {
+  return scrollBy(vp, total, height, dir)
 }
 
 /** After the row buffer changes: follow bottom if pinned, else hold (clamped). */
