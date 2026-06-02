@@ -529,10 +529,13 @@ export class ClaudeSession {
         const toolId = asString(block.id)
         const name = asString(block.name)
         // Record the {name, input} so the matching tool_result can pair into a
-        // tool_end even when this tool was only surfaced in the final message.
-        if (!this.openTools.has(toolId)) {
-          this.openTools.set(toolId, { name, input: block.input })
-        }
+        // tool_end. 🧪 OVERWRITE unconditionally: a streaming content_block_start
+        // stored an EMPTY {} input (the real args stream via input_json_delta,
+        // which we don't reassemble); this final assistant message carries the
+        // COMPLETE input, so it must replace the placeholder — otherwise
+        // tool_end.detail.input stays {} and the desk's diff + Ctrl-O verbose are
+        // blank. (The tool_start dedup below is independent of this.)
+        this.openTools.set(toolId, { name, input: block.input })
         // Skip any tool already announced via a streaming content_block_start
         // this turn (includePartialMessages double-surfaces the same tool_use).
         if (this.announcedToolIds.has(toolId)) continue
