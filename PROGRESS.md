@@ -5,6 +5,23 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-02
 
+### Co-Live Terminal M3.2 — scoping the "typeable" rung (planner: Opus 4.8)
+
+- **M3.2 split into two rungs** (user call): **M3.2A "Composer"** (editor core) + **M3.2B** (`@`-file autocomplete +
+  `!`bash). Boundary = "lives inside the input box" vs "reaches into the host environment."
+- **M3.2A design complete** (`docs/superpowers/specs/2026-06-02-colive-terminal-m3.2a-composer-design.md`) — awaiting
+  user review → writing-plans. Locked: Enter submits / `Ctrl-J`+`\`-Enter newline; **`↑`/`↓` = input** (history +
+  multiline cursor) with **real mouse-wheel reporting for transcript scroll** (replaces M3.1's wheel→arrows hack);
+  full keymap saved **with macOS-laptop Fn-equivalents**; **per-project persisted history**; slash-menu over the
+  existing `slash.ts` commands (reusable `CompletionMenu` for M3.2B); **zero Core change**.
+- **Decided NOT to do a broad TUI-research spike** — our M3.1 pain was mostly integration/protocol ("Bucket B",
+  UAT-discoverable), not TUI-craft; a survey would be low-transfer. Revisit only if we hit a craft wall.
+- **🧪 Probed ink 7.0.5 input internals before locking §7** (recoups some skipped-spike value): `usePaste` gives
+  built-in bracketed paste (full string, separate channel); mouse isn't auto-enabled but ink assembles SGR mouse
+  sequences and re-emits them raw on `internal_eventEmitter`'s `'input'` channel (wheel = btn 64/65). → captured in
+  `knowledge/terminal-mode/ink7-input-internals.md`. Mouse/paste plumbing is GREEN; one hardware caveat (does the VS
+  Code terminal forward SGR mouse) with graceful PageUp/PageDown fallback.
+
 ### Co-Live Terminal M3.1 "Readable transcript" — ✅ DONE, hardware-signed-off, MERGED to `main`
 
 - **Merged to `main` 2026-06-02** as a `--no-ff` merge commit **`fda7e26`** (branch `colive-terminal-m3.1`).
