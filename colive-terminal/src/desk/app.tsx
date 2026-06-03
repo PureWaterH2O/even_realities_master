@@ -25,7 +25,7 @@
  *    / client.respondQuestion(sessionId, answer, toolUseId). Esc interrupts.
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Box, Text, useApp, useInput, useStdout } from 'ink'
+import { Box, Text, useApp, useInput, usePaste, useStdin, useStdout } from 'ink'
 import type {
   HubClient,
   SubscriptionHandle,
@@ -44,6 +44,7 @@ import type { ViewportState } from './render/window'
 import * as B from './input/buffer'
 import type { EditBuffer } from './input/buffer'
 import { renderInputRows } from './input/input-rows'
+import { parseSgrMouse } from './input/mouse'
 import { initNav, prev as histPrev, next as histNext, memoryHistoryStore } from './input/history'
 import type { HistoryStore, HistoryNav } from './input/history'
 
@@ -110,22 +111,27 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const [viewport, setViewport] = useState<ViewportState>(initialViewport)
   const { stdout } = useStdout()
   const width = (stdout?.columns ?? 80)
-  // Reserve lines for the chrome (scroll indicator + status + input) PLUS one
-  // line of headroom. The headroom is load-bearing: ink redraws by moving the
-  // cursor up N lines and overwriting in place; if our total output exactly
-  // fills the terminal, the final newline scrolls the terminal up by one, ink's
-  // cursor math drifts, and every streamed frame leaks a (raw) line into the
-  // host scrollback. Keeping output strictly shorter than the terminal keeps the
-  // viewport a clean fixed region (no scrollback fighting — UAT A1).
-  const reserved = 4 // indicator + status + input + 1 line headroom
-  const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
   const [status, setStatus] = useState<StatusInfo>({ state: 'idle' })
   const [pending, setPending] = useState<Pending | undefined>(undefined)
   const [buf, setBuf] = useState<EditBuffer>(B.empty)
 
+  // Bracketed paste rides ink's separate channel (never reaches useInput), so multi-line
+  // pasted text lands in the buffer and can never trigger per-char or submit logic.
+  usePaste((text) => { setBuf((b) => B.insertText(b, text)) })
+
   const historyStore = useMemo<HistoryStore>(() => config?.historyStore ?? memoryHistoryStore(), [config?.historyStore])
   const historyKey = config?.historyKey ?? 'default'
   const [nav, setNav] = useState<HistoryNav>(() => initNav(historyStore.load(historyKey)))
+
+  // Reserve lines for the chrome (scroll indicator + status line + 1 line of headroom)
+  // PLUS the composer's own rows, which grow as the buffer gains lines. The headroom is
+  // load-bearing: ink redraws by moving the cursor up N lines and overwriting in place; if
+  // total output exactly fills the terminal, the trailing newline scrolls the host and ink's
+  // cursor math drifts (leaking lines into scrollback). Keeping output strictly shorter than
+  // the terminal keeps the viewport a clean fixed region (UAT A1).
+  const inputRowCount = pending && pending.kind === 'question' ? 0 : renderInputRows(buf, { width }).length
+  const reserved = 3 + inputRowCount // indicator + status + headroom + the composer's rows
+  const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
   // or reset by /clear). A ref keeps the latest value available to async
@@ -310,6 +316,25 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // follow bottom while streaming; hold position when scrolled up
   useEffect(() => { setViewport((vp) => afterContentChange(vp, rows.length, height)) }, [rows.length, height])
   const win = computeWindow(rows, height, viewport)
+
+  // Mouse wheel scrolls the transcript. ink re-emits every non-paste byte verbatim on its
+  // internal 'input' channel, so we tap that and parse the raw SGR mouse report ourselves.
+  const { internal_eventEmitter } = useStdin() as unknown as {
+    internal_eventEmitter?: { on(e: string, l: (s: string) => void): void; removeListener(e: string, l: (s: string) => void): void }
+  }
+  useEffect(() => {
+    const em = internal_eventEmitter
+    if (!em) return
+    const onInput = (raw: string): void => {
+      // The emitter delivers the raw SGR mouse report WITH a leading ESC; parseSgrMouse is
+      // anchored on "[<", so strip the ESC first. Non-wheel / non-mouse input → null → ignored.
+      const seq = raw.startsWith('\x1b') ? raw.slice(1) : raw
+      const dir = parseSgrMouse(seq)
+      if (dir !== null) setViewport((vp) => scrollLine(vp, rows.length, height, dir, WHEEL_STEP))
+    }
+    em.on('input', onInput)
+    return () => em.removeListener('input', onInput)
+  }, [internal_eventEmitter, rows.length, height])
 
   /* ------------------------- input ------------------------- */
 

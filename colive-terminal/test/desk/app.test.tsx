@@ -611,4 +611,47 @@ describe('desk App', () => {
     expect(lastFrame()).not.toContain('beta')   // input cleared; transcript is empty in this fresh hub
     cleanup()
   })
+
+  it('a multi-line paste lands in the buffer without submitting', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '\x1b[200~alpha\nbeta\x1b[201~') // bracketed paste -> usePaste
+    expect(sent).toHaveLength(0)                         // paste must NOT auto-submit
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).toContain('alpha')
+    expect(frame).toContain('beta')
+    cleanup()
+  })
+
+  it('mouse wheel-up scrolls the transcript (raw SGR report via the input emitter)', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    const long = Array.from({ length: 60 }, (_, i) => `row ${i}`).join('\n')
+    act(() => { fake.emit({ type: 'text_delta', text: long }) }) // overflow the 20-row viewport
+    await flush()
+    expect(lastFrame()).toContain('(pinned ▼)')          // starts pinned at bottom
+    await write(stdin, '\x1b[<64;1;1M')                   // wheel-up (button 64) -> scroll up, unpin
+    const after = lastFrame() ?? ''
+    expect(after).not.toContain('(pinned ▼)')             // the wheel actually moved the viewport
+    expect(after).toContain('PgUp/PgDn')                  // unpinned hint now shows
+    cleanup()
+  })
+
+  it('the transcript viewport shrinks as the composer grows (dynamic reservation)', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    const long = Array.from({ length: 40 }, (_, i) => `trow ${i}`).join('\n')
+    act(() => { fake.emit({ type: 'text_delta', text: long }) })
+    await flush()
+    const before = (stripAnsi(lastFrame() ?? '').match(/trow \d+/g) ?? []).length
+    await write(stdin, '\n'); await write(stdin, '\n'); await write(stdin, '\n'); await write(stdin, '\n') // 4× Ctrl-J -> composer = 5 rows
+    const after = (stripAnsi(lastFrame() ?? '').match(/trow \d+/g) ?? []).length
+    expect(after).toBeLessThan(before) // a taller composer reserves more rows -> fewer transcript rows visible
+    cleanup()
+  })
 })
