@@ -130,7 +130,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // cursor math drifts (leaking lines into scrollback). Keeping output strictly shorter than
   // the terminal keeps the viewport a clean fixed region (UAT A1).
   const inputRowCount = pending && pending.kind === 'question' ? 0 : renderInputRows(buf, { width }).length
-  const reserved = 3 + inputRowCount // indicator + status + headroom + the composer's rows
+  const reserved = 3 + inputRowCount // 3 = scroll indicator + status + headroom; inputRowCount = composer rows
   const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
@@ -319,6 +319,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
   // Mouse wheel scrolls the transcript. ink re-emits every non-paste byte verbatim on its
   // internal 'input' channel, so we tap that and parse the raw SGR mouse report ourselves.
+  // We read the mouse-wheel off ink's undocumented internal 'input' emitter (an ink 7
+  // internal). Mechanism + the SGR/ESC details: knowledge/terminal-mode/ink7-input-internals.md.
   const { internal_eventEmitter } = useStdin() as unknown as {
     internal_eventEmitter?: { on(e: string, l: (s: string) => void): void; removeListener(e: string, l: (s: string) => void): void }
   }

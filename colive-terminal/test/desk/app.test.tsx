@@ -654,4 +654,18 @@ describe('desk App', () => {
     expect(after).toBeLessThan(before) // a taller composer reserves more rows -> fewer transcript rows visible
     cleanup()
   })
+
+  it('a paste containing a carriage return is inserted atomically and never submits (usePaste safety)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // A bare \r INSIDE a paste must be inserted literally, never treated as Enter. usePaste
+    // delivers the whole paste atomically off the input channel; were the paste to leak through
+    // useInput, the \r would be key.return and submit mid-paste.
+    await write(stdin, '\x1b[200~one\rtwo\x1b[201~')
+    expect(sent).toHaveLength(0)
+    cleanup()
+  })
 })
