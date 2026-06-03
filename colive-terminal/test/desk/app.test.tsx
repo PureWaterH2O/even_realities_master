@@ -577,4 +577,38 @@ describe('desk App', () => {
     cleanup()
     expect(store.load('p')).toEqual(['real prompt']) // /help never recorded
   })
+
+  it('resets history navigation after a slash submit (↑ returns to the newest prompt, not a stale one)', async () => {
+    const store = memoryHistoryStore()
+    store.append('r', 'one')
+    store.append('r', 'two')               // history seeded: ['one','two']
+    const { stdin, lastFrame, cleanup } = mount(<App client={makeFakeHub()} sessionId="s1" config={{ historyStore: store, historyKey: 'r' }} />)
+    await flush()
+    await write(stdin, '\x1b[A')           // ↑ -> recalls 'two' (nav moves into history)
+    expect(lastFrame()).toContain('two')
+    await write(stdin, '\x17')             // Ctrl-W -> delete the recalled word ('two') -> empty buffer
+    await write(stdin, '/help')            // type a slash command
+    await write(stdin, '\r')               // submit /help (non-prompt: must still reset nav)
+    await write(stdin, '\x1b[A')           // ↑ -> must recall the NEWEST prompt 'two', NOT stale 'one'
+    expect(lastFrame()).toContain('two')
+    cleanup()
+  })
+
+  it('↓ walks back toward the draft and restores a blank draft past the newest', async () => {
+    const store = memoryHistoryStore()
+    store.append('d', 'alpha')
+    store.append('d', 'beta')              // history: ['alpha','beta']
+    const { stdin, lastFrame, cleanup } = mount(<App client={makeFakeHub()} sessionId="s1" config={{ historyStore: store, historyKey: 'd' }} />)
+    await flush()
+    await write(stdin, '\x1b[A')           // ↑ -> beta
+    expect(lastFrame()).toContain('beta')
+    await write(stdin, '\x1b[A')           // ↑ -> alpha
+    expect(lastFrame()).toContain('alpha')
+    await write(stdin, '\x1b[B')           // ↓ -> beta
+    expect(lastFrame()).toContain('beta')
+    expect(lastFrame()).not.toContain('alpha')
+    await write(stdin, '\x1b[B')           // ↓ -> blank draft (past the newest)
+    expect(lastFrame()).not.toContain('beta')   // input cleared; transcript is empty in this fresh hub
+    cleanup()
+  })
 })

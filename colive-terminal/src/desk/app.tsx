@@ -355,8 +355,10 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       const interpreted = interpretInput(text)
       if (interpreted.kind === 'prompt' && interpreted.text !== '') {
         historyStore.append(historyKey, interpreted.text)
-        setNav(initNav(historyStore.load(historyKey)))
       }
+      // Reset navigation to the (possibly updated) tail after EVERY submit, so a later
+      // ↑ starts from the most-recent entry even when this submit was a slash command.
+      setNav(initNav(historyStore.load(historyKey)))
       submitLine(text)
       return
     }
