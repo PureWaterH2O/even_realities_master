@@ -27,6 +27,14 @@ FRAMES=(
   "uat-a5-todos-01-full:shot-uat-a5-todos"
   "uat-a6-thinking-01-open:shot-uat-a6-thinking-open"
   "uat-a6-thinking-02-collapsed:shot-uat-a6-thinking-collapsed"
+  # M3.2A composer (driven by scripted keystrokes in m32a.preview.test.tsx)
+  "m32a-a1-multiline:shot-m32a-a1-multiline"
+  "m32a-a2-cursor:shot-m32a-a2-cursor"
+  "m32a-a4-paste:shot-m32a-a4-paste"
+  "m32a-a5-slash-all:shot-m32a-a5-slash-all"
+  "m32a-a5-slash-filtered:shot-m32a-a5-slash-filtered"
+  "m32a-a3-history-1:shot-m32a-a3-history-1"
+  "m32a-layout:shot-m32a-layout"
 )
 
 echo "[1/2] capturing frames (PREVIEW=1 vitest test/preview)…"
