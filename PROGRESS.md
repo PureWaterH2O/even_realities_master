@@ -5,6 +5,23 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-03
 
+### Co-Live Terminal M3.2A "Composer" — ✅ VALIDATED + MERGED to `main` (`278f7c8`)
+
+- **Planner validation pass (Opus 4.8):** audited the candidate spec→claims→code (not PROGRESS notes). Verified:
+  **zero Core/Hub change** (`git diff main..branch -- src/core src/hub` empty — the co-live invariant held), **no test
+  gaming** (no deleted tests, no `.skip`/`.only`), **391 tests / 36 files green + typecheck clean** (re-run from tree),
+  and all three fix claims real in code (A2 readline word-nav, A4 `navRef`+functional-`setBuf`, A6 `mouse-mode.ts`
+  toggle with the ESC-strip). Deferrals honestly characterized; A5's slash.ts additions were only `/select`·`/scroll`
+  (no smuggled commands).
+- **Surfaced for the merge call:** M3.2A defaults **mouse-reporting ON** (`index.ts` `MOUSE_ON`) vs M3.1's alt-screen-only,
+  so native click-drag selection is captured by default → A6 isn't just "missing copy," it's a copy *behavior change*.
+  `/select` is correctly wired to `MOUSE_OFF` but reportedly didn't restore copy on the VS Code terminal → the proper
+  fix is terminal-agnostic **OSC 52 `/copy`** in the next phase.
+- **Decision (user):** **merge as-is, copy/paste phase next.** A4-step deferred (net-new, not a regression; logger wired);
+  A6-copy → dedicated copy/paste phase; A5 → M3.3. Merged `--no-ff` (`278f7c8`), pushed; run-book sign-off recorded.
+- **Next planning:** scope the **copy/paste phase** (OSC 52 `/copy` + paste-in ergonomics; `/select`·`/scroll` +
+  `mouse-mode.ts` already in place to build on). A4 deeper diagnosis via `COLIVE_A4_LOG=/tmp/colive-a4.log` whenever picked up.
+
 ### Co-Live Terminal M3.2A "Composer" — 🔧 UAT fix pass: A2 fixed + hardware-passed; A4-step & A6-copy DEFERRED — NOT merged
 
 - **First hardware UAT (2026-06-03):** A3, B1, B2 **PASS**; A1 via Ctrl-J (user waved off `\`+Enter). Flagged **A2** (Option+word-nav),
