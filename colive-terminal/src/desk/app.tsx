@@ -377,6 +377,11 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     const em = internal_eventEmitter
     if (!em) return
     const onInput = (raw: string): void => {
+      // DIAGNOSTIC (opt-in via COLIVE_A4_LOG): record EVERY raw sequence on ink's 'input'
+      // channel — this is where mouse reports (and their bursts) arrive verbatim. Pairing this
+      // with the per-useInput log below lets us reconstruct exactly what an Option+double-click
+      // emits and why it reaches the ↑/↓ branch. No-op unless the env var is set.
+      if (A4_LOG) a4log(JSON.stringify({ t: Date.now(), src: 'input-channel', bytes: [...raw].map((c) => c.charCodeAt(0)), str: raw }))
       // The emitter delivers the raw SGR mouse report WITH a leading ESC; parseSgrMouse is
       // anchored on "[<", so strip the ESC first. Non-wheel / non-mouse input → null → ignored.
       const seq = raw.startsWith('\x1b') ? raw.slice(1) : raw
@@ -390,6 +395,14 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   /* ------------------------- input ------------------------- */
 
   useInput((ch, key) => {
+    // DIAGNOSTIC (opt-in via COLIVE_A4_LOG): log EVERY useInput event BEFORE the mouse gate, with
+    // all the key flags + whether isMouseReport would drop it. This captures the events a mouse
+    // double-click produces (incl. any phantom ↑/↓ whose ch is empty) so we can see exactly what
+    // fires the history/nav branch. No-op unless the env var is set.
+    if (A4_LOG) {
+      a4log(JSON.stringify({ t: Date.now(), src: 'useInput', bytes: [...ch].map((c) => c.charCodeAt(0)), str: ch, up: !!key.upArrow, down: !!key.downArrow, left: !!key.leftArrow, right: !!key.rightArrow, meta: !!key.meta, ctrl: !!key.ctrl, ret: !!key.return, esc: !!key.escape, mouseReport: isMouseReport(ch), row: buf.row, lines: buf.lines.length, col: buf.col }))
+    }
+
     // Mouse reports can arrive through useInput on some terminals — drop ALL of them before any
     // key handling (logger, escape, history, typing). The wheel is handled separately via the
     // internal 'input' channel; this gate stops every other report form (Option+click etc.) from
