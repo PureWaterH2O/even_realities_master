@@ -23,6 +23,7 @@ import { App } from './desk/app'
 import { readRemoteConfig, resolveRemoteHost } from './remote/config'
 import { detectTailscale, type ShellExec } from './remote/tailscale'
 import { runSetup, createDefaultIO } from './remote/setup'
+import { fileHistoryStore } from './desk/input/history'
 
 /**
  * Parse `colive serve` flags into a {@link ConfigArgs}.
@@ -220,7 +221,13 @@ export function runDesk(
   // encoding. Skipped when not a TTY (tests/pipes), like the alt-screen itself.
   if (isTTY) process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h')
 
-  const instance = render(createElement(App, { client, sessionId: conn.sessionId }))
+  const instance = render(
+    createElement(App, {
+      client,
+      sessionId: conn.sessionId,
+      config: { historyStore: fileHistoryStore(), historyKey: conn.baseUrl },
+    }),
+  )
 
   if (isTTY) {
     const leaveAlt = (): void => {
