@@ -982,4 +982,103 @@ describe('desk App', () => {
     expect(sent).toEqual(['[Mood]'])
     cleanup()
   })
+
+  // M3.2A arrow-burst leak: on VS Code's integrated terminal, certain scroll gestures
+  // (trackpad / diagonal / Option+double-click) emit DENSE BURSTS of arrow-key escape
+  // sequences — 8–31 of them in ONE stdin read/tick — byte-identical to real arrow presses
+  // (key.upArrow etc., empty ch). They drove the composer (history recall / cursor nav)
+  // instead of scrolling, polluting the draft. The fix collects PLAIN arrows into a microtask
+  // batch and IGNORES the whole batch when it is dense (>= ARROW_BURST_THRESHOLD). A real
+  // keypress is 1 arrow/tick; the A4 coalesced case is 2–3; the phantom bursts are >=8 — so a
+  // count threshold cleanly separates them.
+  it('BURST DROPPED: a dense ↑ burst in one tick recalls NO history (empty composer)', async () => {
+    const store = memoryHistoryStore()
+    store.append('b', 'prior command') // recall target: a leaked ↑ WOULD pull this into the draft
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'b' }} />,
+    )
+    await flush()
+    // 8 up-arrows in ONE write = one stdin tick (a scroll-gesture burst).
+    await write(stdin, '\x1b[A'.repeat(8))
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).not.toContain('prior command') // history NOT recalled
+    // Prove the buffer is genuinely empty: type a marker + submit -> just the marker.
+    await write(stdin, 'Z')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['Z'])
+    cleanup()
+  })
+
+  it('MIXED BURST DROPPED: a dense ↑/→ burst on a non-empty draft leaves the buffer UNCHANGED', async () => {
+    const store = memoryHistoryStore()
+    store.append('mx', 'prior command') // a leaked ↑ at the top edge WOULD recall this, replacing the draft
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'mx' }} />,
+    )
+    await flush()
+    await write(stdin, 'hello') // draft "hello", cursor at end (col 5)
+    // >= ARROW_BURST_THRESHOLD arrows in ONE write (4× ↑ + 2× →): a scroll-gesture burst.
+    await write(stdin, '\x1b[A\x1b[A\x1b[A\x1b[A\x1b[C\x1b[C')
+    // Buffer + cursor unchanged: a marker at the cursor lands at the end -> "helloX".
+    await write(stdin, 'X')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['helloX'])
+    cleanup()
+  })
+
+  it('SINGLE ARROW PRESERVED: a single ↑ (batch of 1) recalls the most-recent command', async () => {
+    const store = memoryHistoryStore()
+    store.append('s', 'recall me')
+    const fake = makeFakeHub()
+    fake.sendPrompt = async () => ({ sessionId: 's1' })
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 's' }} />,
+    )
+    await flush()
+    await write(stdin, '\x1b[A') // single ↑ -> batch of 1 < threshold -> recall
+    expect(lastFrame()).toContain('recall me')
+    cleanup()
+  })
+
+  it('A4 PRESERVED: two ↑ batched in ONE tick step the cursor up TWO lines (batch of 2 < threshold)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // Build a 4-line draft; equal-length lines so moveUp's column clamp can't drift the marker.
+    await write(stdin, 'L0')
+    await write(stdin, '\n')
+    await write(stdin, 'L1')
+    await write(stdin, '\n')
+    await write(stdin, 'L2')
+    await write(stdin, '\n')
+    await write(stdin, 'L3') // cursor on row 3 (last line), col 2 (end)
+    await write(stdin, '\x1b[A\x1b[A') // TWO ↑ in one write -> batch of 2 < threshold -> both applied
+    await write(stdin, 'X')
+    await write(stdin, '\r')
+    // Two lines up from row 3 -> row 1 ("L1" + marker).
+    expect(sent).toEqual(['L0\nL1X\nL2\nL3'])
+    cleanup()
+  })
+
+  it('LEFT/RIGHT SINGLE PRESERVED: a single ← navigates one char left', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'word')  // cursor at end (col 4)
+    await write(stdin, '\x1b[D') // single ← -> between "wor" and "d" (col 3)
+    await write(stdin, 'X')      // insert marker one char left of the end
+    await write(stdin, '\r')
+    expect(sent).toEqual(['worXd'])
+    cleanup()
+  })
 })
