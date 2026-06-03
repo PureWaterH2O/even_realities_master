@@ -63,6 +63,11 @@ const COMMAND_HELP: ReadonlyArray<readonly [string, string]> = [
   ['/help', 'list the available slash commands'],
 ]
 
+/** Menu source for the M3.2A slash-command completion popup, derived from COMMAND_HELP. */
+export function slashMenuItems(): { name: string; desc: string }[] {
+  return COMMAND_HELP.map(([name, desc]) => ({ name: name.replace(/^\//, ''), desc }))
+}
+
 /** The /help body, listing every supported command. */
 function helpMessage(): string {
   return [
