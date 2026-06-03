@@ -876,4 +876,209 @@ describe('desk App', () => {
     expect(sent).toHaveLength(0)
     cleanup()
   })
+
+  // M3.2A mouse-history leak: in /scroll mode (SGR reporting ON), an Option+click emits a
+  // mouse report that some terminals deliver through useInput. The old guard only caught the
+  // clean `[<…M` form; ESC-prefixed (`\x1b[<…M`) and legacy X10 (`\x1b[M…`) forms slipped past
+  // and were inserted as garbage text into the composer — polluting the user's draft. The fix
+  // drops ALL mouse reports at the very top of the dispatcher. History is seeded so a spurious
+  // ↑ WOULD have recalled a prior command — proving neither text nor history pollutes the draft.
+  it('drops an ESC-prefixed Option+click mouse report (no garbage text, no history recall)', async () => {
+    const store = memoryHistoryStore()
+    store.append('m', 'prior command') // a recall target: if a mouse report reached ↑, this would appear
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'm' }} />,
+    )
+    await flush()
+    // Faithful terminal emission for Option+double-click: double-ESC / meta-prefixed SGR.
+    // ink's use-input strips ONE leading ESC, so the dispatcher sees `\x1b[<8;20;5M`.
+    await write(stdin, '\x1b\x1b[<8;20;5M')
+    // The composer must still be empty and no prior command recalled.
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).not.toContain('prior command') // history untouched
+    expect(frame).not.toContain('[<8;20;5M')      // no SGR garbage inserted
+    expect(frame).not.toContain('8;20;5')         // no coordinate garbage inserted
+    // Prove the buffer is genuinely empty by typing a marker and submitting: must be JUST the marker.
+    await write(stdin, 'Z')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['Z'])
+    cleanup()
+  })
+
+  it('drops the legacy X10 mouse-report header (no escape garbage, no history recall)', async () => {
+    const store = memoryHistoryStore()
+    store.append('m', 'prior command')
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'm' }} />,
+    )
+    await flush()
+    // Legacy X10: `\x1b[M` + 3 coordinate bytes. ink delivers the `[M` header as its OWN useInput
+    // event (which the guard must drop) and the coordinate bytes as a SEPARATE following event.
+    // The header — the part that carries the escape/control bytes and could fire a key binding —
+    // must be dropped, and history must NOT be recalled. (The trailing coordinate bytes are
+    // indistinguishable from typed text and are out of scope — matching them would over-match.)
+    await write(stdin, '\x1b[M')
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).not.toContain('prior command') // history untouched (no recall fired)
+    expect(frame).not.toContain('[M')             // the X10 header was dropped, not inserted
+    await write(stdin, 'Z')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['Z']) // only the deliberately-typed marker — the report header left nothing
+    cleanup()
+  })
+
+  it('still drops a clean SGR report through useInput (no regression on the form caught today)', async () => {
+    const store = memoryHistoryStore()
+    store.append('m', 'prior command')
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'm' }} />,
+    )
+    await flush()
+    await write(stdin, '\x1b[<8;20;5M') // clean SGR (no ESC prefix) — already caught before the fix
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).not.toContain('prior command')
+    expect(frame).not.toContain('[<8;20;5M')
+    await write(stdin, 'Z')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['Z'])
+    cleanup()
+  })
+
+  it('still inserts literal printable chars that resemble mouse bytes (isMouseReport must not over-match)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // A user typing literal '<', 'M', '[' must still insert — these are valid composer input.
+    await write(stdin, '<')
+    await write(stdin, 'M')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['<M'])
+    cleanup()
+  })
+
+  it('inserts [M…-prefixed text arriving as a single event (must not be dropped as a fake X10 header)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // ink's parser delivers '[Mood]' as ONE event (ch='[Mood]'). It starts with '[M' but is NOT
+    // the bare legacy X10 header (those 3 coord bytes always arrive separately), so it must be
+    // inserted into the composer verbatim, not silently dropped.
+    await write(stdin, '[Mood]')
+    expect(stripAnsi(lastFrame() ?? '')).toContain('[Mood]')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['[Mood]'])
+    cleanup()
+  })
+
+  // M3.2A arrow-burst leak: on VS Code's integrated terminal, certain scroll gestures
+  // (trackpad / diagonal / Option+double-click) emit DENSE BURSTS of arrow-key escape
+  // sequences — 8–31 of them in ONE stdin read/tick — byte-identical to real arrow presses
+  // (key.upArrow etc., empty ch). They drove the composer (history recall / cursor nav)
+  // instead of scrolling, polluting the draft. The fix collects PLAIN arrows into a microtask
+  // batch and IGNORES the whole batch when it is dense (>= ARROW_BURST_THRESHOLD). A real
+  // keypress is 1 arrow/tick; the A4 coalesced case is 2–3; the phantom bursts are >=8 — so a
+  // count threshold cleanly separates them.
+  it('BURST DROPPED: a dense ↑ burst in one tick recalls NO history (empty composer)', async () => {
+    const store = memoryHistoryStore()
+    store.append('b', 'prior command') // recall target: a leaked ↑ WOULD pull this into the draft
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'b' }} />,
+    )
+    await flush()
+    // 8 up-arrows in ONE write = one stdin tick (a scroll-gesture burst).
+    await write(stdin, '\x1b[A'.repeat(8))
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).not.toContain('prior command') // history NOT recalled
+    // Prove the buffer is genuinely empty: type a marker + submit -> just the marker.
+    await write(stdin, 'Z')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['Z'])
+    cleanup()
+  })
+
+  it('MIXED BURST DROPPED: a dense ↑/→ burst on a non-empty draft leaves the buffer UNCHANGED', async () => {
+    const store = memoryHistoryStore()
+    store.append('mx', 'prior command') // a leaked ↑ at the top edge WOULD recall this, replacing the draft
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'mx' }} />,
+    )
+    await flush()
+    await write(stdin, 'hello') // draft "hello", cursor at end (col 5)
+    // >= ARROW_BURST_THRESHOLD arrows in ONE write (4× ↑ + 2× →): a scroll-gesture burst.
+    await write(stdin, '\x1b[A\x1b[A\x1b[A\x1b[A\x1b[C\x1b[C')
+    // Buffer + cursor unchanged: a marker at the cursor lands at the end -> "helloX".
+    await write(stdin, 'X')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['helloX'])
+    cleanup()
+  })
+
+  it('SINGLE ARROW PRESERVED: a single ↑ (batch of 1) recalls the most-recent command', async () => {
+    const store = memoryHistoryStore()
+    store.append('s', 'recall me')
+    const fake = makeFakeHub()
+    fake.sendPrompt = async () => ({ sessionId: 's1' })
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 's' }} />,
+    )
+    await flush()
+    await write(stdin, '\x1b[A') // single ↑ -> batch of 1 < threshold -> recall
+    expect(lastFrame()).toContain('recall me')
+    cleanup()
+  })
+
+  it('A4 PRESERVED: two ↑ batched in ONE tick step the cursor up TWO lines (batch of 2 < threshold)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // Build a 4-line draft; equal-length lines so moveUp's column clamp can't drift the marker.
+    await write(stdin, 'L0')
+    await write(stdin, '\n')
+    await write(stdin, 'L1')
+    await write(stdin, '\n')
+    await write(stdin, 'L2')
+    await write(stdin, '\n')
+    await write(stdin, 'L3') // cursor on row 3 (last line), col 2 (end)
+    await write(stdin, '\x1b[A\x1b[A') // TWO ↑ in one write -> batch of 2 < threshold -> both applied
+    await write(stdin, 'X')
+    await write(stdin, '\r')
+    // Two lines up from row 3 -> row 1 ("L1" + marker).
+    expect(sent).toEqual(['L0\nL1X\nL2\nL3'])
+    cleanup()
+  })
+
+  it('LEFT/RIGHT SINGLE PRESERVED: a single ← navigates one char left', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'word')  // cursor at end (col 4)
+    await write(stdin, '\x1b[D') // single ← -> between "wor" and "d" (col 3)
+    await write(stdin, 'X')      // insert marker one char left of the end
+    await write(stdin, '\r')
+    expect(sent).toEqual(['worXd'])
+    cleanup()
+  })
 })

@@ -17,3 +17,26 @@ export function parseSgrMouse(seq: string): -1 | 1 | null {
   if (button === 65) return 1
   return null
 }
+
+// Any mouse report, tolerating a leading ESC and the [ that ink may strip. Two encodings:
+//  - SGR `<btn;col;row{M|m}`, optionally with a leading `[` (full `[<…M`) and/or ESC. This
+//    also matches the split tail `<…M` that arrives when the escape-flush timer fires mid-report.
+//  - Legacy X10 header, which is ALWAYS exactly `[M` (optionally ESC-prefixed): ink's input
+//    parser treats `M` as the CSI final byte, so the 3 coordinate bytes ALWAYS arrive as a
+//    SEPARATE following event. The header is therefore matched EXACTLY (end-anchored `$`), not
+//    as a prefix — otherwise ordinary text like `[Mood]` / `[Markdown](x)` delivered as a single
+//    event would over-match and be silently dropped.
+// Both are anchored at start AND end so they cannot match ordinary typed text — note we deliberately
+// require the `<` (or full `[M`) so a bare `"5M"`/`"M"` (indistinguishable from typed text) never matches.
+const SGR_REPORT_RE = /^\x1b?\[?<\d+;\d+;\d+[Mm]$/
+const X10_HEADER_RE = /^\x1b?\[M$/
+
+/**
+ * True iff `seq` is any mouse report (SGR or legacy X10), tolerating an optional leading ESC
+ * (and, for SGR, an optionally-missing `[`). The input dispatcher uses this as the broad
+ * "drop any mouse report before key handling" gate; `parseSgrMouse` stays the narrow wheel
+ * decoder. Returns false for ordinary typed text (e.g. `"5M"`, `"M"`, `"<"`, `"["`, `""`).
+ */
+export function isMouseReport(seq: string): boolean {
+  return SGR_REPORT_RE.test(seq) || X10_HEADER_RE.test(seq)
+}

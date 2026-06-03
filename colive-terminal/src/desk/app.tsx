@@ -48,7 +48,7 @@ import type { ViewportState } from './render/window'
 import * as B from './input/buffer'
 import type { EditBuffer } from './input/buffer'
 import { renderInputRows } from './input/input-rows'
-import { parseSgrMouse } from './input/mouse'
+import { parseSgrMouse, isMouseReport } from './input/mouse'
 import { initNav, prev as histPrev, next as histNext, memoryHistoryStore } from './input/history'
 import type { HistoryStore } from './input/history'
 import { appendFileSync } from 'node:fs'
@@ -93,6 +93,13 @@ export interface AppProps {
 
 /** Rows moved per mouse-wheel notch (1 felt sluggish for trackpads; reused by the Task 9 wheel handler). */
 const WHEEL_STEP = 3
+
+// PLAIN-arrow burst threshold. A real arrow keypress delivers 1 arrow per stdin tick; the A4
+// "coalesced batched nav" case delivers 2–3 in one tick (must still nav). VS Code's integrated
+// terminal emits DENSE BURSTS of 8–31 arrow-key sequences in ~3ms for certain scroll gestures
+// (trackpad / diagonal / Option+double-click) — byte-identical to real presses. A batch of >= 4
+// arrows in one synchronous tick is therefore a scroll-gesture artifact, not keystrokes.
+const ARROW_BURST_THRESHOLD = 4
 
 const STATUS_LABEL: Record<StatusState, string> = {
   busy: 'busy',
@@ -150,6 +157,9 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // input batching (the A4 bug). A ref always exposes the freshest value to the next batched
   // event. (initNav once; reset on every submit below.)
   const navRef = useRef(initNav(historyStore.load(historyKey)))
+  // Collects PLAIN (non-meta) arrows arriving in one synchronous stdin tick so a microtask can
+  // see the WHOLE batch and decide real-keypress vs scroll-gesture burst. See ARROW_BURST_THRESHOLD.
+  const arrowBatchRef = useRef<{ keys: Array<'up' | 'down' | 'left' | 'right'>; scheduled: boolean }>({ keys: [], scheduled: false })
 
   // Slash-command completion menu. It is open exactly when the composer holds a single
   // leading-"/" token that matches at least one command (filterSlash returns the items,
@@ -352,6 +362,41 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     [client, pending],
   )
 
+  // Apply ONE plain-arrow nav (used by the deferred batch flush below). Mirrors the old inline
+  // ↑/↓/←/→ handlers exactly: ←/→ step a column; ↑/↓ step a row, recalling history at the top/
+  // bottom edge. Uses FUNCTIONAL setBuf + the navRef so each arrow in a batch sees the freshest
+  // queued buffer (no stale closure) — that's why this needs no buf/rows/height deps.
+  const applyArrow = useCallback((dir: 'up' | 'down' | 'left' | 'right'): void => {
+    if (dir === 'left') { setBuf(B.moveLeft); return }
+    if (dir === 'right') { setBuf(B.moveRight); return }
+    if (dir === 'up') {
+      setBuf((b) => {
+        const m = B.moveUp(b)
+        if (!m.atEdge) return m.buffer
+        const r = histPrev(navRef.current, B.toText(b))
+        navRef.current = r.nav
+        return B.fromText(r.text)
+      })
+      return
+    }
+    setBuf((b) => {
+      const m = B.moveDown(b)
+      if (!m.atEdge) return m.buffer
+      const r = histNext(navRef.current, B.toText(b))
+      navRef.current = r.nav
+      return B.fromText(r.text)
+    })
+  }, [])
+  // Flush the collected plain-arrow batch on a microtask: a dense burst (>= threshold) is a
+  // terminal scroll-gesture artifact and is dropped wholesale; a small batch (1 real keypress,
+  // or the A4 coalesced 2–3) applies each arrow's nav in order.
+  const flushArrowBatch = useCallback((): void => {
+    const { keys } = arrowBatchRef.current
+    arrowBatchRef.current = { keys: [], scheduled: false }
+    if (keys.length >= ARROW_BURST_THRESHOLD) return // dense burst = terminal scroll-gesture artifact, not keystrokes
+    for (const dir of keys) applyArrow(dir)
+  }, [applyArrow])
+
   /* ------------------------- rows + window ------------------------- */
 
   // MEMOIZE the flatten so marked + cli-highlight don't re-run over every block
@@ -377,6 +422,11 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     const em = internal_eventEmitter
     if (!em) return
     const onInput = (raw: string): void => {
+      // DIAGNOSTIC (opt-in via COLIVE_A4_LOG): record EVERY raw sequence on ink's 'input'
+      // channel — this is where mouse reports (and their bursts) arrive verbatim. Pairing this
+      // with the per-useInput log below lets us reconstruct exactly what an Option+double-click
+      // emits and why it reaches the ↑/↓ branch. No-op unless the env var is set.
+      if (A4_LOG) a4log(JSON.stringify({ t: Date.now(), src: 'input-channel', bytes: [...raw].map((c) => c.charCodeAt(0)), str: raw }))
       // The emitter delivers the raw SGR mouse report WITH a leading ESC; parseSgrMouse is
       // anchored on "[<", so strip the ESC first. Non-wheel / non-mouse input → null → ignored.
       const seq = raw.startsWith('\x1b') ? raw.slice(1) : raw
@@ -390,6 +440,21 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   /* ------------------------- input ------------------------- */
 
   useInput((ch, key) => {
+    // DIAGNOSTIC (opt-in via COLIVE_A4_LOG): log EVERY useInput event BEFORE the mouse gate, with
+    // all the key flags + whether isMouseReport would drop it. This captures the events a mouse
+    // double-click produces (incl. any phantom ↑/↓ whose ch is empty) so we can see exactly what
+    // fires the history/nav branch. No-op unless the env var is set.
+    if (A4_LOG) {
+      a4log(JSON.stringify({ t: Date.now(), src: 'useInput', bytes: [...ch].map((c) => c.charCodeAt(0)), str: ch, up: !!key.upArrow, down: !!key.downArrow, left: !!key.leftArrow, right: !!key.rightArrow, meta: !!key.meta, ctrl: !!key.ctrl, ret: !!key.return, esc: !!key.escape, mouseReport: isMouseReport(ch), row: buf.row, lines: buf.lines.length, col: buf.col }))
+    }
+
+    // Mouse reports can arrive through useInput on some terminals — drop ALL of them before any
+    // key handling (logger, escape, history, typing). The wheel is handled separately via the
+    // internal 'input' channel; this gate stops every other report form (Option+click etc.) from
+    // firing a key binding or leaking into the composer as garbage text. isMouseReport tolerates
+    // the leading ESC / split forms the old `ch.startsWith('[<')` guard missed.
+    if (isMouseReport(ch)) return
+
     // A4 diagnostic (opt-in, no-op unless COLIVE_A4_LOG is set): log every ↑/↓ as it arrives
     // so coalesced bytes / auto-repeat (multiple events in one stdin tick) are visible on real
     // hardware. Logs the raw bytes + the buffer position at the moment of the event.
@@ -403,10 +468,6 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       if (sid !== undefined) void client.interrupt(sid).catch(() => {})
       return
     }
-
-    // Mouse reports can arrive through useInput on some terminals — never let one
-    // fire a key binding (wheel is handled separately via the 'input' channel).
-    if (ch.startsWith('[<')) return
 
     // Slash-menu navigation, captured ONLY while the menu is open. ↑/↓ move the
     // highlight; Tab completes. Enter and printable chars deliberately fall through:
@@ -466,30 +527,17 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     if (key.rightArrow && key.meta) { setBuf(B.moveWordRight); return }
     if (key.meta && (ch === 'b' || ch === 'B')) { setBuf(B.moveWordLeft); return }   // readline ESC-b (Option+Left)
     if (key.meta && (ch === 'f' || ch === 'F')) { setBuf(B.moveWordRight); return }  // readline ESC-f (Option+Right)
-    if (key.leftArrow)  { setBuf(B.moveLeft); return }
-    if (key.rightArrow) { setBuf(B.moveRight); return }
-    // ↑/↓ use FUNCTIONAL setBuf updaters (like ← / →) so each event in a batched stdin tick
-    // sees the freshest QUEUED buffer, not a stale closure capture (the A4 bug). The edge
-    // branch has a history side-effect, so it reads/advances navRef.current — a ref is also
-    // immune to the stale-closure problem and always exposes the latest nav to the next event.
-    if (key.upArrow) {
-      setBuf((b) => {
-        const m = B.moveUp(b)
-        if (!m.atEdge) return m.buffer
-        const r = histPrev(navRef.current, B.toText(b))
-        navRef.current = r.nav
-        return B.fromText(r.text)
-      })
-      return
-    }
-    if (key.downArrow) {
-      setBuf((b) => {
-        const m = B.moveDown(b)
-        if (!m.atEdge) return m.buffer
-        const r = histNext(navRef.current, B.toText(b))
-        navRef.current = r.nav
-        return B.fromText(r.text)
-      })
+    // Plain arrows are collected into a microtask batch so we can tell a real keypress (1/tick,
+    // or the A4 coalesced 2–3) from a terminal SCROLL-GESTURE BURST (VS Code emits 8–31 arrow
+    // keys in ~3ms for trackpad/diagonal scroll). A dense burst is ignored (it must not drive the
+    // composer); small batches apply normally. See ARROW_BURST_THRESHOLD.
+    // NOTE: this MUST stay AFTER the meta word-nav branches above (so Option+arrow word-nav stays
+    // synchronous) and AFTER the menuOpen/pending blocks (their ↑/↓ stays synchronous).
+    if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) {
+      const dir = key.upArrow ? 'up' : key.downArrow ? 'down' : key.leftArrow ? 'left' : 'right'
+      const batch = arrowBatchRef.current
+      batch.keys.push(dir)
+      if (!batch.scheduled) { batch.scheduled = true; queueMicrotask(flushArrowBatch) }
       return
     }
 
