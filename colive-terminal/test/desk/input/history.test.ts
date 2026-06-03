@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import * as H from '../../../src/desk/input/history'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 describe('appendEntry (dedup + cap)', () => {
   it('appends a new entry (chronological: newest last)', () => {
@@ -52,5 +55,46 @@ describe('memoryHistoryStore (test double)', () => {
     expect(store.load('proj-a')).toEqual(['one', 'two'])
     expect(store.load('proj-b')).toEqual(['other'])
     expect(store.load('unknown')).toEqual([])
+  })
+})
+
+describe('fileHistoryStore (temp-dir round-trip — never touches the real home dir)', () => {
+  it('append then load round-trips and collapses a consecutive duplicate', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'colive-hist-'))
+    try {
+      const store = H.fileHistoryStore(dir)
+      store.append('proj', 'one')
+      store.append('proj', 'one') // append-only log writes it; load must collapse it
+      store.append('proj', 'two')
+      expect(store.load('proj')).toEqual(['one', 'two'])
+      expect(store.load('missing')).toEqual([]) // unknown key
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('load applies consecutive-dedup defensively and skips corrupt lines', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'colive-hist-'))
+    try {
+      // sanitize('proj') === 'proj' (alphanumerics only) -> proj.jsonl
+      const file = join(dir, 'proj.jsonl')
+      writeFileSync(
+        file,
+        [JSON.stringify('a'), JSON.stringify('a'), 'not-json', JSON.stringify('b')].join('\n') + '\n',
+        'utf8',
+      )
+      expect(H.fileHistoryStore(dir).load('proj')).toEqual(['a', 'b'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('appendEntry purity', () => {
+  it('does not mutate the input array', () => {
+    const arr = ['a']
+    const out = H.appendEntry(arr, 'b')
+    expect(arr).toEqual(['a'])
+    expect(out).toEqual(['a', 'b'])
   })
 })

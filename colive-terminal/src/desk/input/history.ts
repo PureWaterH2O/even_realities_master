@@ -75,8 +75,10 @@ const sanitize = (key: string): string => key.replace(/[^a-zA-Z0-9]+/g, '_').sli
 
 /**
  * JSONL-on-disk store. One file per project key under ~/.colive/history. Each
- * line is a JSON-encoded string. Reads apply dedup/cap defensively; the append
- * is best-effort (a failed write must never crash the composer).
+ * line is a JSON-encoded string. Reads apply consecutive-dedup + cap defensively
+ * (via `appendEntry`) because the append path is a raw log that may accumulate
+ * duplicates between sessions; the append is best-effort (a failed write must
+ * never crash the composer).
  */
 export function fileHistoryStore(baseDir = join(homedir(), '.colive', 'history')): HistoryStore {
   const fileFor = (key: string): string => join(baseDir, `${sanitize(key)}.jsonl`)
@@ -94,7 +96,9 @@ export function fileHistoryStore(baseDir = join(homedir(), '.colive', 'history')
             /* skip a corrupt line */
           }
         }
-        return out.slice(-HISTORY_CAP)
+        // Apply the same consecutive-dedup + cap as the write path, so a file that
+        // accumulated duplicates (the append path is a raw log) recalls cleanly.
+        return out.reduce<string[]>((acc, e) => appendEntry(acc, e), [])
       } catch {
         return []
       }
