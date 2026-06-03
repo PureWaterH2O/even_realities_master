@@ -130,4 +130,19 @@ describe('EditBuffer', () => {
     expect(r).toEqual(b)
     expect(B.toText(r)).toBe('abc')
   })
+
+  it('replaceRange swaps a column span on the cursor line and lands the cursor after it', () => {
+    const b = { lines: ['see @ap and more'], row: 0, col: 7 }
+    const r = B.replaceRange(b, 4, 7, '@src/app.tsx')
+    expect(B.toText(r)).toBe('see @src/app.tsx and more')
+    expect(r.col).toBe(4 + '@src/app.tsx'.length)
+  })
+
+  it('replaceRange only touches the cursor row in a multi-line buffer', () => {
+    const b = { lines: ['first', '@ap'], row: 1, col: 3 }
+    const r = B.replaceRange(b, 0, 3, '@x.ts')
+    expect(r.lines).toEqual(['first', '@x.ts'])
+    expect(r.row).toBe(1)
+    expect(r.col).toBe('@x.ts'.length)
+  })
 })

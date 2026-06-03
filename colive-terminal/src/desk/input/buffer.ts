@@ -139,3 +139,12 @@ export function moveDown(b: EditBuffer): VerticalMove {
   const col = Math.min(b.col, b.lines[row]!.length)
   return { buffer: { ...b, row, col }, atEdge: false }
 }
+
+/** Replace columns [start, end) on the CURSOR's line with `str`; cursor lands after `str`. */
+export function replaceRange(b: EditBuffer, start: number, end: number, str: string): EditBuffer {
+  const cur = b.lines[b.row]!
+  const line = cur.slice(0, start) + str + cur.slice(end)
+  const lines = b.lines.slice()
+  lines[b.row] = line
+  return { lines, row: b.row, col: start + str.length }
+}
