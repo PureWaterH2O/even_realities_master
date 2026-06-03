@@ -966,4 +966,20 @@ describe('desk App', () => {
     expect(sent).toEqual(['<M'])
     cleanup()
   })
+
+  it('inserts [M…-prefixed text arriving as a single event (must not be dropped as a fake X10 header)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // ink's parser delivers '[Mood]' as ONE event (ch='[Mood]'). It starts with '[M' but is NOT
+    // the bare legacy X10 header (those 3 coord bytes always arrive separately), so it must be
+    // inserted into the composer verbatim, not silently dropped.
+    await write(stdin, '[Mood]')
+    expect(stripAnsi(lastFrame() ?? '')).toContain('[Mood]')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['[Mood]'])
+    cleanup()
+  })
 })

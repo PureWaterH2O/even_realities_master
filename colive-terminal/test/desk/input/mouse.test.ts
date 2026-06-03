@@ -51,4 +51,13 @@ describe('isMouseReport', () => {
     expect(isMouseReport('<')).toBe(false)
     expect(isMouseReport('[A')).toBe(false) // arrow-up CSI — not a mouse report
   })
+  it('is false for [M…-prefixed text that is NOT a bare X10 header', () => {
+    // The real legacy X10 header is ALWAYS exactly `[M` (the 3 coordinate bytes arrive as a
+    // SEPARATE event), so the header predicate must match `[M` EXACTLY — not as a prefix. Text
+    // delivered as a single useInput event that merely starts with `[M` must NOT be dropped.
+    expect(isMouseReport('[Mood]')).toBe(false)
+    expect(isMouseReport('[Markdown](x)')).toBe(false)
+    expect(isMouseReport('[My note')).toBe(false)
+    expect(isMouseReport('\x1b[Mood]')).toBe(false)
+  })
 })
