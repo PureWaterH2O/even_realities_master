@@ -412,22 +412,19 @@ describe('desk App', () => {
     } finally { unmount() }
   })
 
-  it('arrow keys scroll the viewport (↑ unpins, ↓ re-pins) — wheel/trackpad', async () => {
+  it('PageUp/PageDown scroll the viewport (PgUp unpins, PgDn re-pins); arrows now drive the composer', async () => {
     const hub = makeFakeHub()
     const { lastFrame, stdin, unmount } = render(<App client={hub} sessionId="s1" />)
     try {
       await act(async () => {})
-      // Overflow the 20-row test viewport so the scroll footer appears.
       const long = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')
       act(() => { hub.emit({ type: 'text_delta', text: long }) })
       expect(lastFrame()).toContain('(pinned ▼)') // starts pinned at bottom
-
-      act(() => { stdin.write('\x1B[A') }) // Up arrow -> scroll up one line
+      act(() => { stdin.write('\x1b[5~') }) // PageUp -> scroll up a page
       const up = lastFrame() ?? ''
       expect(up).not.toContain('(pinned ▼)') // unpinned now
-      expect(up).toContain('PgUp/PgDn') // unpinned hint shows
-
-      act(() => { stdin.write('\x1B[B') }) // Down arrow -> back to bottom, re-pins
+      expect(up).toContain('PgUp/PgDn')      // unpinned hint shows
+      act(() => { stdin.write('\x1b[6~') }) // PageDown -> back to bottom, re-pins
       expect(lastFrame()).toContain('(pinned ▼)')
     } finally { unmount() }
   })
@@ -470,5 +467,30 @@ describe('desk App', () => {
       act(() => { hub.emit({ type: 'thinking_delta', text: 'pondering deeply' }) })
       expect(lastFrame()).toContain('pondering deeply')
     } finally { unmount() }
+  })
+
+  it('composes a multiline prompt with Ctrl-J and submits the joined text on Enter', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'line one')
+    await write(stdin, '\n')          // Ctrl-J → newline, NOT submit
+    await write(stdin, 'line two')
+    expect(sent).toHaveLength(0)      // still composing
+    await write(stdin, '\r')          // Enter submits
+    expect(sent).toEqual(['line one\nline two'])
+    cleanup()
+  })
+
+  it('backspace deletes within the buffer and the prompt re-renders', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'abc')
+    await write(stdin, '\x7f')        // backspace
+    expect(lastFrame()).toContain('ab')
+    cleanup()
   })
 })

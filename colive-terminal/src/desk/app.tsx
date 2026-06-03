@@ -41,6 +41,9 @@ import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
 import { computeWindow, scrollPage, scrollLine, pinBottom, afterContentChange, initialViewport } from './render/window'
 import type { ViewportState } from './render/window'
+import * as B from './input/buffer'
+import type { EditBuffer } from './input/buffer'
+import { renderInputRows } from './input/input-rows'
 
 /** Optional construction config for the app. */
 export interface AppConfig {
@@ -112,7 +115,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
   const [status, setStatus] = useState<StatusInfo>({ state: 'idle' })
   const [pending, setPending] = useState<Pending | undefined>(undefined)
-  const [input, setInput] = useState('')
+  const [buf, setBuf] = useState<EditBuffer>(B.empty)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
   // or reset by /clear). A ref keeps the latest value available to async
@@ -307,57 +310,60 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       return
     }
 
-    // When a permission/question prompt is open, number keys pick an option.
+    // Mouse reports can arrive through useInput on some terminals — never let one
+    // fire a key binding (wheel is handled separately via the 'input' channel).
+    if (ch.startsWith('[<')) return
+
     if (pending) {
-      if (/^[1-9]$/.test(ch)) {
-        resolvePending(Number.parseInt(ch, 10) - 1)
-        return
-      }
-      // A question also accepts a typed free-text answer (Enter submits it).
+      if (/^[1-9]$/.test(ch)) { resolvePending(Number.parseInt(ch, 10) - 1); return }
       if (pending.kind === 'question') {
-        if (key.return) {
-          submitQuestionText(input)
-          setInput('')
-          return
-        }
-        if (key.backspace || key.delete) {
-          setInput((s) => s.slice(0, -1))
-          return
-        }
-        if (ch && !key.ctrl && !key.meta) setInput((s) => s + ch)
+        if (key.return) { submitQuestionText(B.toText(buf)); setBuf(B.empty()); return }
+        if (key.backspace || key.delete) { setBuf(B.deleteBackward); return }
+        if (ch && !key.ctrl && !key.meta) setBuf((b) => B.insertText(b, ch))
       }
       return
     }
 
+    // Ctrl-C quits; Ctrl-O toggles verbose (unchanged).
+    if (key.ctrl && (ch === 'c' || ch === 'C')) { exit(); return }
+    if (key.ctrl && (ch === 'o' || ch === 'O')) { setVerbose((v) => !v); return }
+
+    // Enter submits; Ctrl-J (\n) and "\\"+Enter insert a newline.
     if (key.return) {
-      const line = input
-      setInput('')
-      submitLine(line)
+      const text = B.toText(buf)
+      // Backslash-continuation: a line ending in a single "\" means "newline, keep editing".
+      if (text.endsWith('\\')) {
+        setBuf((b) => B.insertNewline(trimTrailingBackslash(b)))
+        return
+      }
+      setBuf(B.empty())
+      submitLine(text)
       return
     }
-    if (key.backspace || key.delete) {
-      setInput((s) => s.slice(0, -1))
-      return
-    }
-    if (key.ctrl && (ch === 'c' || ch === 'C')) {
-      exit()
-      return
-    }
-    // Arrow keys scroll a few rows. In the alternate screen the terminal maps
-    // mouse-wheel / trackpad scrolling to ↑/↓ keystrokes, so this also gives
-    // natural wheel scrolling (like less/man) — UAT A1. WHEEL_STEP > 1 because
-    // a terminal emits one ↑/↓ per wheel notch; 1 row/notch felt sluggish.
-    if (key.upArrow)   { setViewport((vp) => scrollLine(vp, rows.length, height, -1, WHEEL_STEP)); return }
-    if (key.downArrow) { setViewport((vp) => scrollLine(vp, rows.length, height, 1, WHEEL_STEP)); return }
+    if (ch === '\n' || (key.ctrl && (ch === 'j' || ch === 'J'))) { setBuf(B.insertNewline); return }
+
+    // Editing keys.
+    if (key.backspace || key.delete) { setBuf(B.deleteBackward); return }
+    if (key.ctrl && (ch === 'w' || ch === 'W')) { setBuf(B.deleteWordBackward); return }
+    if (key.leftArrow && key.meta)  { setBuf(B.moveWordLeft); return }
+    if (key.rightArrow && key.meta) { setBuf(B.moveWordRight); return }
+    if (key.leftArrow)  { setBuf(B.moveLeft); return }
+    if (key.rightArrow) { setBuf(B.moveRight); return }
+    if (key.upArrow)   { setBuf((b) => B.moveUp(b).buffer); return }   // history wired in Task 8
+    if (key.downArrow) { setBuf((b) => B.moveDown(b).buffer); return } // history wired in Task 8
+
     if (key.pageUp)   { setViewport((vp) => scrollPage(vp, rows.length, height, -1)); return }
     if (key.pageDown) { setViewport((vp) => scrollPage(vp, rows.length, height, 1)); return }
-    if (key.ctrl && (ch === 'o' || ch === 'O')) { setVerbose((v) => !v); return }
-    // End key: ink exposes it as key.end on most terminals
-    if (key.end) { setViewport(pinBottom(rows.length, height)); return }
-    // Printable characters (ignore control combos) extend the input buffer.
-    if (ch && !key.ctrl && !key.meta) {
-      setInput((s) => s + ch)
+    if (key.end) {
+      if (B.isBlank(buf)) { setViewport(pinBottom(rows.length, height)); return }
+      setBuf(B.moveLineEnd); return
     }
+    // ink reports Home inconsistently; Ctrl-A / Ctrl-E are the reliable line-start/end.
+    if (key.ctrl && (ch === 'a' || ch === 'A')) { setBuf(B.moveLineStart); return }
+    if (key.ctrl && (ch === 'e' || ch === 'E')) { setBuf(B.moveLineEnd); return }
+
+    // Printable characters extend the buffer at the cursor.
+    if (ch && !key.ctrl && !key.meta) setBuf((b) => B.insertText(b, ch))
   })
 
   /* ------------------------- render ------------------------- */
@@ -384,7 +390,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         </Box>
       ) : null}
 
-      {pending ? <PendingPrompt pending={pending} input={input} /> : null}
+      {pending ? <PendingPrompt pending={pending} input={B.toText(buf)} /> : null}
 
       <Box>
         <Text dimColor>
@@ -393,9 +399,10 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       </Box>
 
       {pending && pending.kind === 'question' ? null : (
-        <Box>
-          <Text>{'> '}</Text>
-          <Text>{input}</Text>
+        <Box flexDirection="column">
+          {renderInputRows(buf, { width }).map((r, i) => (
+            <Text key={`in-${i}`}>{r}</Text>
+          ))}
         </Box>
       )}
     </Box>
@@ -436,6 +443,15 @@ function PendingPrompt({ pending, input }: { pending: Pending; input: string }):
       </Box>
     </Box>
   )
+}
+
+/** Drop a single trailing "\" from the buffer's current line (backslash-continuation). */
+function trimTrailingBackslash(b: EditBuffer): EditBuffer {
+  const line = b.lines[b.row]!
+  if (!line.endsWith('\\')) return b
+  const lines = b.lines.slice()
+  lines[b.row] = line.slice(0, -1)
+  return { ...b, lines, col: Math.min(b.col, lines[b.row]!.length) }
 }
 
 /** Build a local view string for /context and /usage from current state. */
