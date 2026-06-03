@@ -71,8 +71,8 @@ const COMMAND_HELP: ReadonlyArray<readonly [string, string]> = [
   ['/compact', 'compact the conversation (M3 — not yet implemented)'],
   ['/context', 'show context info for the current session'],
   ['/usage', 'show token usage and cost for the current session'],
-  ['/select', 'Disable mouse reporting so you can select/copy text (wheel scroll off)'],
-  ['/scroll', 'Re-enable mouse-wheel scrolling (default)'],
+  ['/select', 'disable mouse reporting so you can select/copy text (wheel scroll off)'],
+  ['/scroll', 're-enable mouse-wheel scrolling (default)'],
   ['/help', 'list the available slash commands'],
 ]
 
