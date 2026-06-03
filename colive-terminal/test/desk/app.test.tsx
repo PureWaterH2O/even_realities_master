@@ -576,6 +576,54 @@ describe('desk App', () => {
     cleanup()
   })
 
+  // A2 (UAT): the user's terminal (VS Code) emits Option+Left/Right as the READLINE
+  // form `ESC b` / `ESC f` (ink: ch='b'/'f' + key.meta, NO arrow flag), not the CSI
+  // form `\x1b[1;3D`. Probe in this harness confirms ch='b'/'f' + meta=true.
+  it('A2: Option+Left as readline ESC-b moves the cursor one WORD left', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'foo bar')   // cursor at end (col 7)
+    await write(stdin, '\x1bb')     // ESC-b: word-left -> cursor before "bar" (col 4)
+    await write(stdin, 'X')         // insert marker at the word boundary
+    await write(stdin, '\r')        // submit
+    expect(sent).toEqual(['foo Xbar']) // moved one word left; without the fix it stays "foo barX"
+    cleanup()
+  })
+
+  it('A2: Option+Right as readline ESC-f moves the cursor one WORD right', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'foo bar')   // cursor at end (col 7)
+    await write(stdin, '\x1b[D')    // ← (left) once -> between "ba" and "r" (col 6)
+    await write(stdin, '\x1b[D')
+    await write(stdin, '\x1b[D')
+    await write(stdin, '\x1b[D')    // now at col 3 (after "foo")
+    await write(stdin, '\x1bf')     // ESC-f: word-right -> end of "bar" (col 7)
+    await write(stdin, 'X')         // insert marker
+    await write(stdin, '\r')        // submit
+    expect(sent).toEqual(['foo barX']) // moved word-right back to end; without the fix it stays at col 3 -> "fooX bar"
+    cleanup()
+  })
+
+  it('A2: Option+Backspace (Meta+DEL) deletes the preceding WORD', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'foo bar')   // cursor at end
+    await write(stdin, '\x1b\x7f')  // Meta+DEL (Option+Backspace) -> delete-word
+    await write(stdin, '\r')        // submit
+    expect(sent).toEqual(['foo'])   // "bar" + its preceding space removed (deleteWordBackward skips trailing space then the word); a plain backspace would yield "foo ba"
+    cleanup()
+  })
+
   it('Ctrl-J composes a genuine multi-line buffer (renders the continuation line indented)', async () => {
     const fake = makeFakeHub()
     const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)

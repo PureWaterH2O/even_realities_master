@@ -418,10 +418,13 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     if (ch === '\n' || (key.ctrl && (ch === 'j' || ch === 'J'))) { setBuf(B.insertNewline); return }
 
     // Editing keys.
+    if (key.meta && (key.backspace || key.delete)) { setBuf(B.deleteWordBackward); return } // Option+Backspace (must precede plain backspace)
     if (key.backspace || key.delete) { setBuf(B.deleteBackward); return }
     if (key.ctrl && (ch === 'w' || ch === 'W')) { setBuf(B.deleteWordBackward); return }
     if (key.leftArrow && key.meta)  { setBuf(B.moveWordLeft); return }
     if (key.rightArrow && key.meta) { setBuf(B.moveWordRight); return }
+    if (key.meta && (ch === 'b' || ch === 'B')) { setBuf(B.moveWordLeft); return }   // readline ESC-b (Option+Left)
+    if (key.meta && (ch === 'f' || ch === 'F')) { setBuf(B.moveWordRight); return }  // readline ESC-f (Option+Right)
     if (key.leftArrow)  { setBuf(B.moveLeft); return }
     if (key.rightArrow) { setBuf(B.moveRight); return }
     if (key.upArrow) {
