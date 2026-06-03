@@ -106,4 +106,28 @@ describe('EditBuffer', () => {
     expect(b.row).toBe(1)
     expect(b.col).toBe(2)
   })
+
+  it('moveWordLeft at the start of a continuation line does not wrap to the previous line', () => {
+    let b = B.fromText('foo\nbar')   // row 1, col 3 (end of "bar")
+    b = B.moveLineStart(b)           // row 1, col 0
+    b = B.moveWordLeft(b)            // line-scoped: stays put
+    expect(b.row).toBe(1)
+    expect(b.col).toBe(0)
+  })
+
+  it('moveDown inside a multiline buffer moves the cursor and clamps the column', () => {
+    let b = B.fromText('longline\nx')        // row 1, col 1
+    b = B.moveLineEnd(B.moveUp(b).buffer)    // row 0, col 8 (end of "longline")
+    const r = B.moveDown(b)
+    expect(r.atEdge).toBe(false)
+    expect(r.buffer.row).toBe(1)
+    expect(r.buffer.col).toBe(1)             // clamped within "x"
+  })
+
+  it('deleteBackward at the buffer origin is a no-op', () => {
+    const b = B.moveLineStart(B.insertText(B.empty(), 'abc')) // row 0, col 0
+    const r = B.deleteBackward(b)
+    expect(r).toEqual(b)
+    expect(B.toText(r)).toBe('abc')
+  })
 })

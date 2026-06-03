@@ -105,6 +105,7 @@ export function moveRight(b: EditBuffer): EditBuffer {
   return { ...b, row: b.row + 1, col: 0 }
 }
 
+/** Word move within the current line. Line-scoped: at col 0 this stays put (no wrap to the previous line). */
 export function moveWordLeft(b: EditBuffer): EditBuffer {
   const cur = b.lines[b.row]!
   let i = b.col
@@ -113,6 +114,7 @@ export function moveWordLeft(b: EditBuffer): EditBuffer {
   return { ...b, col: i }
 }
 
+/** Word move within the current line. Line-scoped: at end-of-line this stays put (no wrap to the next line). */
 export function moveWordRight(b: EditBuffer): EditBuffer {
   const cur = b.lines[b.row]!
   let i = b.col
