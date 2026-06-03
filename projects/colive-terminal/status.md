@@ -1,17 +1,24 @@
 # Co-Live Terminal — Status
 
-**Current state:** 🧪 **M3.2A "Composer" — CANDIDATE built, awaiting hardware UAT (NOT merged).** Branch
-`colive-terminal-m3.2a` (off `main` `8f9bb0f`), built via subagent-driven TDD (impl → spec review → quality
-review per task; 19 commits). New pure `src/desk/input/` layer (`EditBuffer` model, per-project DI'd history,
-SGR-wheel parser, slash-filter, multi-line cursor render) + `app.tsx` rewired into a composer: multi-line
-authoring (`Ctrl-J` / `\`+Enter), char/word/line cursor nav, persisted per-project history (`↑/↓`), `usePaste`
-paste, mouse-wheel transcript scroll, and a slash-command menu. **`↑/↓` now drive the INPUT** (the wheel scrolls
-the transcript; text selection → **Option-drag**). **ZERO Core/Hub change** — desk stays a pure Hub client.
-**375 tests pass / 35 files, typecheck clean — controller-verified from a clean tree (`npm ci`).** A final
-holistic review across the whole branch = "ready for hardware UAT" (2 cosmetic non-blocking notes). The review
-loops caught + fixed 3 real bugs (backslash-continuation cursor anchor; history nav-reset after every submit;
-history read-dedup). **DONE only after the user runs `projects/colive-terminal/m3.2a-uat-runbook.md` on real
-G2 + R1 and signs off** (M3.0 §0), then merges to `main`.
+**Current state:** 🔧 **M3.2A "Composer" — UAT fix pass done (A2/A4/A6), re-UAT pending (NOT merged).** Branch
+`colive-terminal-m3.2a` (off `main` `8f9bb0f`), built + fixed via subagent-driven TDD (impl → spec review →
+quality review per task). New pure `src/desk/input/` layer (`EditBuffer` model, per-project DI'd history,
+SGR-wheel parser, slash-filter, multi-line cursor render) + `app.tsx` rewired into a composer. **`↑/↓` drive the
+INPUT** (wheel scrolls the transcript). **ZERO Core/Hub change** — desk stays a pure Hub client.
+
+**First hardware UAT (2026-06-03):** A3/B1/B2 PASS, A1 via Ctrl-J; flagged A2/A4/A6, A5=scope. **Fix pass (each
+TDD'd + independently reviewed, re-verified clean-tree → 391 tests / 36 files, typecheck 0):**
+- **A2** `29c93c8` — Option+word-nav via the readline `ESC-b`/`ESC-f` form (VS Code sends that, not the CSI form)
+  + Option+Backspace delete-word. Additive (CSI form kept).
+- **A4** `c537ac2` — **real stale-closure bug** (not the terminal): ↑/↓ now use functional `setBuf` updaters +
+  `nav`→ref, fixing dropped/"jumping" arrows under input batching. Opt-in `COLIVE_A4_LOG` logger for hardware proof.
+- **A6** `9001f8a` (+ `21c6ead` polish) — runtime **`/select` ⇄ `/scroll`** mouse-mode toggle (native copy vs wheel
+  scroll; DECSET literals de-duped in `src/desk/mouse-mode.ts`).
+- **Deferred:** durable `/copy` (OSC 52) → **M3.2B**; full skill/CLI slash set (A5) needs Hub-reported commands → **M3.3**.
+
+**DONE only after the user re-runs `projects/colive-terminal/m3.2a-uat-runbook.md` (focus A2/A4/A6) on real
+G2 + R1 and signs off** (M3.0 §0), then merges to `main`. (The build's earlier review loops also caught 3 real
+bugs: backslash-continuation cursor anchor; history nav-reset after every submit; history read-dedup.)
 
 _Previously:_ ✅ **M3.1 "Readable transcript" DONE — hardware-signed-off 2026-06-02, merged to `main`** (desk
 scrollback viewport, inline syntax-highlighted diffs, markdown, Ctrl-O verbose, todos panel, native-style tool

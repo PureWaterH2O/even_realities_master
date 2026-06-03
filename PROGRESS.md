@@ -5,6 +5,28 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-03
 
+### Co-Live Terminal M3.2A "Composer" — 🔧 UAT fix pass (A2/A4/A6), re-UAT pending — NOT merged
+
+- **First hardware UAT (2026-06-03):** A3, B1, B2 **PASS**; A1 via Ctrl-J (user waved off `\`+Enter). Flagged **A2** (Option+word-nav),
+  **A4** (paste→arrow "jump"), **A6** (copy/selection — "critical"); A5 (more slash commands) = scope ask.
+- **Triaged via a 4-way parallel investigation workflow** (verified root causes against ground-truth code; killed the runaway
+  web-research sub-tree once the 3 load-bearing findings were in). Then fixed via subagent-driven TDD (fresh implementer →
+  spec review → quality review per fix; **zero Core/Hub change**):
+  - **A2 — Option+word-nav:** VS Code's terminal emits the **readline** form of Option+←/→ (`ESC-b`/`ESC-f` → `ch='b'/'f'+meta`,
+    no arrow flag), which the CSI-only dispatcher swallowed. Added that form (kept CSI) **+ Option+Backspace = delete-word**. `29c93c8`.
+  - **A4 — paste→arrow "jump": a REAL bug, not the terminal.** ↑/↓ computed next-state from a **stale React closure** + non-functional
+    `setBuf`; under input batching (auto-repeat / coalesced bytes — ink drains stdin in one synchronous emit loop, refreshing the
+    handler closure only at React commit) every batched arrow read the same frozen buffer → all but the last dropped, edge moves
+    fired history recall → "jump to top/bottom." Fixed: **functional `setBuf` updaters** (like `←` always was) + `nav`→`useRef`.
+    Shipped an **opt-in logger** (`COLIVE_A4_LOG`) for one-shot hardware confirmation. `c537ac2`. Lesson captured in
+    `knowledge/terminal-mode/ink7-input-internals.md`.
+  - **A6 — copy:** wheel-scroll and native selection are **mutually exclusive** (same `?1000h` mode; `?1006h` alone emits nothing).
+    Added a runtime **`/select` ⇄ `/scroll`** mouse-mode toggle (DECSET literals de-duped into `src/desk/mouse-mode.ts`, shared with
+    `index.ts` so on-exit cleanup can't drift; status-line shows `select-mode`). `9001f8a`. Durable **`/copy` (OSC 52)** → M3.2B;
+    full skill/CLI command set (**A5**) needs Hub-reported commands → **M3.3**.
+- **Re-verified from a clean tree:** `npm ci` clean, typecheck exit 0, **391 tests / 36 files** (was 381; +10). Run-book updated for
+  re-UAT (focus A2/A4/A6). **Still NOT merged** — DONE only after the user re-runs the run-book on real G2 + R1 and signs off.
+
 ### Co-Live Terminal M3.2A "Composer" — ✅ BUILT (candidate), awaiting hardware UAT — NOT merged
 
 - **Implemented from the plan** (`docs/superpowers/plans/2026-06-02-colive-terminal-m3.2a-composer.md`) on branch
