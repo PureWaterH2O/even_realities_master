@@ -17,17 +17,26 @@
 export type SlashView = 'context' | 'usage'
 
 /**
+ * Mouse-reporting mode (UAT A6). `scroll` = SGR mouse ON (wheel scrolls the
+ * transcript; the default, matching the alt-screen enter sequence). `select` =
+ * mouse OFF, so native click-drag text selection / copy works in any terminal.
+ */
+export type MouseMode = 'scroll' | 'select'
+
+/**
  * A recognized slash command, handled entirely client-side. Discriminated by
  * `command`:
  * - `new_session` (/clear): drop the current sessionId and clear the transcript.
  * - `note` (/compact): surface `message` (an M3 not-implemented notice); post nothing.
  * - `view` (/context, /usage): render the `view` from local state.
+ * - `mouse_mode` (/select, /scroll): toggle SGR mouse reporting at runtime.
  * - `help` (/help): surface `message` listing the available commands.
  */
 export type CommandResult =
   | { kind: 'command'; command: 'new_session' }
   | { kind: 'command'; command: 'note'; message: string }
   | { kind: 'command'; command: 'view'; view: SlashView }
+  | { kind: 'command'; command: 'mouse_mode'; mode: MouseMode }
   | { kind: 'command'; command: 'help'; message: string }
 
 /** A leading-slash token that matches no known command. Show, don't post. */
@@ -51,6 +60,8 @@ export const SLASH_COMMANDS = [
   'compact',
   'context',
   'usage',
+  'select',
+  'scroll',
   'help',
 ] as const
 
@@ -60,8 +71,15 @@ const COMMAND_HELP: ReadonlyArray<readonly [string, string]> = [
   ['/compact', 'compact the conversation (M3 — not yet implemented)'],
   ['/context', 'show context info for the current session'],
   ['/usage', 'show token usage and cost for the current session'],
+  ['/select', 'disable mouse reporting so you can select/copy text (wheel scroll off)'],
+  ['/scroll', 're-enable mouse-wheel scrolling (default)'],
   ['/help', 'list the available slash commands'],
 ]
+
+/** Menu source for the M3.2A slash-command completion popup, derived from COMMAND_HELP. */
+export function slashMenuItems(): { name: string; desc: string }[] {
+  return COMMAND_HELP.map(([name, desc]) => ({ name: name.replace(/^\//, ''), desc }))
+}
 
 /** The /help body, listing every supported command. */
 function helpMessage(): string {
@@ -109,6 +127,10 @@ export function interpretInput(raw: string): InterpretedInput {
       return { kind: 'command', command: 'view', view: 'context' }
     case 'usage':
       return { kind: 'command', command: 'view', view: 'usage' }
+    case 'select':
+      return { kind: 'command', command: 'mouse_mode', mode: 'select' }
+    case 'scroll':
+      return { kind: 'command', command: 'mouse_mode', mode: 'scroll' }
     case 'help':
       return { kind: 'command', command: 'help', message: helpMessage() }
     default:

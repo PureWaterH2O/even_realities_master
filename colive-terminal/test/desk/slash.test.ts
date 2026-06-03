@@ -44,6 +44,24 @@ describe('interpretInput — slash commands', () => {
     expect(r.view).toBe('usage')
   })
 
+  it('/select -> mouse_mode command (select)', () => {
+    const r = interpretInput('/select')
+    expect(r.kind).toBe('command')
+    if (r.kind !== 'command' || r.command !== 'mouse_mode') {
+      throw new Error('expected mouse_mode command')
+    }
+    expect(r.mode).toBe('select')
+  })
+
+  it('/scroll -> mouse_mode command (scroll)', () => {
+    const r = interpretInput('/scroll')
+    expect(r.kind).toBe('command')
+    if (r.kind !== 'command' || r.command !== 'mouse_mode') {
+      throw new Error('expected mouse_mode command')
+    }
+    expect(r.mode).toBe('scroll')
+  })
+
   it('/help -> help command listing the available slash commands', () => {
     const r = interpretInput('/help')
     expect(r.kind).toBe('command')
@@ -51,7 +69,7 @@ describe('interpretInput — slash commands', () => {
       throw new Error('expected help command')
     }
     // The help text should mention every supported command.
-    for (const name of ['/clear', '/compact', '/context', '/usage', '/help']) {
+    for (const name of ['/clear', '/compact', '/context', '/usage', '/select', '/scroll', '/help']) {
       expect(r.message).toContain(name)
     }
   })
@@ -134,6 +152,8 @@ describe('interpretInput — the load-bearing invariant', () => {
       '/compact',
       '/context',
       '/usage',
+      '/select',
+      '/scroll',
       '/help',
       '/foo',
       '/bar baz',

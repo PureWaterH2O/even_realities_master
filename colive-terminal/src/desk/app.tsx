@@ -25,7 +25,7 @@
  *    / client.respondQuestion(sessionId, answer, toolUseId). Esc interrupts.
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { Box, Text, useApp, useInput, useStdout } from 'ink'
+import { Box, Text, useApp, useInput, usePaste, useStdin, useStdout } from 'ink'
 import type {
   HubClient,
   SubscriptionHandle,
@@ -37,10 +37,35 @@ import type {
   UserQuestionEvent,
 } from '../core/events'
 import { interpretInput } from './slash'
+import type { MouseMode } from './slash'
+import { filterSlash } from './input/menu'
+import { slashMenuItems } from './slash'
+import { MOUSE_ON, MOUSE_OFF } from './mouse-mode'
 import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
 import { computeWindow, scrollPage, scrollLine, pinBottom, afterContentChange, initialViewport } from './render/window'
 import type { ViewportState } from './render/window'
+import * as B from './input/buffer'
+import type { EditBuffer } from './input/buffer'
+import { renderInputRows } from './input/input-rows'
+import { parseSgrMouse } from './input/mouse'
+import { initNav, prev as histPrev, next as histNext, memoryHistoryStore } from './input/history'
+import type { HistoryStore } from './input/history'
+import { appendFileSync } from 'node:fs'
+
+// A4 diagnostic logger: opt-in via COLIVE_A4_LOG=<path>; a no-op otherwise. Lets us CONFIRM
+// arrow-key batching on real hardware (multiple ↑/↓ arriving in one stdin tick) without
+// changing normal behaviour. (Date.now() is fine in production — only the sandbox forbids it.)
+const A4_LOG = process.env.COLIVE_A4_LOG
+const a4log = (line: string): void => {
+  if (A4_LOG) {
+    try {
+      appendFileSync(A4_LOG, line + '\n')
+    } catch {
+      /* best-effort — never crash the composer on a diagnostic write */
+    }
+  }
+}
 
 /** Optional construction config for the app. */
 export interface AppConfig {
@@ -48,6 +73,10 @@ export interface AppConfig {
   cwd?: string
   /** Replay buffered frames on subscribe (default true so late joiners catch up). */
   needReplay?: boolean
+  /** Injected history persistence (defaults to an in-memory store if absent). */
+  historyStore?: HistoryStore
+  /** Project key for per-project history (the Hub base URL or cwd). */
+  historyKey?: string
 }
 
 /** Props for the root {@link App}. The HubClient is injected for testability. */
@@ -62,7 +91,7 @@ export interface AppProps {
 /* Status model                                                        */
 /* ------------------------------------------------------------------ */
 
-/** Rows moved per arrow key / mouse-wheel notch (1 felt sluggish for trackpads). */
+/** Rows moved per mouse-wheel notch (1 felt sluggish for trackpads; reused by the Task 9 wheel handler). */
 const WHEEL_STEP = 3
 
 const STATUS_LABEL: Record<StatusState, string> = {
@@ -101,18 +130,49 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const [viewport, setViewport] = useState<ViewportState>(initialViewport)
   const { stdout } = useStdout()
   const width = (stdout?.columns ?? 80)
-  // Reserve lines for the chrome (scroll indicator + status + input) PLUS one
-  // line of headroom. The headroom is load-bearing: ink redraws by moving the
-  // cursor up N lines and overwriting in place; if our total output exactly
-  // fills the terminal, the final newline scrolls the terminal up by one, ink's
-  // cursor math drifts, and every streamed frame leaks a (raw) line into the
-  // host scrollback. Keeping output strictly shorter than the terminal keeps the
-  // viewport a clean fixed region (no scrollback fighting — UAT A1).
-  const reserved = 4 // indicator + status + input + 1 line headroom
-  const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
   const [status, setStatus] = useState<StatusInfo>({ state: 'idle' })
   const [pending, setPending] = useState<Pending | undefined>(undefined)
-  const [input, setInput] = useState('')
+  const [buf, setBuf] = useState<EditBuffer>(B.empty)
+  // UAT A6 — runtime mouse-reporting mode. Defaults to 'scroll' (mouse ON, wheel
+  // scrolls the transcript) to match the alt-screen enter sequence in src/index.ts.
+  // /select flips to 'select' (mouse OFF) so native click-drag copy works.
+  const [mouseMode, setMouseMode] = useState<MouseMode>('scroll')
+
+  // Bracketed paste rides ink's separate channel (never reaches useInput), so multi-line
+  // pasted text lands in the buffer and can never trigger per-char or submit logic.
+  usePaste((text) => { setBuf((b) => B.insertText(b, text)) })
+
+  const historyStore = useMemo<HistoryStore>(() => config?.historyStore ?? memoryHistoryStore(), [config?.historyStore])
+  const historyKey = config?.historyKey ?? 'default'
+  // History navigation cursor. A REF (not state) on purpose: it is NEVER read in render
+  // (the composer re-render is driven entirely by setBuf), and the ↑/↓ edge branch advances
+  // it from INSIDE a functional setBuf updater — reading state there would be stale under
+  // input batching (the A4 bug). A ref always exposes the freshest value to the next batched
+  // event. (initNav once; reset on every submit below.)
+  const navRef = useRef(initNav(historyStore.load(historyKey)))
+
+  // Slash-command completion menu. It is open exactly when the composer holds a single
+  // leading-"/" token that matches at least one command (filterSlash returns the items,
+  // else null). app.tsx owns the highlight index; the items list is memoized once.
+  const [menuIndex, setMenuIndex] = useState(0)
+  const menuItems = useMemo(() => slashMenuItems(), [])
+  const menu = filterSlash(B.toText(buf), menuItems) // null when the menu is closed
+  const menuOpen = menu !== null
+  const clampedMenuIndex = menu ? Math.min(menuIndex, menu.length - 1) : 0
+  // Reset the menu highlight to the top whenever the composer text changes (a re-filter).
+  // ↑/↓ move the highlight without changing the text, so they are unaffected.
+  useEffect(() => { setMenuIndex(0) }, [B.toText(buf)])
+
+  // Reserve lines for the chrome (scroll indicator + status line + 1 line of headroom)
+  // PLUS the composer's own rows, which grow as the buffer gains lines. The headroom is
+  // load-bearing: ink redraws by moving the cursor up N lines and overwriting in place; if
+  // total output exactly fills the terminal, the trailing newline scrolls the host and ink's
+  // cursor math drifts (leaking lines into scrollback). Keeping output strictly shorter than
+  // the terminal keeps the viewport a clean fixed region (UAT A1).
+  const menuRowCount = menuOpen ? menu!.length : 0
+  const inputRowCount = pending && pending.kind === 'question' ? 0 : renderInputRows(buf, { width }).length
+  const reserved = 3 + inputRowCount + menuRowCount // 3 = indicator + status + headroom
+  const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
   // or reset by /clear). A ref keeps the latest value available to async
@@ -244,11 +304,19 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         case 'view':
           dispatch({ type: 'note', text: renderView(result.view, status) })
           return
+        case 'mouse_mode':
+          // Emit the DECSET toggle at runtime. These set terminal MODES (not screen
+          // content), so the write does not corrupt ink's frame — ink only diffs its
+          // own frame string. Reuses the same literals src/index.ts writes on
+          // enter/exit (via ./mouse-mode), so on-exit cleanup always matches.
+          stdout?.write(result.mode === 'select' ? MOUSE_OFF : MOUSE_ON)
+          setMouseMode(result.mode)
+          return
         default:
           return
       }
     },
-    [client, config?.cwd, setSessionId, status],
+    [client, config?.cwd, setSessionId, status, stdout],
   )
 
   const resolvePending = useCallback(
@@ -298,66 +366,145 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   useEffect(() => { setViewport((vp) => afterContentChange(vp, rows.length, height)) }, [rows.length, height])
   const win = computeWindow(rows, height, viewport)
 
+  // Mouse wheel scrolls the transcript. ink re-emits every non-paste byte verbatim on its
+  // internal 'input' channel, so we tap that and parse the raw SGR mouse report ourselves.
+  // We read the mouse-wheel off ink's undocumented internal 'input' emitter (an ink 7
+  // internal). Mechanism + the SGR/ESC details: knowledge/terminal-mode/ink7-input-internals.md.
+  const { internal_eventEmitter } = useStdin() as unknown as {
+    internal_eventEmitter?: { on(e: string, l: (s: string) => void): void; removeListener(e: string, l: (s: string) => void): void }
+  }
+  useEffect(() => {
+    const em = internal_eventEmitter
+    if (!em) return
+    const onInput = (raw: string): void => {
+      // The emitter delivers the raw SGR mouse report WITH a leading ESC; parseSgrMouse is
+      // anchored on "[<", so strip the ESC first. Non-wheel / non-mouse input → null → ignored.
+      const seq = raw.startsWith('\x1b') ? raw.slice(1) : raw
+      const dir = parseSgrMouse(seq)
+      if (dir !== null) setViewport((vp) => scrollLine(vp, rows.length, height, dir, WHEEL_STEP))
+    }
+    em.on('input', onInput)
+    return () => em.removeListener('input', onInput)
+  }, [internal_eventEmitter, rows.length, height])
+
   /* ------------------------- input ------------------------- */
 
   useInput((ch, key) => {
+    // A4 diagnostic (opt-in, no-op unless COLIVE_A4_LOG is set): log every ↑/↓ as it arrives
+    // so coalesced bytes / auto-repeat (multiple events in one stdin tick) are visible on real
+    // hardware. Logs the raw bytes + the buffer position at the moment of the event.
+    if (A4_LOG && (key.upArrow || key.downArrow)) {
+      a4log(JSON.stringify({ t: Date.now(), dir: key.upArrow ? 'UP' : 'DOWN', bytes: [...ch].map((c) => c.charCodeAt(0)), upArrow: key.upArrow, downArrow: key.downArrow, meta: key.meta, row: buf.row, lines: buf.lines.length, col: buf.col }))
+    }
+
     if (key.escape) {
+      if (menuOpen) { setBuf(B.empty()); return }       // close the menu, clear the token
       const sid = sessionIdRef.current
       if (sid !== undefined) void client.interrupt(sid).catch(() => {})
       return
     }
 
-    // When a permission/question prompt is open, number keys pick an option.
+    // Mouse reports can arrive through useInput on some terminals — never let one
+    // fire a key binding (wheel is handled separately via the 'input' channel).
+    if (ch.startsWith('[<')) return
+
+    // Slash-menu navigation, captured ONLY while the menu is open. ↑/↓ move the
+    // highlight; Tab completes. Enter and printable chars deliberately fall through:
+    // Enter submits via the normal path (slash commands route locally, never POSTed)
+    // and a printable char extends the buffer, which re-filters the menu.
+    if (menuOpen && !pending) {
+      if (key.upArrow)   { setMenuIndex((i) => Math.max(0, Math.min(i, menu!.length - 1) - 1)); return }
+      if (key.downArrow) { setMenuIndex((i) => Math.min(menu!.length - 1, i + 1)); return }
+      if (key.tab) { setBuf(B.fromText('/' + menu![clampedMenuIndex]!.name)); setMenuIndex(0); return }
+    }
+
     if (pending) {
-      if (/^[1-9]$/.test(ch)) {
-        resolvePending(Number.parseInt(ch, 10) - 1)
-        return
-      }
-      // A question also accepts a typed free-text answer (Enter submits it).
+      if (/^[1-9]$/.test(ch)) { resolvePending(Number.parseInt(ch, 10) - 1); return }
       if (pending.kind === 'question') {
-        if (key.return) {
-          submitQuestionText(input)
-          setInput('')
-          return
-        }
-        if (key.backspace || key.delete) {
-          setInput((s) => s.slice(0, -1))
-          return
-        }
-        if (ch && !key.ctrl && !key.meta) setInput((s) => s + ch)
+        if (key.return) { submitQuestionText(B.toText(buf)); setBuf(B.empty()); return }
+        if (key.backspace || key.delete) { setBuf(B.deleteBackward); return }
+        if (ch && !key.ctrl && !key.meta) setBuf((b) => B.insertText(b, ch))
       }
       return
     }
 
+    // Ctrl-C quits; Ctrl-O toggles verbose (unchanged).
+    if (key.ctrl && (ch === 'c' || ch === 'C')) { exit(); return }
+    if (key.ctrl && (ch === 'o' || ch === 'O')) { setVerbose((v) => !v); return }
+
+    // Enter submits; Ctrl-J (\n) and "\\"+Enter insert a newline.
     if (key.return) {
-      const line = input
-      setInput('')
-      submitLine(line)
+      const text = B.toText(buf)
+      // Backslash-continuation: if the line the cursor is on ends in a single "\",
+      // Enter inserts a newline (keep editing) instead of submitting. Anchored on the
+      // CURSOR's line so it stays consistent with trimTrailingBackslash (which strips
+      // from buf.row) now that ↑/↓ can move the cursor off the last line.
+      if (buf.lines[buf.row]!.endsWith('\\')) {
+        setBuf((b) => B.insertNewline(trimTrailingBackslash(b)))
+        return
+      }
+      setBuf(B.empty())
+      // Spec §5: record submitted PROMPTS only — never slash commands (they route
+      // locally and are noise in recall). interpretInput is the single source of truth.
+      const interpreted = interpretInput(text)
+      if (interpreted.kind === 'prompt' && interpreted.text !== '') {
+        historyStore.append(historyKey, interpreted.text)
+      }
+      // Reset navigation to the (possibly updated) tail after EVERY submit, so a later
+      // ↑ starts from the most-recent entry even when this submit was a slash command.
+      navRef.current = initNav(historyStore.load(historyKey))
+      submitLine(text)
       return
     }
-    if (key.backspace || key.delete) {
-      setInput((s) => s.slice(0, -1))
+    if (ch === '\n' || (key.ctrl && (ch === 'j' || ch === 'J'))) { setBuf(B.insertNewline); return }
+
+    // Editing keys.
+    if (key.meta && (key.backspace || key.delete)) { setBuf(B.deleteWordBackward); return } // Option+Backspace (must precede plain backspace)
+    if (key.backspace || key.delete) { setBuf(B.deleteBackward); return }
+    if (key.ctrl && (ch === 'w' || ch === 'W')) { setBuf(B.deleteWordBackward); return }
+    if (key.leftArrow && key.meta)  { setBuf(B.moveWordLeft); return }
+    if (key.rightArrow && key.meta) { setBuf(B.moveWordRight); return }
+    if (key.meta && (ch === 'b' || ch === 'B')) { setBuf(B.moveWordLeft); return }   // readline ESC-b (Option+Left)
+    if (key.meta && (ch === 'f' || ch === 'F')) { setBuf(B.moveWordRight); return }  // readline ESC-f (Option+Right)
+    if (key.leftArrow)  { setBuf(B.moveLeft); return }
+    if (key.rightArrow) { setBuf(B.moveRight); return }
+    // ↑/↓ use FUNCTIONAL setBuf updaters (like ← / →) so each event in a batched stdin tick
+    // sees the freshest QUEUED buffer, not a stale closure capture (the A4 bug). The edge
+    // branch has a history side-effect, so it reads/advances navRef.current — a ref is also
+    // immune to the stale-closure problem and always exposes the latest nav to the next event.
+    if (key.upArrow) {
+      setBuf((b) => {
+        const m = B.moveUp(b)
+        if (!m.atEdge) return m.buffer
+        const r = histPrev(navRef.current, B.toText(b))
+        navRef.current = r.nav
+        return B.fromText(r.text)
+      })
       return
     }
-    if (key.ctrl && (ch === 'c' || ch === 'C')) {
-      exit()
+    if (key.downArrow) {
+      setBuf((b) => {
+        const m = B.moveDown(b)
+        if (!m.atEdge) return m.buffer
+        const r = histNext(navRef.current, B.toText(b))
+        navRef.current = r.nav
+        return B.fromText(r.text)
+      })
       return
     }
-    // Arrow keys scroll a few rows. In the alternate screen the terminal maps
-    // mouse-wheel / trackpad scrolling to ↑/↓ keystrokes, so this also gives
-    // natural wheel scrolling (like less/man) — UAT A1. WHEEL_STEP > 1 because
-    // a terminal emits one ↑/↓ per wheel notch; 1 row/notch felt sluggish.
-    if (key.upArrow)   { setViewport((vp) => scrollLine(vp, rows.length, height, -1, WHEEL_STEP)); return }
-    if (key.downArrow) { setViewport((vp) => scrollLine(vp, rows.length, height, 1, WHEEL_STEP)); return }
+
     if (key.pageUp)   { setViewport((vp) => scrollPage(vp, rows.length, height, -1)); return }
     if (key.pageDown) { setViewport((vp) => scrollPage(vp, rows.length, height, 1)); return }
-    if (key.ctrl && (ch === 'o' || ch === 'O')) { setVerbose((v) => !v); return }
-    // End key: ink exposes it as key.end on most terminals
-    if (key.end) { setViewport(pinBottom(rows.length, height)); return }
-    // Printable characters (ignore control combos) extend the input buffer.
-    if (ch && !key.ctrl && !key.meta) {
-      setInput((s) => s + ch)
+    if (key.end) {
+      if (B.isBlank(buf)) { setViewport(pinBottom(rows.length, height)); return }
+      setBuf(B.moveLineEnd); return
     }
+    // ink reports Home inconsistently; Ctrl-A / Ctrl-E are the reliable line-start/end.
+    if (key.ctrl && (ch === 'a' || ch === 'A')) { setBuf(B.moveLineStart); return }
+    if (key.ctrl && (ch === 'e' || ch === 'E')) { setBuf(B.moveLineEnd); return }
+
+    // Printable characters extend the buffer at the cursor.
+    if (ch && !key.ctrl && !key.meta) setBuf((b) => B.insertText(b, ch))
   })
 
   /* ------------------------- render ------------------------- */
@@ -384,18 +531,30 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         </Box>
       ) : null}
 
-      {pending ? <PendingPrompt pending={pending} input={input} /> : null}
+      {pending ? <PendingPrompt pending={pending} input={B.toText(buf)} /> : null}
 
       <Box>
         <Text dimColor>
           [{statusLabel}{tokenStr}] {sid ? `session ${sid}` : 'new session'}
+          {mouseMode === 'select' ? ' · select-mode (wheel off · ⇧/⌥-drag to copy)' : ''}
         </Text>
       </Box>
 
+      {menuOpen ? (
+        <Box flexDirection="column">
+          {menu!.map((item, i) => (
+            <Text key={item.name} inverse={i === clampedMenuIndex}>
+              {`/${item.name}  `}<Text dimColor>{item.desc}</Text>
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+
       {pending && pending.kind === 'question' ? null : (
-        <Box>
-          <Text>{'> '}</Text>
-          <Text>{input}</Text>
+        <Box flexDirection="column">
+          {renderInputRows(buf, { width }).map((r, i) => (
+            <Text key={`in-${i}`}>{r}</Text>
+          ))}
         </Box>
       )}
     </Box>
@@ -436,6 +595,15 @@ function PendingPrompt({ pending, input }: { pending: Pending; input: string }):
       </Box>
     </Box>
   )
+}
+
+/** Drop a single trailing "\" from the buffer's current line (backslash-continuation). */
+function trimTrailingBackslash(b: EditBuffer): EditBuffer {
+  const line = b.lines[b.row]!
+  if (!line.endsWith('\\')) return b
+  const lines = b.lines.slice()
+  lines[b.row] = line.slice(0, -1)
+  return { ...b, lines, col: Math.min(b.col, lines[b.row]!.length) }
 }
 
 /** Build a local view string for /context and /usage from current state. */

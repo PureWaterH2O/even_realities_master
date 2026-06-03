@@ -3,6 +3,72 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
+## 2026-06-03
+
+### Co-Live Terminal M3.2A "Composer" — 🔧 UAT fix pass: A2 fixed + hardware-passed; A4-step & A6-copy DEFERRED — NOT merged
+
+- **First hardware UAT (2026-06-03):** A3, B1, B2 **PASS**; A1 via Ctrl-J (user waved off `\`+Enter). Flagged **A2** (Option+word-nav),
+  **A4** (paste→arrow "jump"), **A6** (copy/selection — "critical"); A5 (more slash commands) = scope ask.
+- **Triaged via a 4-way parallel investigation workflow** (verified root causes against ground-truth code; killed the runaway
+  web-research sub-tree once the 3 load-bearing findings were in). Then fixed via subagent-driven TDD (fresh implementer →
+  spec review → quality review per fix; **zero Core/Hub change**):
+  - **A2 — Option+word-nav:** VS Code's terminal emits the **readline** form of Option+←/→ (`ESC-b`/`ESC-f` → `ch='b'/'f'+meta`,
+    no arrow flag), which the CSI-only dispatcher swallowed. Added that form (kept CSI) **+ Option+Backspace = delete-word**. `29c93c8`.
+  - **A4 — paste→arrow "jump": a REAL bug, not the terminal.** ↑/↓ computed next-state from a **stale React closure** + non-functional
+    `setBuf`; under input batching (auto-repeat / coalesced bytes — ink drains stdin in one synchronous emit loop, refreshing the
+    handler closure only at React commit) every batched arrow read the same frozen buffer → all but the last dropped, edge moves
+    fired history recall → "jump to top/bottom." Fixed: **functional `setBuf` updaters** (like `←` always was) + `nav`→`useRef`.
+    Shipped an **opt-in logger** (`COLIVE_A4_LOG`) for one-shot hardware confirmation. `c537ac2`. Lesson captured in
+    `knowledge/terminal-mode/ink7-input-internals.md`.
+  - **A6 — copy:** wheel-scroll and native selection are **mutually exclusive** (same `?1000h` mode; `?1006h` alone emits nothing).
+    Added a runtime **`/select` ⇄ `/scroll`** mouse-mode toggle (DECSET literals de-duped into `src/desk/mouse-mode.ts`, shared with
+    `index.ts` so on-exit cleanup can't drift; status-line shows `select-mode`). `9001f8a`. Durable **`/copy` (OSC 52)** → M3.2B;
+    full skill/CLI command set (**A5**) needs Hub-reported commands → **M3.3**.
+- **Re-verified from a clean tree:** `npm ci` clean, typecheck exit 0, **391 tests / 36 files** (was 381; +10).
+- **Round-2 hardware UAT (2026-06-03):** **A2 = FULL PASS.** **A4** — paste works, but post-paste one-line ↑/↓ stepping still
+  fails on the VS Code terminal (the functional-updater fix corrected a real rig-verified stale-closure bug, but an additional
+  cause remains unpinned) → **user deferred (not mission-critical)**; `COLIVE_A4_LOG` logger stays wired. **A6** — copy still does
+  not work (couldn't copy anything, even with `/select`) → **user deferred the entire copy/paste surface to a new dedicated phase**
+  (to be scoped in the planning chat). A5 → M3.3.
+- **Composer core is hardware-validated** (multi-line authoring, char/word/line cursor nav, history, paste, slash menu,
+  `/select`·`/scroll` toggle). Two deferrals (A4 per-line step, A6 copy) carried to the planning chat for the merge-scope call.
+  **Still NOT merged.**
+
+### Co-Live Terminal M3.2A "Composer" — ✅ BUILT (candidate), awaiting hardware UAT — NOT merged
+
+- **Implemented from the plan** (`docs/superpowers/plans/2026-06-02-colive-terminal-m3.2a-composer.md`) on branch
+  `colive-terminal-m3.2a` (off `main` `8f9bb0f`), via **subagent-driven TDD** — one fresh implementer per task, then an
+  independent spec-compliance review (re-runs the tests) + a code-quality review, per task.
+- **New pure, fully-unit-tested layer `src/desk/input/`:** `buffer.ts` (immutable `EditBuffer` model + cursor/edit ops),
+  `history.ts` (pure nav + dedup/cap + DI'd `HistoryStore` w/ file + memory adapters), `mouse.ts` (pure SGR-wheel parser),
+  `menu.ts` (`filterSlash`), `input-rows.ts` (multi-line render w/ inverse-video cursor). `app.tsx`'s `useInput` became a
+  thin key→op dispatcher; paste rides ink `usePaste`; mouse-wheel read off `useStdin().internal_eventEmitter`'s `'input'`
+  channel (ESC-stripped before the parser); SGR mouse enabled at `index.ts`; per-project history defaulted to the on-disk
+  store (keyed by the Hub base URL).
+- **Keymap shift (hardware UAT confirms):** `↑/↓` now drive the **input** (history at edges, cursor between draft lines);
+  the **mouse wheel scrolls the transcript**; PageUp/PageDown page it; text selection now needs **Option-drag** (mouse
+  reporting is on). Full keymap w/ macOS Fn-equivalents in the run-book.
+- **The review loops caught + fixed real bugs** (not just style): backslash-continuation guard anchored on the **cursor**
+  line (was whole-buffer → a stray mid-buffer newline once `↑/↓` could move the cursor off the last line); history nav
+  reset after **every** submit (a slash-submit left a stale recall index); `fileHistoryStore.load` now applies
+  consecutive-dedup on read (the append path is a raw JSONL log). Tests strengthened to actually prove the buffer model
+  (mid-buffer insert → `aXbc`) and the `usePaste` safety property (a `\r` inside a paste never submits).
+- **Verification:** **375 tests pass / 35 files, typecheck clean, ZERO Core/Hub change** — controller-reverified from a
+  clean tree (`npm ci && npm run typecheck && npm test`). A final holistic review across the whole 19-commit branch =
+  **"ready for hardware UAT"** (only 2 non-blocking cosmetic notes: gate the menu render on `!pending`; import `MenuItem`
+  in `slashMenuItems`).
+- **Pre-UAT visual self-test DONE** (the M3.1 "see it before UAT" discipline — initially skipped, then done on a reminder):
+  extended the preview rig with a keystroke-driven composer scenario file (`test/preview/m32a.preview.test.tsx` — the rig's
+  `capture()`/`key()` sends arbitrary stdin bytes, so input-driven features render the same way the live desk would),
+  dumped frames, rendered PNGs via `vhs`, and **reviewed the screenshots**: multiline authoring, the mid-line inverse-video
+  cursor, multi-line paste, the slash menu + highlight, history recall, and a multi-line composer below a live transcript
+  all render correctly — **no rendering bugs found**, so no pre-UAT fixes were needed. Committed the preview test as a
+  permanent regression+preview asset (suite now **381 tests / 36 files**) and registered the frames in `scripts/screenshots.sh`.
+- **STATUS: CANDIDATE — NOT merged.** Per M3.0 §0, M3.2A is DONE only after the user runs
+  `projects/colive-terminal/m3.2a-uat-runbook.md` on real **G2 + R1** and signs off. Run-book = Part A (composer:
+  multiline, cursor/word/line nav, history-across-restart, paste, slash menu, wheel scroll + Option-drag) + Part B (light
+  co-live regression: single-render + permission ring round-trip).
+
 ## 2026-06-02
 
 ### Co-Live Terminal M3.2 — scoping the "typeable" rung (planner: Opus 4.8)

@@ -1,14 +1,31 @@
 # Co-Live Terminal — Status
 
-**Current state:** ✅ **M3.1 "Readable transcript" DONE — hardware-signed-off 2026-06-02, merged to `main`.**
-The rung shipped — desk scrollback viewport (PgUp/PgDn/End + arrow/wheel scroll), inline syntax-highlighted
-diffs, markdown (with code border + blockquote bar), Ctrl-O verbose toggle, todos panel (live ✔/▶/☐ glyphs),
-native-style `⏺ Tool(arg)` headers, and desk-only thinking display; one Core change (a `thinking_delta` event;
-Hub untouched). Hardened post-UAT via a self-test rig (replay + VHS screenshots + record/replay) and an
-adversarial audit workflow (4 render bugs fixed) + the B1 dup-prompt fix. **314 tests pass, typecheck clean,
-0 vulns — controller-verified from a clean tree** (`npm ci`). **User hardware UAT: Part A A1–A6 reviewed +
-Part B B1–B4 PASS on real G2 + R1 (2026-06-02).** Next rung (M3.2) is scoped by the planner chat — no M3.2
-work until then.
+**Current state:** 🔧 **M3.2A "Composer" — composer core hardware-validated; A4-step & A6-copy DEFERRED; in planning
+review (NOT merged).** Branch `colive-terminal-m3.2a` (off `main` `8f9bb0f`) @ `b17be70`, built + fixed via
+subagent-driven TDD (impl → spec review → quality review per task). New pure `src/desk/input/` layer (`EditBuffer`
+model, per-project DI'd history, SGR-wheel parser, slash-filter, multi-line cursor render) + `app.tsx` rewired into a
+composer. **`↑/↓` drive the INPUT** (wheel scrolls the transcript). **ZERO Core/Hub change** — desk stays a pure Hub
+client. **391 tests / 36 files, typecheck 0 (clean-tree verified 2026-06-03).**
+
+**Hardware UAT (2026-06-03, two rounds):** R1 — A3/B1/B2 PASS, A1 via Ctrl-J; flagged A2/A4/A6, A5=scope. Fix pass
+(each TDD'd + independently reviewed). R2 results:
+- **A2 ✅ FULL PASS** `29c93c8` — Option+word-nav via the readline `ESC-b`/`ESC-f` form (VS Code sends that, not the CSI
+  form) + Option+Backspace delete-word. Additive (CSI form kept).
+- **A4 ⏸ DEFERRED (not mission-critical)** `c537ac2` — fixed a **real, rig-verified stale-closure bug** (↑/↓ now functional
+  `setBuf` updaters + `nav`→ref), but post-paste **one-line stepping still fails on the VS Code terminal** → an additional
+  cause remains unpinned. Paste itself works. Opt-in `COLIVE_A4_LOG` logger stays wired for the next pass.
+- **A6 ⏸ DEFERRED → dedicated copy/paste phase** `9001f8a` (+ `21c6ead`) — shipped a runtime **`/select` ⇄ `/scroll`**
+  mouse-mode toggle, but **copy still does not work** in the user's VS Code setup. Whole copy/paste surface (selection
+  bypass, OSC 52 `/copy`, paste ergonomics) → its own phase, to be scoped in the planning chat.
+- **A5 ⏸** full skill/CLI slash set needs Hub-reported commands → **M3.3**.
+
+**Next:** planning chat reviews and decides whether M3.2A merges as-is (with A4/A6 deferred) or splits A4/A6 out. (The
+build's earlier review loops also caught 3 real bugs: backslash-continuation cursor anchor; history nav-reset after every
+submit; history read-dedup.)
+
+_Previously:_ ✅ **M3.1 "Readable transcript" DONE — hardware-signed-off 2026-06-02, merged to `main`** (desk
+scrollback viewport, inline syntax-highlighted diffs, markdown, Ctrl-O verbose, todos panel, native-style tool
+headers, desk-only thinking; one Core change — `thinking_delta`; 314 tests, hardware Part A + B PASS).
 
 _Previously:_ ✅ **M2 COMPLETE** — Tailscale remote access hardware-validated end-to-end (setup→serve→glasses→walk-away→tool-use) and **merged to `main`**. 237 tests, typecheck clean. Glasses work from anywhere on the tailnet (cellular+Tailscale, no LAN required). Deferred follow-ups carried forward: fast-`202`, filter internal sessions from the list, per-poll perf, desk single-slot concurrent-permission disambiguation, `bin:{colive}` before any real install/distribution, daemon-not-running vs not-installed distinction (see `knowledge/terminal-mode/tailscale-detection.md` open questions).
 

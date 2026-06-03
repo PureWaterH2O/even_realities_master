@@ -24,6 +24,7 @@ import type {
 } from '../../src/desk/client'
 import type { CoLiveEvent } from '../../src/core/events'
 import { stripAnsi } from '../../src/desk/render/ansi'
+import { memoryHistoryStore } from '../../src/desk/input/history'
 
 /** A fake HubClient that records calls and exposes the captured onEvent. */
 interface FakeHub extends HubClient {
@@ -355,6 +356,98 @@ describe('desk App', () => {
     expect(lastFrame() ?? '').not.toContain('old message')
   })
 
+  it('/select shows the select-mode status indicator; /scroll removes it (never POSTed)', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // default (scroll mode): no select-mode indicator on the status line
+    expect(stripAnsi(lastFrame() ?? '')).not.toContain('select-mode')
+
+    await write(stdin, '/select')
+    await write(stdin, '\r')
+    expect(fake.prompts).toHaveLength(0)                          // never POSTed
+    expect(stripAnsi(lastFrame() ?? '')).toContain('select-mode') // indicator shown
+    expect(stripAnsi(lastFrame() ?? '')).toContain('wheel off')
+
+    await write(stdin, '/scroll')
+    await write(stdin, '\r')
+    expect(fake.prompts).toHaveLength(0)                              // still never POSTed
+    expect(stripAnsi(lastFrame() ?? '')).not.toContain('select-mode') // indicator gone
+  })
+
+  it('/select and /scroll write the SGR mouse DECSET sequences to stdout', async () => {
+    const fake = makeFakeHub()
+    const inst = mount(<App client={fake} sessionId="s1" />)
+    const { stdin, stdout } = inst as unknown as {
+      stdin: { write(s: string): void }
+      stdout: { frames: string[] }
+    }
+    await flush()
+
+    const before = stdout.frames.length
+    await write(stdin, '/select')
+    await write(stdin, '\r')
+    // MOUSE_OFF = disable SGR (1006l) then button tracking (1000l)
+    expect(stdout.frames.slice(before).some((f) => f.includes('\x1b[?1006l\x1b[?1000l'))).toBe(true)
+
+    const beforeScroll = stdout.frames.length
+    await write(stdin, '/scroll')
+    await write(stdin, '\r')
+    // MOUSE_ON = enable button tracking (1000h) then SGR (1006h)
+    expect(stdout.frames.slice(beforeScroll).some((f) => f.includes('\x1b[?1000h\x1b[?1006h'))).toBe(true)
+  })
+
+  it('typing "/" opens the slash menu, filters, and Tab completes the command', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/')
+    expect(lastFrame()).toContain('/clear')   // menu lists commands
+    expect(lastFrame()).toContain('/help')
+    await write(stdin, 'h')                    // "/h" filters to /help
+    expect(lastFrame()).toContain('/help')
+    expect(lastFrame()).not.toContain('/clear')
+    await write(stdin, '\t')                   // Tab completes the highlighted item
+    expect(lastFrame()).toContain('> /help')
+    cleanup()
+  })
+
+  it('Esc closes an open slash menu without interrupting', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/')
+    expect(lastFrame()).toContain('/clear')    // menu open
+    await write(stdin, '\x1b')                 // Esc → close menu (no interrupt)
+    await flush(60)                            // ink debounces a lone ESC; wait past it
+    expect(fake.interrupts).toHaveLength(0)    // Esc did NOT interrupt
+    expect(lastFrame()).not.toContain('/clear') // menu closed
+    cleanup()
+  })
+
+  it('↓ moves the slash-menu highlight; Tab completes the highlighted command', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/')        // menu opens, highlight on the first item (clear)
+    await write(stdin, '\x1b[B')   // ↓ -> highlight the second item (compact)
+    await write(stdin, '\t')       // Tab completes the HIGHLIGHTED item
+    expect(lastFrame()).toContain('> /compact')
+    cleanup()
+  })
+
+  it('Enter on an open slash menu submits the command locally (never POSTed)', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/help')    // menu open, buffer "/help"
+    expect(lastFrame()).toContain('/help')         // menu visible
+    await write(stdin, '\r')       // Enter: falls through the menu block -> submitLine -> local /help
+    expect(fake.prompts).toHaveLength(0)           // never POSTed to the Hub
+    expect(lastFrame()).toContain('Available commands') // help rendered locally
+    cleanup()
+  })
+
   it('Esc interrupts the session', async () => {
     const fake = makeFakeHub()
     const { stdin } = mount(<App client={fake} sessionId="s1" />)
@@ -412,22 +505,19 @@ describe('desk App', () => {
     } finally { unmount() }
   })
 
-  it('arrow keys scroll the viewport (↑ unpins, ↓ re-pins) — wheel/trackpad', async () => {
+  it('PageUp/PageDown scroll the viewport (PgUp unpins, PgDn re-pins); arrows now drive the composer', async () => {
     const hub = makeFakeHub()
     const { lastFrame, stdin, unmount } = render(<App client={hub} sessionId="s1" />)
     try {
       await act(async () => {})
-      // Overflow the 20-row test viewport so the scroll footer appears.
       const long = Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')
       act(() => { hub.emit({ type: 'text_delta', text: long }) })
       expect(lastFrame()).toContain('(pinned ▼)') // starts pinned at bottom
-
-      act(() => { stdin.write('\x1B[A') }) // Up arrow -> scroll up one line
+      act(() => { stdin.write('\x1b[5~') }) // PageUp -> scroll up a page
       const up = lastFrame() ?? ''
       expect(up).not.toContain('(pinned ▼)') // unpinned now
-      expect(up).toContain('PgUp/PgDn') // unpinned hint shows
-
-      act(() => { stdin.write('\x1B[B') }) // Down arrow -> back to bottom, re-pins
+      expect(up).toContain('PgUp/PgDn')      // unpinned hint shows
+      act(() => { stdin.write('\x1b[6~') }) // PageDown -> back to bottom, re-pins
       expect(lastFrame()).toContain('(pinned ▼)')
     } finally { unmount() }
   })
@@ -470,5 +560,320 @@ describe('desk App', () => {
       act(() => { hub.emit({ type: 'thinking_delta', text: 'pondering deeply' }) })
       expect(lastFrame()).toContain('pondering deeply')
     } finally { unmount() }
+  })
+
+  it('composes a multiline prompt with Ctrl-J and submits the joined text on Enter', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'line one')
+    await write(stdin, '\n')          // Ctrl-J → newline, NOT submit
+    await write(stdin, 'line two')
+    expect(sent).toHaveLength(0)      // still composing
+    await write(stdin, '\r')          // Enter submits
+    expect(sent).toEqual(['line one\nline two'])
+    cleanup()
+  })
+
+  it('backspace deletes within the buffer and the prompt re-renders', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'abc')
+    await write(stdin, '\x7f')        // backspace
+    expect(lastFrame()).toContain('ab')
+    cleanup()
+  })
+
+  it('Enter submits (not continues) when the trailing "\\" is on a line the cursor has left', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'foo')
+    await write(stdin, '\n')        // newline -> row 1
+    await write(stdin, 'bar\\')     // last line "bar\" (ends with a backslash)
+    await write(stdin, '\x1b[A')    // ↑ -> cursor moves to row 0 ("foo"), off the backslash line
+    await write(stdin, '\r')        // Enter: cursor's line is "foo" (no trailing \) -> SUBMIT
+    expect(sent).toEqual(['foo\nbar\\'])  // literal backslash preserved; NOT a stray-newline continuation
+    cleanup()
+  })
+
+  it('cursor edit: ←← then a char inserts mid-buffer (proves the EditBuffer model, not string-append)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'abc')
+    await write(stdin, '\x1b[D')   // ← (left)
+    await write(stdin, '\x1b[D')   // ← (left) -> cursor between "a" and "b"
+    await write(stdin, 'X')        // insert at cursor
+    await write(stdin, '\r')       // submit
+    expect(sent).toEqual(['aXbc']) // mid-buffer insert; a string-append impl would yield "abcX"
+    cleanup()
+  })
+
+  // A2 (UAT): the user's terminal (VS Code) emits Option+Left/Right as the READLINE
+  // form `ESC b` / `ESC f` (ink: ch='b'/'f' + key.meta, NO arrow flag), not the CSI
+  // form `\x1b[1;3D`. Probe in this harness confirms ch='b'/'f' + meta=true.
+  it('A2: Option+Left as readline ESC-b moves the cursor one WORD left', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'foo bar')   // cursor at end (col 7)
+    await write(stdin, '\x1bb')     // ESC-b: word-left -> cursor before "bar" (col 4)
+    await write(stdin, 'X')         // insert marker at the word boundary
+    await write(stdin, '\r')        // submit
+    expect(sent).toEqual(['foo Xbar']) // moved one word left; without the fix it stays "foo barX"
+    cleanup()
+  })
+
+  it('A2: Option+Right as readline ESC-f moves the cursor one WORD right', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'foo bar')   // cursor at end (col 7)
+    await write(stdin, '\x1b[D')    // ← (left) once -> between "ba" and "r" (col 6)
+    await write(stdin, '\x1b[D')
+    await write(stdin, '\x1b[D')
+    await write(stdin, '\x1b[D')    // now at col 3 (after "foo")
+    await write(stdin, '\x1bf')     // ESC-f: word-right -> end of "bar" (col 7)
+    await write(stdin, 'X')         // insert marker
+    await write(stdin, '\r')        // submit
+    expect(sent).toEqual(['foo barX']) // moved word-right back to end; without the fix it stays at col 3 -> "fooX bar"
+    cleanup()
+  })
+
+  it('A2: Option+Backspace (Meta+DEL) deletes the preceding WORD', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'foo bar')   // cursor at end
+    await write(stdin, '\x1b\x7f')  // Meta+DEL (Option+Backspace) -> delete-word
+    await write(stdin, '\r')        // submit
+    expect(sent).toEqual(['foo'])   // "bar" + its preceding space removed (deleteWordBackward skips trailing space then the word); a plain backspace would yield "foo ba"
+    cleanup()
+  })
+
+  it('Ctrl-J composes a genuine multi-line buffer (renders the continuation line indented)', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'line one')
+    await write(stdin, '\n')       // Ctrl-J -> new buffer line
+    await write(stdin, 'line two')
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).toContain('> line one') // first line keeps the prompt
+    expect(frame).toContain('  line two') // continuation line is indented (buffer renderer, not a string)
+    cleanup()
+  })
+
+  it('persists submitted prompts per project and recalls them with ↑ (across a remount)', async () => {
+    const store = memoryHistoryStore()
+    const fake1 = makeFakeHub()
+    fake1.sendPrompt = async () => ({ sessionId: 's1' })
+
+    // First run: submit two prompts.
+    const run1 = mount(<App client={fake1} sessionId="s1" config={{ historyStore: store, historyKey: 'proj-x' }} />)
+    await flush()
+    await write(run1.stdin, 'first prompt')
+    await write(run1.stdin, '\r')
+    await write(run1.stdin, 'second prompt')
+    await write(run1.stdin, '\r')
+    run1.cleanup()
+
+    // Second run (simulated restart): ↑ recalls newest, ↑ again the older.
+    const run2 = mount(<App client={makeFakeHub()} sessionId="s1" config={{ historyStore: store, historyKey: 'proj-x' }} />)
+    await flush()
+    await write(run2.stdin, '\x1b[A') // ↑
+    expect(run2.lastFrame()).toContain('second prompt')
+    await write(run2.stdin, '\x1b[A') // ↑
+    expect(run2.lastFrame()).toContain('first prompt')
+    run2.cleanup()
+  })
+
+  it('does not record slash commands in history (spec §5 — prompts only)', async () => {
+    const store = memoryHistoryStore()
+    const fake = makeFakeHub()
+    fake.sendPrompt = async () => ({ sessionId: 's1' })
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'p' }} />)
+    await flush()
+    await write(stdin, 'real prompt')
+    await write(stdin, '\r')
+    await write(stdin, '/help')   // slash command — must NOT enter history
+    await write(stdin, '\r')
+    await write(stdin, '\x1b[A')  // ↑ recalls the most recent PROMPT, skipping /help
+    expect(lastFrame()).toContain('real prompt')
+    cleanup()
+    expect(store.load('p')).toEqual(['real prompt']) // /help never recorded
+  })
+
+  it('resets history navigation after a slash submit (↑ returns to the newest prompt, not a stale one)', async () => {
+    const store = memoryHistoryStore()
+    store.append('r', 'one')
+    store.append('r', 'two')               // history seeded: ['one','two']
+    const { stdin, lastFrame, cleanup } = mount(<App client={makeFakeHub()} sessionId="s1" config={{ historyStore: store, historyKey: 'r' }} />)
+    await flush()
+    await write(stdin, '\x1b[A')           // ↑ -> recalls 'two' (nav moves into history)
+    expect(lastFrame()).toContain('two')
+    await write(stdin, '\x17')             // Ctrl-W -> delete the recalled word ('two') -> empty buffer
+    await write(stdin, '/help')            // type a slash command
+    await write(stdin, '\r')               // submit /help (non-prompt: must still reset nav)
+    await write(stdin, '\x1b[A')           // ↑ -> must recall the NEWEST prompt 'two', NOT stale 'one'
+    expect(lastFrame()).toContain('two')
+    cleanup()
+  })
+
+  it('↓ walks back toward the draft and restores a blank draft past the newest', async () => {
+    const store = memoryHistoryStore()
+    store.append('d', 'alpha')
+    store.append('d', 'beta')              // history: ['alpha','beta']
+    const { stdin, lastFrame, cleanup } = mount(<App client={makeFakeHub()} sessionId="s1" config={{ historyStore: store, historyKey: 'd' }} />)
+    await flush()
+    await write(stdin, '\x1b[A')           // ↑ -> beta
+    expect(lastFrame()).toContain('beta')
+    await write(stdin, '\x1b[A')           // ↑ -> alpha
+    expect(lastFrame()).toContain('alpha')
+    await write(stdin, '\x1b[B')           // ↓ -> beta
+    expect(lastFrame()).toContain('beta')
+    expect(lastFrame()).not.toContain('alpha')
+    await write(stdin, '\x1b[B')           // ↓ -> blank draft (past the newest)
+    expect(lastFrame()).not.toContain('beta')   // input cleared; transcript is empty in this fresh hub
+    cleanup()
+  })
+
+  // A4 (UAT): after a multi-line block, ↑/↓ "jumped to the top/bottom line" instead of
+  // moving one line at a time. ROOT CAUSE: the ↑/↓ handlers read the CLOSURE-captured `buf`
+  // and called the NON-functional setBuf, so when ink delivers multiple arrows in ONE stdin
+  // tick (auto-repeat / coalesced bytes after a paste) every event sees the SAME stale buffer
+  // — all but the last move are dropped, and a surviving edge move fires history recall that
+  // collapses the draft. The fix uses FUNCTIONAL setBuf updaters (like ← already does) + a
+  // navRef so each batched event sees the freshest queued buffer.
+  //
+  // This test deliberately sends the two arrows in a SINGLE stdin.write with NO settle/flush
+  // between them — the exact condition the old settle-per-keystroke rigs masked.
+  it('A4: two ↑ batched in ONE stdin tick step the cursor up two lines (not one, not a history jump)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // Build a 4-line draft. Equal-length lines so moveUp's column clamp can't drift the marker.
+    await write(stdin, 'L0')
+    await write(stdin, '\n')
+    await write(stdin, 'L1')
+    await write(stdin, '\n')
+    await write(stdin, 'L2')
+    await write(stdin, '\n')
+    await write(stdin, 'L3')   // cursor now on row 3 (last line), col 2 (end)
+
+    // TWO up-arrows in ONE write, with NO settle between them (the batching repro).
+    await act(async () => {
+      stdin.write('\x1b[A\x1b[A')
+      for (let i = 0; i < 4; i++) await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 0))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    // Marker insert at the resting cursor, then submit, to read where the cursor landed.
+    await write(stdin, 'X')
+    await write(stdin, '\r')
+    // Two lines up from row 3 -> row 1 ("L1" + marker). The OLD non-functional code lands the
+    // marker on row 2 ("L2X") because only the LAST of the two batched events survives.
+    expect(sent).toEqual(['L0\nL1X\nL2\nL3'])
+    cleanup()
+  })
+
+  // A4 companion — the original "jump" face of the bug: with history present and the cursor on
+  // the TOP line, two ↑ in one tick must NOT silently lose the batch. The first ↑ is at the
+  // buffer's top edge so it recalls history (replacing the draft); the second batched ↑ must
+  // still be applied to the freshest queued buffer (it recalls the NEXT-older entry). With the
+  // OLD code the second event read the stale pre-recall buffer and was dropped.
+  it('A4: with history, two ↑ batched at the top edge recall two entries, not one (no dropped batch)', async () => {
+    const store = memoryHistoryStore()
+    store.append('a4', 'older')
+    store.append('a4', 'newer')             // history: ['older','newer']
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={makeFakeHub()} sessionId="s1" config={{ historyStore: store, historyKey: 'a4' }} />,
+    )
+    await flush()
+    // Empty draft -> cursor already on the single top line (row 0). Two ↑ in ONE tick.
+    await act(async () => {
+      stdin.write('\x1b[A\x1b[A')
+      for (let i = 0; i < 4; i++) await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 0))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    // First ↑ recalls 'newer'; the second batched ↑ must advance to the OLDER entry.
+    // OLD code drops the second event (stale closure) and would still show 'newer'.
+    expect(lastFrame()).toContain('older')
+    cleanup()
+  })
+
+  it('a multi-line paste lands in the buffer without submitting', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '\x1b[200~alpha\nbeta\x1b[201~') // bracketed paste -> usePaste
+    expect(sent).toHaveLength(0)                         // paste must NOT auto-submit
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).toContain('alpha')
+    expect(frame).toContain('beta')
+    cleanup()
+  })
+
+  it('mouse wheel-up scrolls the transcript (raw SGR report via the input emitter)', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    const long = Array.from({ length: 60 }, (_, i) => `row ${i}`).join('\n')
+    act(() => { fake.emit({ type: 'text_delta', text: long }) }) // overflow the 20-row viewport
+    await flush()
+    expect(lastFrame()).toContain('(pinned ▼)')          // starts pinned at bottom
+    await write(stdin, '\x1b[<64;1;1M')                   // wheel-up (button 64) -> scroll up, unpin
+    const after = lastFrame() ?? ''
+    expect(after).not.toContain('(pinned ▼)')             // the wheel actually moved the viewport
+    expect(after).toContain('PgUp/PgDn')                  // unpinned hint now shows
+    cleanup()
+  })
+
+  it('the transcript viewport shrinks as the composer grows (dynamic reservation)', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    const long = Array.from({ length: 40 }, (_, i) => `trow ${i}`).join('\n')
+    act(() => { fake.emit({ type: 'text_delta', text: long }) })
+    await flush()
+    const before = (stripAnsi(lastFrame() ?? '').match(/trow \d+/g) ?? []).length
+    await write(stdin, '\n'); await write(stdin, '\n'); await write(stdin, '\n'); await write(stdin, '\n') // 4× Ctrl-J -> composer = 5 rows
+    const after = (stripAnsi(lastFrame() ?? '').match(/trow \d+/g) ?? []).length
+    expect(after).toBeLessThan(before) // a taller composer reserves more rows -> fewer transcript rows visible
+    cleanup()
+  })
+
+  it('a paste containing a carriage return is inserted atomically and never submits (usePaste safety)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // A bare \r INSIDE a paste must be inserted literally, never treated as Enter. usePaste
+    // delivers the whole paste atomically off the input channel; were the paste to leak through
+    // useInput, the \r would be key.return and submit mid-paste.
+    await write(stdin, '\x1b[200~one\rtwo\x1b[201~')
+    expect(sent).toHaveLength(0)
+    cleanup()
   })
 })
