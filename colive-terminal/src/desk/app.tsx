@@ -133,6 +133,9 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const menu = filterSlash(B.toText(buf), menuItems) // null when the menu is closed
   const menuOpen = menu !== null
   const clampedMenuIndex = menu ? Math.min(menuIndex, menu.length - 1) : 0
+  // Reset the menu highlight to the top whenever the composer text changes (a re-filter).
+  // ↑/↓ move the highlight without changing the text, so they are unaffected.
+  useEffect(() => { setMenuIndex(0) }, [B.toText(buf)])
 
   // Reserve lines for the chrome (scroll indicator + status line + 1 line of headroom)
   // PLUS the composer's own rows, which grow as the buffer gains lines. The headroom is

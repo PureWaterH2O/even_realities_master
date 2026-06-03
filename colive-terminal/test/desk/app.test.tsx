@@ -384,6 +384,29 @@ describe('desk App', () => {
     cleanup()
   })
 
+  it('↓ moves the slash-menu highlight; Tab completes the highlighted command', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/')        // menu opens, highlight on the first item (clear)
+    await write(stdin, '\x1b[B')   // ↓ -> highlight the second item (compact)
+    await write(stdin, '\t')       // Tab completes the HIGHLIGHTED item
+    expect(lastFrame()).toContain('> /compact')
+    cleanup()
+  })
+
+  it('Enter on an open slash menu submits the command locally (never POSTed)', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/help')    // menu open, buffer "/help"
+    expect(lastFrame()).toContain('/help')         // menu visible
+    await write(stdin, '\r')       // Enter: falls through the menu block -> submitLine -> local /help
+    expect(fake.prompts).toHaveLength(0)           // never POSTed to the Hub
+    expect(lastFrame()).toContain('Available commands') // help rendered locally
+    cleanup()
+  })
+
   it('Esc interrupts the session', async () => {
     const fake = makeFakeHub()
     const { stdin } = mount(<App client={fake} sessionId="s1" />)
