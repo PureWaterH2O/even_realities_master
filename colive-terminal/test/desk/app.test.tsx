@@ -356,6 +356,47 @@ describe('desk App', () => {
     expect(lastFrame() ?? '').not.toContain('old message')
   })
 
+  it('/select shows the select-mode status indicator; /scroll removes it (never POSTed)', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // default (scroll mode): no select-mode indicator on the status line
+    expect(stripAnsi(lastFrame() ?? '')).not.toContain('select-mode')
+
+    await write(stdin, '/select')
+    await write(stdin, '\r')
+    expect(fake.prompts).toHaveLength(0)                          // never POSTed
+    expect(stripAnsi(lastFrame() ?? '')).toContain('select-mode') // indicator shown
+    expect(stripAnsi(lastFrame() ?? '')).toContain('wheel off')
+
+    await write(stdin, '/scroll')
+    await write(stdin, '\r')
+    expect(fake.prompts).toHaveLength(0)                              // still never POSTed
+    expect(stripAnsi(lastFrame() ?? '')).not.toContain('select-mode') // indicator gone
+  })
+
+  it('/select and /scroll write the SGR mouse DECSET sequences to stdout', async () => {
+    const fake = makeFakeHub()
+    const inst = mount(<App client={fake} sessionId="s1" />)
+    const { stdin, stdout } = inst as unknown as {
+      stdin: { write(s: string): void }
+      stdout: { frames: string[] }
+    }
+    await flush()
+
+    const before = stdout.frames.length
+    await write(stdin, '/select')
+    await write(stdin, '\r')
+    // MOUSE_OFF = disable SGR (1006l) then button tracking (1000l)
+    expect(stdout.frames.slice(before).some((f) => f.includes('\x1b[?1006l\x1b[?1000l'))).toBe(true)
+
+    const beforeScroll = stdout.frames.length
+    await write(stdin, '/scroll')
+    await write(stdin, '\r')
+    // MOUSE_ON = enable button tracking (1000h) then SGR (1006h)
+    expect(stdout.frames.slice(beforeScroll).some((f) => f.includes('\x1b[?1000h\x1b[?1006h'))).toBe(true)
+  })
+
   it('typing "/" opens the slash menu, filters, and Tab completes the command', async () => {
     const fake = makeFakeHub()
     const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)

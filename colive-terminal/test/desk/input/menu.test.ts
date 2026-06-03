@@ -11,6 +11,14 @@ describe('slashMenuItems', () => {
     expect(names).toContain('help')
     expect(ITEMS.find((i) => i.name === 'clear')?.desc).toMatch(/new session/i)
   })
+
+  it('exposes the mouse-mode commands (/select, /scroll) with descriptions', () => {
+    const names = ITEMS.map((i) => i.name)
+    expect(names).toContain('select')
+    expect(names).toContain('scroll')
+    expect(ITEMS.find((i) => i.name === 'select')?.desc).toMatch(/select|copy/i)
+    expect(ITEMS.find((i) => i.name === 'scroll')?.desc).toMatch(/scroll/i)
+  })
 })
 
 describe('filterSlash', () => {

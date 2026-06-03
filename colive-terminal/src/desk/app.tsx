@@ -37,8 +37,10 @@ import type {
   UserQuestionEvent,
 } from '../core/events'
 import { interpretInput } from './slash'
+import type { MouseMode } from './slash'
 import { filterSlash } from './input/menu'
 import { slashMenuItems } from './slash'
+import { MOUSE_ON, MOUSE_OFF } from './mouse-mode'
 import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
 import { computeWindow, scrollPage, scrollLine, pinBottom, afterContentChange, initialViewport } from './render/window'
@@ -131,6 +133,10 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const [status, setStatus] = useState<StatusInfo>({ state: 'idle' })
   const [pending, setPending] = useState<Pending | undefined>(undefined)
   const [buf, setBuf] = useState<EditBuffer>(B.empty)
+  // UAT A6 — runtime mouse-reporting mode. Defaults to 'scroll' (mouse ON, wheel
+  // scrolls the transcript) to match the alt-screen enter sequence in src/index.ts.
+  // /select flips to 'select' (mouse OFF) so native click-drag copy works.
+  const [mouseMode, setMouseMode] = useState<MouseMode>('scroll')
 
   // Bracketed paste rides ink's separate channel (never reaches useInput), so multi-line
   // pasted text lands in the buffer and can never trigger per-char or submit logic.
@@ -298,11 +304,19 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         case 'view':
           dispatch({ type: 'note', text: renderView(result.view, status) })
           return
+        case 'mouse_mode':
+          // Emit the DECSET toggle at runtime. These set terminal MODES (not screen
+          // content), so the write does not corrupt ink's frame — ink only diffs its
+          // own frame string. Reuses the same literals src/index.ts writes on
+          // enter/exit (via ./mouse-mode), so on-exit cleanup always matches.
+          stdout?.write(result.mode === 'select' ? MOUSE_OFF : MOUSE_ON)
+          setMouseMode(result.mode)
+          return
         default:
           return
       }
     },
-    [client, config?.cwd, setSessionId, status],
+    [client, config?.cwd, setSessionId, status, stdout],
   )
 
   const resolvePending = useCallback(
@@ -522,6 +536,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       <Box>
         <Text dimColor>
           [{statusLabel}{tokenStr}] {sid ? `session ${sid}` : 'new session'}
+          {mouseMode === 'select' ? ' · select-mode (wheel off · ⇧/⌥-drag to copy)' : ''}
         </Text>
       </Box>
 

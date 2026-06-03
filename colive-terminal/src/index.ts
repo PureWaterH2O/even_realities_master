@@ -24,6 +24,7 @@ import { readRemoteConfig, resolveRemoteHost } from './remote/config'
 import { detectTailscale, type ShellExec } from './remote/tailscale'
 import { runSetup, createDefaultIO } from './remote/setup'
 import { fileHistoryStore } from './desk/input/history'
+import { MOUSE_ON, MOUSE_OFF } from './desk/mouse-mode'
 
 /**
  * Parse `colive serve` flags into a {@link ConfigArgs}.
@@ -219,7 +220,7 @@ export function runDesk(
   // wheel is delivered as distinct \x1b[<..M reports (M3.2A reads them off ink's
   // internal 'input' channel). 1000h = button tracking (incl. wheel), 1006h = SGR
   // encoding. Skipped when not a TTY (tests/pipes), like the alt-screen itself.
-  if (isTTY) process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h')
+  if (isTTY) process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H' + MOUSE_ON)
 
   const instance = render(
     createElement(App, {
@@ -233,7 +234,7 @@ export function runDesk(
     const leaveAlt = (): void => {
       try {
         // disable SGR mouse BEFORE leaving the alt-screen, then restore the primary screen
-        process.stdout.write('\x1b[?1006l\x1b[?1000l\x1b[?1049l')
+        process.stdout.write(MOUSE_OFF + '\x1b[?1049l')
       } catch {
         /* stream already closed — nothing to restore */
       }
