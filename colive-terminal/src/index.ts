@@ -214,14 +214,19 @@ export function runDesk(
   // either. The shell is restored on every exit path. Skipped when stdout is not a
   // TTY (tests / pipes) so nothing changes there.
   const isTTY = Boolean((process.stdout as { isTTY?: boolean }).isTTY)
-  if (isTTY) process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H') // enter alt-screen, clear, home
+  // enter alt-screen + clear + home, then enable SGR mouse reporting so the
+  // wheel is delivered as distinct \x1b[<..M reports (M3.2A reads them off ink's
+  // internal 'input' channel). 1000h = button tracking (incl. wheel), 1006h = SGR
+  // encoding. Skipped when not a TTY (tests/pipes), like the alt-screen itself.
+  if (isTTY) process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h')
 
   const instance = render(createElement(App, { client, sessionId: conn.sessionId }))
 
   if (isTTY) {
     const leaveAlt = (): void => {
       try {
-        process.stdout.write('\x1b[?1049l') // restore the primary screen + scrollback
+        // disable SGR mouse BEFORE leaving the alt-screen, then restore the primary screen
+        process.stdout.write('\x1b[?1006l\x1b[?1000l\x1b[?1049l')
       } catch {
         /* stream already closed — nothing to restore */
       }
