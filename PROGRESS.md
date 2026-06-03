@@ -5,7 +5,7 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-03
 
-### Co-Live Terminal M3.2A "Composer" — 🔧 UAT fix pass (A2/A4/A6), re-UAT pending — NOT merged
+### Co-Live Terminal M3.2A "Composer" — 🔧 UAT fix pass: A2 fixed + hardware-passed; A4-step & A6-copy DEFERRED — NOT merged
 
 - **First hardware UAT (2026-06-03):** A3, B1, B2 **PASS**; A1 via Ctrl-J (user waved off `\`+Enter). Flagged **A2** (Option+word-nav),
   **A4** (paste→arrow "jump"), **A6** (copy/selection — "critical"); A5 (more slash commands) = scope ask.
@@ -24,8 +24,15 @@ built, what we decided. Newest entries on top.
     Added a runtime **`/select` ⇄ `/scroll`** mouse-mode toggle (DECSET literals de-duped into `src/desk/mouse-mode.ts`, shared with
     `index.ts` so on-exit cleanup can't drift; status-line shows `select-mode`). `9001f8a`. Durable **`/copy` (OSC 52)** → M3.2B;
     full skill/CLI command set (**A5**) needs Hub-reported commands → **M3.3**.
-- **Re-verified from a clean tree:** `npm ci` clean, typecheck exit 0, **391 tests / 36 files** (was 381; +10). Run-book updated for
-  re-UAT (focus A2/A4/A6). **Still NOT merged** — DONE only after the user re-runs the run-book on real G2 + R1 and signs off.
+- **Re-verified from a clean tree:** `npm ci` clean, typecheck exit 0, **391 tests / 36 files** (was 381; +10).
+- **Round-2 hardware UAT (2026-06-03):** **A2 = FULL PASS.** **A4** — paste works, but post-paste one-line ↑/↓ stepping still
+  fails on the VS Code terminal (the functional-updater fix corrected a real rig-verified stale-closure bug, but an additional
+  cause remains unpinned) → **user deferred (not mission-critical)**; `COLIVE_A4_LOG` logger stays wired. **A6** — copy still does
+  not work (couldn't copy anything, even with `/select`) → **user deferred the entire copy/paste surface to a new dedicated phase**
+  (to be scoped in the planning chat). A5 → M3.3.
+- **Composer core is hardware-validated** (multi-line authoring, char/word/line cursor nav, history, paste, slash menu,
+  `/select`·`/scroll` toggle). Two deferrals (A4 per-line step, A6 copy) carried to the planning chat for the merge-scope call.
+  **Still NOT merged.**
 
 ### Co-Live Terminal M3.2A "Composer" — ✅ BUILT (candidate), awaiting hardware UAT — NOT merged
 
