@@ -3,6 +3,36 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
+## 2026-06-03
+
+### Co-Live Terminal M3.2A "Composer" — ✅ BUILT (candidate), awaiting hardware UAT — NOT merged
+
+- **Implemented from the plan** (`docs/superpowers/plans/2026-06-02-colive-terminal-m3.2a-composer.md`) on branch
+  `colive-terminal-m3.2a` (off `main` `8f9bb0f`), via **subagent-driven TDD** — one fresh implementer per task, then an
+  independent spec-compliance review (re-runs the tests) + a code-quality review, per task.
+- **New pure, fully-unit-tested layer `src/desk/input/`:** `buffer.ts` (immutable `EditBuffer` model + cursor/edit ops),
+  `history.ts` (pure nav + dedup/cap + DI'd `HistoryStore` w/ file + memory adapters), `mouse.ts` (pure SGR-wheel parser),
+  `menu.ts` (`filterSlash`), `input-rows.ts` (multi-line render w/ inverse-video cursor). `app.tsx`'s `useInput` became a
+  thin key→op dispatcher; paste rides ink `usePaste`; mouse-wheel read off `useStdin().internal_eventEmitter`'s `'input'`
+  channel (ESC-stripped before the parser); SGR mouse enabled at `index.ts`; per-project history defaulted to the on-disk
+  store (keyed by the Hub base URL).
+- **Keymap shift (hardware UAT confirms):** `↑/↓` now drive the **input** (history at edges, cursor between draft lines);
+  the **mouse wheel scrolls the transcript**; PageUp/PageDown page it; text selection now needs **Option-drag** (mouse
+  reporting is on). Full keymap w/ macOS Fn-equivalents in the run-book.
+- **The review loops caught + fixed real bugs** (not just style): backslash-continuation guard anchored on the **cursor**
+  line (was whole-buffer → a stray mid-buffer newline once `↑/↓` could move the cursor off the last line); history nav
+  reset after **every** submit (a slash-submit left a stale recall index); `fileHistoryStore.load` now applies
+  consecutive-dedup on read (the append path is a raw JSONL log). Tests strengthened to actually prove the buffer model
+  (mid-buffer insert → `aXbc`) and the `usePaste` safety property (a `\r` inside a paste never submits).
+- **Verification:** **375 tests pass / 35 files, typecheck clean, ZERO Core/Hub change** — controller-reverified from a
+  clean tree (`npm ci && npm run typecheck && npm test`). A final holistic review across the whole 19-commit branch =
+  **"ready for hardware UAT"** (only 2 non-blocking cosmetic notes: gate the menu render on `!pending`; import `MenuItem`
+  in `slashMenuItems`).
+- **STATUS: CANDIDATE — NOT merged.** Per M3.0 §0, M3.2A is DONE only after the user runs
+  `projects/colive-terminal/m3.2a-uat-runbook.md` on real **G2 + R1** and signs off. Run-book = Part A (composer:
+  multiline, cursor/word/line nav, history-across-restart, paste, slash menu, wheel scroll + Option-drag) + Part B (light
+  co-live regression: single-render + permission ring round-trip).
+
 ## 2026-06-02
 
 ### Co-Live Terminal M3.2 — scoping the "typeable" rung (planner: Opus 4.8)
