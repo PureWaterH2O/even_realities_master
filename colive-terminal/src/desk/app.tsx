@@ -65,7 +65,7 @@ export interface AppProps {
 /* Status model                                                        */
 /* ------------------------------------------------------------------ */
 
-/** Rows moved per arrow key / mouse-wheel notch (1 felt sluggish for trackpads). */
+/** Rows moved per mouse-wheel notch (1 felt sluggish for trackpads; reused by the Task 9 wheel handler). */
 const WHEEL_STEP = 3
 
 const STATUS_LABEL: Record<StatusState, string> = {
@@ -331,8 +331,11 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     // Enter submits; Ctrl-J (\n) and "\\"+Enter insert a newline.
     if (key.return) {
       const text = B.toText(buf)
-      // Backslash-continuation: a line ending in a single "\" means "newline, keep editing".
-      if (text.endsWith('\\')) {
+      // Backslash-continuation: if the line the cursor is on ends in a single "\",
+      // Enter inserts a newline (keep editing) instead of submitting. Anchored on the
+      // CURSOR's line so it stays consistent with trimTrailingBackslash (which strips
+      // from buf.row) now that ↑/↓ can move the cursor off the last line.
+      if (buf.lines[buf.row]!.endsWith('\\')) {
         setBuf((b) => B.insertNewline(trimTrailingBackslash(b)))
         return
       }

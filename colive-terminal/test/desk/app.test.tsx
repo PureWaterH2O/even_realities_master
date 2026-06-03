@@ -493,4 +493,47 @@ describe('desk App', () => {
     expect(lastFrame()).toContain('ab')
     cleanup()
   })
+
+  it('Enter submits (not continues) when the trailing "\\" is on a line the cursor has left', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'foo')
+    await write(stdin, '\n')        // newline -> row 1
+    await write(stdin, 'bar\\')     // last line "bar\" (ends with a backslash)
+    await write(stdin, '\x1b[A')    // ↑ -> cursor moves to row 0 ("foo"), off the backslash line
+    await write(stdin, '\r')        // Enter: cursor's line is "foo" (no trailing \) -> SUBMIT
+    expect(sent).toEqual(['foo\nbar\\'])  // literal backslash preserved; NOT a stray-newline continuation
+    cleanup()
+  })
+
+  it('cursor edit: ←← then a char inserts mid-buffer (proves the EditBuffer model, not string-append)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'abc')
+    await write(stdin, '\x1b[D')   // ← (left)
+    await write(stdin, '\x1b[D')   // ← (left) -> cursor between "a" and "b"
+    await write(stdin, 'X')        // insert at cursor
+    await write(stdin, '\r')       // submit
+    expect(sent).toEqual(['aXbc']) // mid-buffer insert; a string-append impl would yield "abcX"
+    cleanup()
+  })
+
+  it('Ctrl-J composes a genuine multi-line buffer (renders the continuation line indented)', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'line one')
+    await write(stdin, '\n')       // Ctrl-J -> new buffer line
+    await write(stdin, 'line two')
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).toContain('> line one') // first line keeps the prompt
+    expect(frame).toContain('  line two') // continuation line is indented (buffer renderer, not a string)
+    cleanup()
+  })
 })
