@@ -28,6 +28,13 @@ built, what we decided. Newest entries on top.
   clean tree (`npm ci && npm run typecheck && npm test`). A final holistic review across the whole 19-commit branch =
   **"ready for hardware UAT"** (only 2 non-blocking cosmetic notes: gate the menu render on `!pending`; import `MenuItem`
   in `slashMenuItems`).
+- **Pre-UAT visual self-test DONE** (the M3.1 "see it before UAT" discipline — initially skipped, then done on a reminder):
+  extended the preview rig with a keystroke-driven composer scenario file (`test/preview/m32a.preview.test.tsx` — the rig's
+  `capture()`/`key()` sends arbitrary stdin bytes, so input-driven features render the same way the live desk would),
+  dumped frames, rendered PNGs via `vhs`, and **reviewed the screenshots**: multiline authoring, the mid-line inverse-video
+  cursor, multi-line paste, the slash menu + highlight, history recall, and a multi-line composer below a live transcript
+  all render correctly — **no rendering bugs found**, so no pre-UAT fixes were needed. Committed the preview test as a
+  permanent regression+preview asset (suite now **381 tests / 36 files**) and registered the frames in `scripts/screenshots.sh`.
 - **STATUS: CANDIDATE — NOT merged.** Per M3.0 §0, M3.2A is DONE only after the user runs
   `projects/colive-terminal/m3.2a-uat-runbook.md` on real **G2 + R1** and signs off. Run-book = Part A (composer:
   multiline, cursor/word/line nav, history-across-restart, paste, slash menu, wheel scroll + Option-drag) + Part B (light
