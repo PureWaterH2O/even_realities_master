@@ -44,6 +44,8 @@ import type { ViewportState } from './render/window'
 import * as B from './input/buffer'
 import type { EditBuffer } from './input/buffer'
 import { renderInputRows } from './input/input-rows'
+import { initNav, prev as histPrev, next as histNext, memoryHistoryStore } from './input/history'
+import type { HistoryStore, HistoryNav } from './input/history'
 
 /** Optional construction config for the app. */
 export interface AppConfig {
@@ -51,6 +53,10 @@ export interface AppConfig {
   cwd?: string
   /** Replay buffered frames on subscribe (default true so late joiners catch up). */
   needReplay?: boolean
+  /** Injected history persistence (defaults to an in-memory store if absent). */
+  historyStore?: HistoryStore
+  /** Project key for per-project history (the Hub base URL or cwd). */
+  historyKey?: string
 }
 
 /** Props for the root {@link App}. The HubClient is injected for testability. */
@@ -116,6 +122,10 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const [status, setStatus] = useState<StatusInfo>({ state: 'idle' })
   const [pending, setPending] = useState<Pending | undefined>(undefined)
   const [buf, setBuf] = useState<EditBuffer>(B.empty)
+
+  const historyStore = useMemo<HistoryStore>(() => config?.historyStore ?? memoryHistoryStore(), [config?.historyStore])
+  const historyKey = config?.historyKey ?? 'default'
+  const [nav, setNav] = useState<HistoryNav>(() => initNav(historyStore.load(historyKey)))
 
   // The session id can change at runtime (resolved by the Hub on a new session,
   // or reset by /clear). A ref keeps the latest value available to async
@@ -340,6 +350,13 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         return
       }
       setBuf(B.empty())
+      // Spec §5: record submitted PROMPTS only — never slash commands (they route
+      // locally and are noise in recall). interpretInput is the single source of truth.
+      const interpreted = interpretInput(text)
+      if (interpreted.kind === 'prompt' && interpreted.text !== '') {
+        historyStore.append(historyKey, interpreted.text)
+        setNav(initNav(historyStore.load(historyKey)))
+      }
       submitLine(text)
       return
     }
@@ -352,8 +369,18 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     if (key.rightArrow && key.meta) { setBuf(B.moveWordRight); return }
     if (key.leftArrow)  { setBuf(B.moveLeft); return }
     if (key.rightArrow) { setBuf(B.moveRight); return }
-    if (key.upArrow)   { setBuf((b) => B.moveUp(b).buffer); return }   // history wired in Task 8
-    if (key.downArrow) { setBuf((b) => B.moveDown(b).buffer); return } // history wired in Task 8
+    if (key.upArrow) {
+      const m = B.moveUp(buf)
+      if (!m.atEdge) { setBuf(m.buffer); return }
+      const r = histPrev(nav, B.toText(buf))
+      setNav(r.nav); setBuf(B.fromText(r.text)); return
+    }
+    if (key.downArrow) {
+      const m = B.moveDown(buf)
+      if (!m.atEdge) { setBuf(m.buffer); return }
+      const r = histNext(nav, B.toText(buf))
+      setNav(r.nav); setBuf(B.fromText(r.text)); return
+    }
 
     if (key.pageUp)   { setViewport((vp) => scrollPage(vp, rows.length, height, -1)); return }
     if (key.pageDown) { setViewport((vp) => scrollPage(vp, rows.length, height, 1)); return }

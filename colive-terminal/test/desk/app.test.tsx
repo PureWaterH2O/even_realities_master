@@ -24,6 +24,7 @@ import type {
 } from '../../src/desk/client'
 import type { CoLiveEvent } from '../../src/core/events'
 import { stripAnsi } from '../../src/desk/render/ansi'
+import { memoryHistoryStore } from '../../src/desk/input/history'
 
 /** A fake HubClient that records calls and exposes the captured onEvent. */
 interface FakeHub extends HubClient {
@@ -535,5 +536,45 @@ describe('desk App', () => {
     expect(frame).toContain('> line one') // first line keeps the prompt
     expect(frame).toContain('  line two') // continuation line is indented (buffer renderer, not a string)
     cleanup()
+  })
+
+  it('persists submitted prompts per project and recalls them with ↑ (across a remount)', async () => {
+    const store = memoryHistoryStore()
+    const fake1 = makeFakeHub()
+    fake1.sendPrompt = async () => ({ sessionId: 's1' })
+
+    // First run: submit two prompts.
+    const run1 = mount(<App client={fake1} sessionId="s1" config={{ historyStore: store, historyKey: 'proj-x' }} />)
+    await flush()
+    await write(run1.stdin, 'first prompt')
+    await write(run1.stdin, '\r')
+    await write(run1.stdin, 'second prompt')
+    await write(run1.stdin, '\r')
+    run1.cleanup()
+
+    // Second run (simulated restart): ↑ recalls newest, ↑ again the older.
+    const run2 = mount(<App client={makeFakeHub()} sessionId="s1" config={{ historyStore: store, historyKey: 'proj-x' }} />)
+    await flush()
+    await write(run2.stdin, '\x1b[A') // ↑
+    expect(run2.lastFrame()).toContain('second prompt')
+    await write(run2.stdin, '\x1b[A') // ↑
+    expect(run2.lastFrame()).toContain('first prompt')
+    run2.cleanup()
+  })
+
+  it('does not record slash commands in history (spec §5 — prompts only)', async () => {
+    const store = memoryHistoryStore()
+    const fake = makeFakeHub()
+    fake.sendPrompt = async () => ({ sessionId: 's1' })
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'p' }} />)
+    await flush()
+    await write(stdin, 'real prompt')
+    await write(stdin, '\r')
+    await write(stdin, '/help')   // slash command — must NOT enter history
+    await write(stdin, '\r')
+    await write(stdin, '\x1b[A')  // ↑ recalls the most recent PROMPT, skipping /help
+    expect(lastFrame()).toContain('real prompt')
+    cleanup()
+    expect(store.load('p')).toEqual(['real prompt']) // /help never recorded
   })
 })
