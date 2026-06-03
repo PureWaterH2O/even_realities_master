@@ -876,4 +876,94 @@ describe('desk App', () => {
     expect(sent).toHaveLength(0)
     cleanup()
   })
+
+  // M3.2A mouse-history leak: in /scroll mode (SGR reporting ON), an Option+click emits a
+  // mouse report that some terminals deliver through useInput. The old guard only caught the
+  // clean `[<…M` form; ESC-prefixed (`\x1b[<…M`) and legacy X10 (`\x1b[M…`) forms slipped past
+  // and were inserted as garbage text into the composer — polluting the user's draft. The fix
+  // drops ALL mouse reports at the very top of the dispatcher. History is seeded so a spurious
+  // ↑ WOULD have recalled a prior command — proving neither text nor history pollutes the draft.
+  it('drops an ESC-prefixed Option+click mouse report (no garbage text, no history recall)', async () => {
+    const store = memoryHistoryStore()
+    store.append('m', 'prior command') // a recall target: if a mouse report reached ↑, this would appear
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'm' }} />,
+    )
+    await flush()
+    // Faithful terminal emission for Option+double-click: double-ESC / meta-prefixed SGR.
+    // ink's use-input strips ONE leading ESC, so the dispatcher sees `\x1b[<8;20;5M`.
+    await write(stdin, '\x1b\x1b[<8;20;5M')
+    // The composer must still be empty and no prior command recalled.
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).not.toContain('prior command') // history untouched
+    expect(frame).not.toContain('[<8;20;5M')      // no SGR garbage inserted
+    expect(frame).not.toContain('8;20;5')         // no coordinate garbage inserted
+    // Prove the buffer is genuinely empty by typing a marker and submitting: must be JUST the marker.
+    await write(stdin, 'Z')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['Z'])
+    cleanup()
+  })
+
+  it('drops the legacy X10 mouse-report header (no escape garbage, no history recall)', async () => {
+    const store = memoryHistoryStore()
+    store.append('m', 'prior command')
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'm' }} />,
+    )
+    await flush()
+    // Legacy X10: `\x1b[M` + 3 coordinate bytes. ink delivers the `[M` header as its OWN useInput
+    // event (which the guard must drop) and the coordinate bytes as a SEPARATE following event.
+    // The header — the part that carries the escape/control bytes and could fire a key binding —
+    // must be dropped, and history must NOT be recalled. (The trailing coordinate bytes are
+    // indistinguishable from typed text and are out of scope — matching them would over-match.)
+    await write(stdin, '\x1b[M')
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).not.toContain('prior command') // history untouched (no recall fired)
+    expect(frame).not.toContain('[M')             // the X10 header was dropped, not inserted
+    await write(stdin, 'Z')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['Z']) // only the deliberately-typed marker — the report header left nothing
+    cleanup()
+  })
+
+  it('still drops a clean SGR report through useInput (no regression on the form caught today)', async () => {
+    const store = memoryHistoryStore()
+    store.append('m', 'prior command')
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={fake} sessionId="s1" config={{ historyStore: store, historyKey: 'm' }} />,
+    )
+    await flush()
+    await write(stdin, '\x1b[<8;20;5M') // clean SGR (no ESC prefix) — already caught before the fix
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).not.toContain('prior command')
+    expect(frame).not.toContain('[<8;20;5M')
+    await write(stdin, 'Z')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['Z'])
+    cleanup()
+  })
+
+  it('still inserts literal printable chars that resemble mouse bytes (isMouseReport must not over-match)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // A user typing literal '<', 'M', '[' must still insert — these are valid composer input.
+    await write(stdin, '<')
+    await write(stdin, 'M')
+    await write(stdin, '\r')
+    expect(sent).toEqual(['<M'])
+    cleanup()
+  })
 })

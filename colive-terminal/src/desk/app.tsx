@@ -48,7 +48,7 @@ import type { ViewportState } from './render/window'
 import * as B from './input/buffer'
 import type { EditBuffer } from './input/buffer'
 import { renderInputRows } from './input/input-rows'
-import { parseSgrMouse } from './input/mouse'
+import { parseSgrMouse, isMouseReport } from './input/mouse'
 import { initNav, prev as histPrev, next as histNext, memoryHistoryStore } from './input/history'
 import type { HistoryStore } from './input/history'
 import { appendFileSync } from 'node:fs'
@@ -390,6 +390,13 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   /* ------------------------- input ------------------------- */
 
   useInput((ch, key) => {
+    // Mouse reports can arrive through useInput on some terminals — drop ALL of them before any
+    // key handling (logger, escape, history, typing). The wheel is handled separately via the
+    // internal 'input' channel; this gate stops every other report form (Option+click etc.) from
+    // firing a key binding or leaking into the composer as garbage text. isMouseReport tolerates
+    // the leading ESC / split forms the old `ch.startsWith('[<')` guard missed.
+    if (isMouseReport(ch)) return
+
     // A4 diagnostic (opt-in, no-op unless COLIVE_A4_LOG is set): log every ↑/↓ as it arrives
     // so coalesced bytes / auto-repeat (multiple events in one stdin tick) are visible on real
     // hardware. Logs the raw bytes + the buffer position at the moment of the event.
@@ -403,10 +410,6 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       if (sid !== undefined) void client.interrupt(sid).catch(() => {})
       return
     }
-
-    // Mouse reports can arrive through useInput on some terminals — never let one
-    // fire a key binding (wheel is handled separately via the 'input' channel).
-    if (ch.startsWith('[<')) return
 
     // Slash-menu navigation, captured ONLY while the menu is open. ↑/↓ move the
     // highlight; Tab completes. Enter and printable chars deliberately fall through:
