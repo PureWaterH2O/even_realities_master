@@ -15,6 +15,7 @@ describe('renderInputRows', () => {
     expect(rows).toHaveLength(2)
     expect(stripAnsi(rows[0]!)).toBe('> one')
     expect(stripAnsi(rows[1]!)).toBe('  two ') // cursor at end of "two"
+    expect(rows[0]).not.toContain('[7m') // non-cursor row must carry no inverse cell
   })
 
   it('places the cursor (inverse video) on the char under it, not only at the end', () => {
