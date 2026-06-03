@@ -34,4 +34,33 @@ load-bearing facts for building a real input editor (cursor/multiline/history) a
 - Cost of enabling mouse: terminal text-selection then needs **Option-drag (macOS)** / Shift-drag (the vim/less/tmux
   convention). Graceful fallback if a terminal won't forward SGR mouse: `PageUp`/`PageDown` still scroll.
 
+## Enter vs newline — the multiline linchpin (🧪 M3.2A build, 2026-06-03)
+Verified in `parse-keypress.js` + `hooks/use-input.js` (ink 7.0.5):
+- **`\r` (0x0d, Enter):** `keypress.name = 'return'` → `key.return === true`; `input === '\r'`.
+- **`\n` (0x0a, Ctrl-J / line-feed):** `keypress.name = 'enter'` (ink's own comment: "should have been called linefeed")
+  → **`key.return === false`**, and `'enter'` is **NOT** in `nonAlphanumericKeys`, so `input` is the raw **`'\n'`** (not blanked).
+- `nonAlphanumericKeys = [...Object.values(keyName), 'backspace']`; `keyName`'s values are
+  `clear, delete, down, end, f1–f12, home, insert, left, pagedown, pageup, right, tab, up` — **no `enter`, no `return`**.
+- ⇒ A composer can treat **Enter = submit** (`key.return`) and **Ctrl-J = newline** (`input === '\n'`) with **no collision** —
+  exactly how M3.2A's "Enter submits / Ctrl-J inserts a newline" works in every terminal (incl. the VS Code integrated terminal).
+- Backspace (`\x7f`/`\x08`): `key.backspace === true`, `input === ''` (`'backspace'` IS in `nonAlphanumericKeys`). Tab: `key.tab`,
+  `input === ''`. So branch on the `key.*` boolean for these, never on `input`.
+
+## The ESC asymmetry — `useInput` strips it, the `'input'` emitter keeps it (🧪 M3.2A, 2026-06-03)
+- `use-input.js` strips a leading ESC from the value it hands `useInput` (`if (input.startsWith('')) input = input.slice(1)`),
+  so a mouse report reaching `useInput` arrives as `[<…M` (no ESC) → the defensive guard `if (ch.startsWith('[<')) return` works as-is.
+- BUT `internal_eventEmitter.emit('input', raw)` delivers the **raw, ESC-prefixed** string `\x1b[<…M`. A wheel handler reading that
+  channel **must strip the leading ESC before a `^\[<`-anchored parser** (M3.2A: `parseSgrMouse(raw.startsWith('\x1b') ? raw.slice(1) : raw)`).
+  Get this wrong and the wheel silently no-ops.
+
+## Testable in ink-testing-library (🧪 throwaway probe, 2026-06-03)
+Rendering a component + writing bytes to the fake `stdin` exercises the REAL plumbing — these all work in the harness:
+- `usePaste` **fires**: writing `\x1b[200~alpha\nbeta\x1b[201~` calls the handler with `"alpha\nbeta"` (full multi-line string).
+- `useStdin().internal_eventEmitter` **exists**; writing `\x1b[<64;1;1M` re-emits `"\x1b[<64;1;1M"` on its `'input'` channel (ESC-prefixed, per above).
+- `PageUp`/`PageDown` = `\x1b[5~`/`\x1b[6~` → `key.pageUp`/`key.pageDown`. A lone ESC is **debounced** — assert after a ~60 ms flush.
+- `render()` returns a per-instance `cleanup`; `unmount` is idempotent.
+- **Gotcha:** a bracketed paste with **no `usePaste` listener** falls back to `useInput` (App.js gates on `listenerCount('paste')`),
+  so a paste test that only checks "text landed / didn't submit" passes even when unwired. Prove the real path with a **`\r`-in-paste**
+  case — only `usePaste` keeps a carriage-return inside a paste from submitting.
+
 **Applies to:** Co-Live desk client (M3.2A Composer, M3.2B `@`/`!`), and any future ink-based TUI here.
