@@ -5,6 +5,39 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-03
 
+### Co-Live Terminal M3.2A — ✅ mouse-history-leak fix VALIDATED + MERGED (`2370b25`); copy/paste phase DESCOPED
+
+- **Copy resolved without a phase:** **Option+drag** selects + copies natively (terminal selection bypass with mouse
+  reporting on) — user accepted. So the planned copy/paste phase **collapsed to one bug fix** (the mouse-select leak)
+  and is otherwise descoped. (OSC 52 `/copy` is no longer needed; parked as a future nicety if ever wanted.)
+- **The bug:** in default `/scroll` mode, an Option+double-click / trackpad scroll populated the composer with a recalled
+  command. **Root cause (`COLIVE_A4_LOG`-confirmed, NOT mouse reports):** in the alt-screen, VS Code's terminal uses
+  **alternate scroll mode (DECSET 1007)** — it translates wheel/trackpad scroll into dense **arrow-key bursts** (33–66 in
+  one ~3 ms stdin tick), byte-identical to real arrows, which drove the composer (↑ = history recall).
+- **Layered fix (built by the builder chat, planner-validated):** `isMouseReport()` drops all mouse-report strings;
+  disable alt-scroll (`1007l`) on entry; **density burst-detection** — ≥ `ARROW_BURST_THRESHOLD` (4) arrows in one tick =
+  scroll-gesture artifact → ignored, < 4 = real input (preserves single keypress + A4 2–3 batched). Env-gated input-trace
+  logger kept. Lesson in `knowledge/terminal-mode/ink7-input-internals.md` ("alternate scroll mode").
+- **Validation:** zero Core/Hub change, no test gaming, fix real in code, **412 tests / 37 files clean-tree green**,
+  hardware-validated by user. Merged `--no-ff` (`2370b25`), pushed.
+- **Known tradeoff (accepted):** dropped bursts don't scroll either → **reliable scroll = PageUp/PageDown** (Fn+↑/↓ on
+  Mac); the mouse wheel no longer scrolls the transcript. **Future enhancement:** route vertical arrow-bursts → transcript
+  scroll (restores wheel-scroll on top of the burst-detection fix). Not a blocker.
+- **Next:** scope **M3.2B** (`@`-file autocomplete + `!`bash).
+
+### Glasses + Obsidian integration — 💡 explored, phased plan captured in backlog
+
+- **Planning discussion:** explored how the glasses could integrate with the user's Obsidian "second brain" vault
+  (the "anytime thought-capture" use case from the M3.0 scope boundary). Evaluated: structured slash commands,
+  context-aware capture, conversational tidy-on-the-go, seamless capture-to-explore, unified interface.
+- **Ruled out:** hybrid Terminal Mode + SDK app (glasses can't easily switch modes); two separate Claudes
+  (routing layer preferred).
+- **Decided:** 4-phase incremental approach. Phase 1 (capture slash commands: `/thought`, `/todo`, `/idea`)
+  starts in the **Obsidian project** as Claude Code skills, then wires into Co-Live later. Phases 2–4
+  (vault session, routing, full SDK app) are post-M3 in this project.
+- **Captured in** `ideas/backlog.md` § "Glasses + Obsidian Vault Integration" — does not interfere with
+  the current M3 roadmap. Phase 1 work happens in `~/Documents/random_claude_stuff/obsidian_how_to/`.
+
 ### Co-Live Terminal M3.2A "Composer" — ✅ VALIDATED + MERGED to `main` (`278f7c8`)
 
 - **Planner validation pass (Opus 4.8):** audited the candidate spec→claims→code (not PROGRESS notes). Verified:

@@ -15,6 +15,44 @@ Running list of ideas for the glasses/ring. An idea graduates into a
 | Independent confirmation of the G2 SoC once FCC photos unlock (2026-07-20) or via teardown | hardware | S (watch) / L (teardown) | TBD | Resolve Apollo510 vs 510B + EM9305. Could be just monitoring fccid.io. |
 | Capture an annotated dual-connection BLE sniff to resolve L/R pairing + PAwR | firmware-ble | M | TBD | Answers a foundational architecture open question no source has. |
 
+## Glasses + Obsidian Vault Integration (explored 2026-06-03)
+
+**Vision:** The glasses become a capture device and light viewer for the user's Obsidian
+"second brain" vault (see `~/Documents/random_claude_stuff/obsidian_how_to/Project Brief.md`
+for the full vault system). Two use cases: (1) hands-free voice capture of thoughts/todos/ideas
+into the daily note while on the go or mid-coding-session, (2) reading vault state on the HUD
+(today's todos, stale ideas, daily timeline).
+
+**Key architectural decisions from the discussion:**
+- Hybrid app (Terminal Mode + SDK app switching) is ruled out — glasses can't easily switch modes.
+- Capture must work from ANY active session (not just a dedicated vault session) to avoid friction.
+- Viewing is secondary — user is usually at the desk for browsing. HUD viewing is Claude-mediated
+  text in Terminal Mode (no custom renderer unless we go full SDK app).
+- Consistent formatting for views: tune the vault session's system prompt hard rather than building
+  a custom renderer. Revisit only if this hits a ceiling.
+- One Claude with routing > two separate Claudes. The user wants to capture a stray thought
+  mid-coding and return to work without switching sessions.
+
+**Phased approach (each phase independently useful, nothing thrown away):**
+1. **Capture slash commands** — `/thought`, `/todo`, `/idea` work from any Co-Live session.
+   Write to today's daily note with timestamp + tag in the vault's format. Minimal — just new
+   slash commands + file writes. **← Start here. Being built in the Obsidian project first as
+   Claude Code skills, then wired into Co-Live as slash commands.**
+2. **"Vault" session** — a persistent session whose Claude is loaded with the vault's house rules.
+   Tap into it to ask "what are my todos" or "tidy today." Text-only but prompt-tuned for
+   consistent output.
+3. **Routing layer** — one Claude handles both coding and vault. Context-aware: `/thought` captures,
+   "what's on my plate" reads the vault, "explore that auth idea" starts a flesh-out. No session
+   switching.
+4. **Full SDK app (only if needed)** — custom renderer for persistent views (todo widget, daily
+   summary always visible). Only build if phases 1–3 prove Terminal Mode's text-only HUD is
+   insufficient.
+
+**Dependency:** Phase 1 starts in the Obsidian project (skills/slash commands for capture +
+tidy + resurface). Phases 2–4 live here in Co-Live Terminal, likely as a post-M3 milestone.
+
+---
+
 ## Parking lot
 
 Half-formed thoughts that aren't ready to be rows yet.
