@@ -711,6 +711,74 @@ describe('desk App', () => {
     cleanup()
   })
 
+  // A4 (UAT): after a multi-line block, ↑/↓ "jumped to the top/bottom line" instead of
+  // moving one line at a time. ROOT CAUSE: the ↑/↓ handlers read the CLOSURE-captured `buf`
+  // and called the NON-functional setBuf, so when ink delivers multiple arrows in ONE stdin
+  // tick (auto-repeat / coalesced bytes after a paste) every event sees the SAME stale buffer
+  // — all but the last move are dropped, and a surviving edge move fires history recall that
+  // collapses the draft. The fix uses FUNCTIONAL setBuf updaters (like ← already does) + a
+  // navRef so each batched event sees the freshest queued buffer.
+  //
+  // This test deliberately sends the two arrows in a SINGLE stdin.write with NO settle/flush
+  // between them — the exact condition the old settle-per-keystroke rigs masked.
+  it('A4: two ↑ batched in ONE stdin tick step the cursor up two lines (not one, not a history jump)', async () => {
+    const fake = makeFakeHub()
+    const sent: string[] = []
+    fake.sendPrompt = async (args) => { sent.push(args.text); return { sessionId: 's1' } }
+    const { stdin, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    // Build a 4-line draft. Equal-length lines so moveUp's column clamp can't drift the marker.
+    await write(stdin, 'L0')
+    await write(stdin, '\n')
+    await write(stdin, 'L1')
+    await write(stdin, '\n')
+    await write(stdin, 'L2')
+    await write(stdin, '\n')
+    await write(stdin, 'L3')   // cursor now on row 3 (last line), col 2 (end)
+
+    // TWO up-arrows in ONE write, with NO settle between them (the batching repro).
+    await act(async () => {
+      stdin.write('\x1b[A\x1b[A')
+      for (let i = 0; i < 4; i++) await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 0))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    // Marker insert at the resting cursor, then submit, to read where the cursor landed.
+    await write(stdin, 'X')
+    await write(stdin, '\r')
+    // Two lines up from row 3 -> row 1 ("L1" + marker). The OLD non-functional code lands the
+    // marker on row 2 ("L2X") because only the LAST of the two batched events survives.
+    expect(sent).toEqual(['L0\nL1X\nL2\nL3'])
+    cleanup()
+  })
+
+  // A4 companion — the original "jump" face of the bug: with history present and the cursor on
+  // the TOP line, two ↑ in one tick must NOT silently lose the batch. The first ↑ is at the
+  // buffer's top edge so it recalls history (replacing the draft); the second batched ↑ must
+  // still be applied to the freshest queued buffer (it recalls the NEXT-older entry). With the
+  // OLD code the second event read the stale pre-recall buffer and was dropped.
+  it('A4: with history, two ↑ batched at the top edge recall two entries, not one (no dropped batch)', async () => {
+    const store = memoryHistoryStore()
+    store.append('a4', 'older')
+    store.append('a4', 'newer')             // history: ['older','newer']
+    const { stdin, lastFrame, cleanup } = mount(
+      <App client={makeFakeHub()} sessionId="s1" config={{ historyStore: store, historyKey: 'a4' }} />,
+    )
+    await flush()
+    // Empty draft -> cursor already on the single top line (row 0). Two ↑ in ONE tick.
+    await act(async () => {
+      stdin.write('\x1b[A\x1b[A')
+      for (let i = 0; i < 4; i++) await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 0))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    // First ↑ recalls 'newer'; the second batched ↑ must advance to the OLDER entry.
+    // OLD code drops the second event (stale closure) and would still show 'newer'.
+    expect(lastFrame()).toContain('older')
+    cleanup()
+  })
+
   it('a multi-line paste lands in the buffer without submitting', async () => {
     const fake = makeFakeHub()
     const sent: string[] = []

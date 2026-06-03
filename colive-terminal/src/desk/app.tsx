@@ -48,7 +48,22 @@ import type { EditBuffer } from './input/buffer'
 import { renderInputRows } from './input/input-rows'
 import { parseSgrMouse } from './input/mouse'
 import { initNav, prev as histPrev, next as histNext, memoryHistoryStore } from './input/history'
-import type { HistoryStore, HistoryNav } from './input/history'
+import type { HistoryStore } from './input/history'
+import { appendFileSync } from 'node:fs'
+
+// A4 diagnostic logger: opt-in via COLIVE_A4_LOG=<path>; a no-op otherwise. Lets us CONFIRM
+// arrow-key batching on real hardware (multiple ↑/↓ arriving in one stdin tick) without
+// changing normal behaviour. (Date.now() is fine in production — only the sandbox forbids it.)
+const A4_LOG = process.env.COLIVE_A4_LOG
+const a4log = (line: string): void => {
+  if (A4_LOG) {
+    try {
+      appendFileSync(A4_LOG, line + '\n')
+    } catch {
+      /* best-effort — never crash the composer on a diagnostic write */
+    }
+  }
+}
 
 /** Optional construction config for the app. */
 export interface AppConfig {
@@ -123,7 +138,12 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
   const historyStore = useMemo<HistoryStore>(() => config?.historyStore ?? memoryHistoryStore(), [config?.historyStore])
   const historyKey = config?.historyKey ?? 'default'
-  const [nav, setNav] = useState<HistoryNav>(() => initNav(historyStore.load(historyKey)))
+  // History navigation cursor. A REF (not state) on purpose: it is NEVER read in render
+  // (the composer re-render is driven entirely by setBuf), and the ↑/↓ edge branch advances
+  // it from INSIDE a functional setBuf updater — reading state there would be stale under
+  // input batching (the A4 bug). A ref always exposes the freshest value to the next batched
+  // event. (initNav once; reset on every submit below.)
+  const navRef = useRef(initNav(historyStore.load(historyKey)))
 
   // Slash-command completion menu. It is open exactly when the composer holds a single
   // leading-"/" token that matches at least one command (filterSlash returns the items,
@@ -356,6 +376,13 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   /* ------------------------- input ------------------------- */
 
   useInput((ch, key) => {
+    // A4 diagnostic (opt-in, no-op unless COLIVE_A4_LOG is set): log every ↑/↓ as it arrives
+    // so coalesced bytes / auto-repeat (multiple events in one stdin tick) are visible on real
+    // hardware. Logs the raw bytes + the buffer position at the moment of the event.
+    if (A4_LOG && (key.upArrow || key.downArrow)) {
+      a4log(JSON.stringify({ t: Date.now(), dir: key.upArrow ? 'UP' : 'DOWN', bytes: [...ch].map((c) => c.charCodeAt(0)), upArrow: key.upArrow, downArrow: key.downArrow, meta: key.meta, row: buf.row, lines: buf.lines.length, col: buf.col }))
+    }
+
     if (key.escape) {
       if (menuOpen) { setBuf(B.empty()); return }       // close the menu, clear the token
       const sid = sessionIdRef.current
@@ -411,7 +438,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       }
       // Reset navigation to the (possibly updated) tail after EVERY submit, so a later
       // ↑ starts from the most-recent entry even when this submit was a slash command.
-      setNav(initNav(historyStore.load(historyKey)))
+      navRef.current = initNav(historyStore.load(historyKey))
       submitLine(text)
       return
     }
@@ -427,17 +454,29 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     if (key.meta && (ch === 'f' || ch === 'F')) { setBuf(B.moveWordRight); return }  // readline ESC-f (Option+Right)
     if (key.leftArrow)  { setBuf(B.moveLeft); return }
     if (key.rightArrow) { setBuf(B.moveRight); return }
+    // ↑/↓ use FUNCTIONAL setBuf updaters (like ← / →) so each event in a batched stdin tick
+    // sees the freshest QUEUED buffer, not a stale closure capture (the A4 bug). The edge
+    // branch has a history side-effect, so it reads/advances navRef.current — a ref is also
+    // immune to the stale-closure problem and always exposes the latest nav to the next event.
     if (key.upArrow) {
-      const m = B.moveUp(buf)
-      if (!m.atEdge) { setBuf(m.buffer); return }
-      const r = histPrev(nav, B.toText(buf))
-      setNav(r.nav); setBuf(B.fromText(r.text)); return
+      setBuf((b) => {
+        const m = B.moveUp(b)
+        if (!m.atEdge) return m.buffer
+        const r = histPrev(navRef.current, B.toText(b))
+        navRef.current = r.nav
+        return B.fromText(r.text)
+      })
+      return
     }
     if (key.downArrow) {
-      const m = B.moveDown(buf)
-      if (!m.atEdge) { setBuf(m.buffer); return }
-      const r = histNext(nav, B.toText(buf))
-      setNav(r.nav); setBuf(B.fromText(r.text)); return
+      setBuf((b) => {
+        const m = B.moveDown(b)
+        if (!m.atEdge) return m.buffer
+        const r = histNext(navRef.current, B.toText(b))
+        navRef.current = r.nav
+        return B.fromText(r.text)
+      })
+      return
     }
 
     if (key.pageUp)   { setViewport((vp) => scrollPage(vp, rows.length, height, -1)); return }
