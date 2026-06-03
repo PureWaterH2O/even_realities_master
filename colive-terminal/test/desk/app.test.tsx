@@ -356,6 +356,34 @@ describe('desk App', () => {
     expect(lastFrame() ?? '').not.toContain('old message')
   })
 
+  it('typing "/" opens the slash menu, filters, and Tab completes the command', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/')
+    expect(lastFrame()).toContain('/clear')   // menu lists commands
+    expect(lastFrame()).toContain('/help')
+    await write(stdin, 'h')                    // "/h" filters to /help
+    expect(lastFrame()).toContain('/help')
+    expect(lastFrame()).not.toContain('/clear')
+    await write(stdin, '\t')                   // Tab completes the highlighted item
+    expect(lastFrame()).toContain('> /help')
+    cleanup()
+  })
+
+  it('Esc closes an open slash menu without interrupting', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/')
+    expect(lastFrame()).toContain('/clear')    // menu open
+    await write(stdin, '\x1b')                 // Esc → close menu (no interrupt)
+    await flush(60)                            // ink debounces a lone ESC; wait past it
+    expect(fake.interrupts).toHaveLength(0)    // Esc did NOT interrupt
+    expect(lastFrame()).not.toContain('/clear') // menu closed
+    cleanup()
+  })
+
   it('Esc interrupts the session', async () => {
     const fake = makeFakeHub()
     const { stdin } = mount(<App client={fake} sessionId="s1" />)

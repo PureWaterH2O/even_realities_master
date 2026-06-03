@@ -37,6 +37,8 @@ import type {
   UserQuestionEvent,
 } from '../core/events'
 import { interpretInput } from './slash'
+import { filterSlash } from './input/menu'
+import { slashMenuItems } from './slash'
 import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
 import { computeWindow, scrollPage, scrollLine, pinBottom, afterContentChange, initialViewport } from './render/window'
@@ -123,14 +125,24 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const historyKey = config?.historyKey ?? 'default'
   const [nav, setNav] = useState<HistoryNav>(() => initNav(historyStore.load(historyKey)))
 
+  // Slash-command completion menu. It is open exactly when the composer holds a single
+  // leading-"/" token that matches at least one command (filterSlash returns the items,
+  // else null). app.tsx owns the highlight index; the items list is memoized once.
+  const [menuIndex, setMenuIndex] = useState(0)
+  const menuItems = useMemo(() => slashMenuItems(), [])
+  const menu = filterSlash(B.toText(buf), menuItems) // null when the menu is closed
+  const menuOpen = menu !== null
+  const clampedMenuIndex = menu ? Math.min(menuIndex, menu.length - 1) : 0
+
   // Reserve lines for the chrome (scroll indicator + status line + 1 line of headroom)
   // PLUS the composer's own rows, which grow as the buffer gains lines. The headroom is
   // load-bearing: ink redraws by moving the cursor up N lines and overwriting in place; if
   // total output exactly fills the terminal, the trailing newline scrolls the host and ink's
   // cursor math drifts (leaking lines into scrollback). Keeping output strictly shorter than
   // the terminal keeps the viewport a clean fixed region (UAT A1).
+  const menuRowCount = menuOpen ? menu!.length : 0
   const inputRowCount = pending && pending.kind === 'question' ? 0 : renderInputRows(buf, { width }).length
-  const reserved = 3 + inputRowCount // 3 = scroll indicator + status + headroom; inputRowCount = composer rows
+  const reserved = 3 + inputRowCount + menuRowCount // 3 = indicator + status + headroom
   const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
@@ -342,6 +354,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
   useInput((ch, key) => {
     if (key.escape) {
+      if (menuOpen) { setBuf(B.empty()); return }       // close the menu, clear the token
       const sid = sessionIdRef.current
       if (sid !== undefined) void client.interrupt(sid).catch(() => {})
       return
@@ -350,6 +363,16 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     // Mouse reports can arrive through useInput on some terminals — never let one
     // fire a key binding (wheel is handled separately via the 'input' channel).
     if (ch.startsWith('[<')) return
+
+    // Slash-menu navigation, captured ONLY while the menu is open. ↑/↓ move the
+    // highlight; Tab completes. Enter and printable chars deliberately fall through:
+    // Enter submits via the normal path (slash commands route locally, never POSTed)
+    // and a printable char extends the buffer, which re-filters the menu.
+    if (menuOpen && !pending) {
+      if (key.upArrow)   { setMenuIndex((i) => Math.max(0, Math.min(i, menu!.length - 1) - 1)); return }
+      if (key.downArrow) { setMenuIndex((i) => Math.min(menu!.length - 1, i + 1)); return }
+      if (key.tab) { setBuf(B.fromText('/' + menu![clampedMenuIndex]!.name)); setMenuIndex(0); return }
+    }
 
     if (pending) {
       if (/^[1-9]$/.test(ch)) { resolvePending(Number.parseInt(ch, 10) - 1); return }
@@ -456,6 +479,16 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
           [{statusLabel}{tokenStr}] {sid ? `session ${sid}` : 'new session'}
         </Text>
       </Box>
+
+      {menuOpen ? (
+        <Box flexDirection="column">
+          {menu!.map((item, i) => (
+            <Text key={item.name} inverse={i === clampedMenuIndex}>
+              {`/${item.name}  `}<Text dimColor>{item.desc}</Text>
+            </Text>
+          ))}
+        </Box>
+      ) : null}
 
       {pending && pending.kind === 'question' ? null : (
         <Box flexDirection="column">
