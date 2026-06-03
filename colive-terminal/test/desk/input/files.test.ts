@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fuzzyFilter, isSubsequence, scorePath } from '../../../src/desk/input/files'
+import { fuzzyFilter, isSubsequence, scorePath, listProjectFiles, type FileSourceDeps } from '../../../src/desk/input/files'
 
 describe('isSubsequence', () => {
   it('is order-sensitive and case-insensitive', () => {
@@ -32,5 +32,16 @@ describe('fuzzyFilter', () => {
   })
   it('honors the limit', () => {
     expect(fuzzyFilter(['app1.ts', 'app2.ts', 'app3.ts'], 'app', 2)).toHaveLength(2)
+  })
+})
+
+describe('listProjectFiles', () => {
+  it('uses git ls-files output (split by line, trimmed, empties dropped)', () => {
+    const deps: FileSourceDeps = { gitList: () => 'a.ts\nsrc/b.ts\n\n', walk: () => ['SHOULD_NOT_USE'] }
+    expect(listProjectFiles('/x', deps)).toEqual(['a.ts', 'src/b.ts'])
+  })
+  it('falls back to the walk when git is unavailable (null)', () => {
+    const deps: FileSourceDeps = { gitList: () => null, walk: () => ['w/one.ts'] }
+    expect(listProjectFiles('/x', deps)).toEqual(['w/one.ts'])
   })
 })
