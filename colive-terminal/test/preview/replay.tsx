@@ -14,6 +14,7 @@
 import { act } from 'react'
 import { render } from 'ink-testing-library'
 import { App } from '../../src/desk/app'
+import type { AppConfig } from '../../src/desk/app'
 import { stripAnsi } from '../../src/desk/render/ansi'
 import { reduceBlocks, initialBlockState } from '../../src/desk/render/blocks'
 import { flattenRows } from '../../src/desk/render/rows'
@@ -108,9 +109,9 @@ export const KEYS = {
  * captured by a `snap` step. `sessionId` seeds an existing session so no prompt
  * round-trip is needed.
  */
-export async function capture(steps: Step[], sessionId = 's-preview'): Promise<Frame[]> {
+export async function capture(steps: Step[], sessionId = 's-preview', config?: AppConfig): Promise<Frame[]> {
   const client = makeReplayClient()
-  const inst = render(<App client={client} sessionId={sessionId} />)
+  const inst = render(<App client={client} sessionId={sessionId} config={config} />)
   const frames: Frame[] = []
   try {
     await settle()

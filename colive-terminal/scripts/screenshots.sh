@@ -35,6 +35,13 @@ FRAMES=(
   "m32a-a5-slash-filtered:shot-m32a-a5-slash-filtered"
   "m32a-a3-history-1:shot-m32a-a3-history-1"
   "m32a-layout:shot-m32a-layout"
+  # M3.2B @-file + !bash (scripted keystrokes in m32b.preview.test.tsx)
+  "m32b-c1-at-menu:shot-m32b-c1-at-menu"
+  "m32b-c1-at-inserted:shot-m32b-c1-at-inserted"
+  "m32b-c2-at-midline:shot-m32b-c2-at-midline"
+  "m32b-c3-bash-typed:shot-m32b-c3-bash-typed"
+  "m32b-c3-bash-submitted:shot-m32b-c3-bash-submitted"
+  "m32b-layout:shot-m32b-layout"
 )
 
 echo "[1/2] capturing frames (PREVIEW=1 vitest test/preview)…"
