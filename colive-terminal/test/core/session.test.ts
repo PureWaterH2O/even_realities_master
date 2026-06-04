@@ -1140,6 +1140,71 @@ describe('ClaudeSession — interrupt', () => {
   })
 })
 
+describe('ClaudeSession — clean interrupt', () => {
+  it('interrupt ends the current turn and the session accepts the next prompt on the SAME query', async () => {
+    // Proof of the persistent-query contract: after an interrupt flushes the
+    // in-flight turn's result, the NEXT prompt drives a turn on the SAME query
+    // (no reopen) — `calls` stays length 1.
+    const calls: Array<{ options?: unknown }> = []
+    // Eagerly-created gate (resolver captured synchronously, so interrupt() can
+    // always wake the parked turn-1 generator regardless of microtask timing).
+    const pending: unknown[] = []
+    let wake!: () => void
+    const gate = new Promise<void>((r) => {
+      wake = r
+    })
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: unknown }) => {
+      calls.push({ options: args.options })
+      let turn = 0
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          const which = turn++
+          if (which === 0) {
+            // Turn 1: stream something, then PAUSE on the gate. interrupt()
+            // flushes a `result` (real Query.interrupt() ends the turn) + wakes.
+            yield {
+              type: 'stream_event',
+              event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
+            }
+            await gate
+            while (pending.length) yield pending.shift()
+          } else {
+            // Turn 2 (and beyond): no gate — complete immediately so the SAME
+            // query's consumer loop resolves run() without hanging.
+            yield { type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} }
+          }
+        }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {
+        pending.push({ type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} })
+        wake()
+      }
+      return q
+    }) as unknown as QueryFn
+
+    const events: string[] = []
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => events.push(e.type),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+
+    const turn1 = session.run('long thing')
+    await Promise.resolve()
+    session.interrupt()
+    await turn1
+
+    // The second prompt runs on the SAME persistent query — no reopen.
+    await session.run('next thing')
+
+    expect(calls).toHaveLength(1)
+    expect(events).toContain('user_prompt')
+  })
+})
+
 describe('ClaudeSession — whenIdentified signal (real id-learning signal)', () => {
   it('resolves whenIdentified only after a macrotask-delayed init captures the id', async () => {
     // The id-learning signal must be driven by real stream progress, not a
