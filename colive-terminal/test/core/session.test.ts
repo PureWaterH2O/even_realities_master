@@ -1340,3 +1340,43 @@ describe('ClaudeSession — persistent streaming query', () => {
     expect(emitted.filter((e) => e.type === 'error')).toEqual([])
   })
 })
+
+describe('ClaudeSession — self-heal on fatal query error', () => {
+  it('a dead query reopens with resume:<sessionId> on the next prompt', async () => {
+    // open #0 surfaces sess-1 via init, then THROWS -> onConsumerError emits
+    // `error`, marks the query dead, and resolves run('boom'); the next
+    // run('recover') reopens (open #1) carrying resume:'sess-1' (the captured id).
+    const calls: Array<{ options?: { resume?: string } }> = []
+    let openCount = 0
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: { resume?: string } }) => {
+      calls.push({ options: args.options })
+      const which = openCount++
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          if (which === 0) {
+            yield { type: 'system', subtype: 'init', session_id: 'sess-1' }
+            throw new Error('stream blew up')
+          }
+          yield { type: 'result', subtype: 'success', session_id: 'sess-1', result: '', usage: {} }
+        }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
+    }) as unknown as QueryFn
+
+    const events: string[] = []
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => events.push(e.type),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('boom') // opens, captures sess-1 via init, dies -> error + idle, run() resolves
+    await session.run('recover') // reopens with resume:sess-1
+    expect(events).toContain('error')
+    expect(calls).toHaveLength(2)
+    expect(calls[1]!.options?.resume).toBe('sess-1')
+  })
+})
