@@ -297,6 +297,12 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         dispatch({ type: 'note', text: result.message })
         return
       }
+      if (result.kind === 'bash') {
+        // TODO(Task 7): dispatch !bash (record history, POST result.text). For now,
+        // surface a placeholder note so the input isn't silently swallowed.
+        dispatch({ type: 'note', text: `!bash not yet wired: ${result.command}` })
+        return
+      }
       // result.kind === 'command'
       switch (result.command) {
         case 'new_session':
