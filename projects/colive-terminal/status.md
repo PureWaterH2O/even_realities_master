@@ -1,7 +1,7 @@
 # Co-Live Terminal — Status
 
-**Current state:** ✅🔧 **M3.2B "`@`-file autocomplete + `!`bash" — HARDWARE UAT C1–C6 PASS (2026-06-03); awaiting
-planner validation + merge (NOT merged by build chat).** Branch `colive-terminal-m3.2b` (off `main`), built via
+**Current state:** ✅ **M3.2B "`@`-file autocomplete + `!`bash" — DONE: hardware UAT C1–C6 PASS (2026-06-03),
+planner-validated, MERGED to `main` `58af6e0`.** Built on branch `colive-terminal-m3.2b` (off `main`) via
 subagent-driven TDD (10 tasks: impl → spec-compliance review → code-quality review per task; final whole-branch review
 APPROVED FOR HANDBACK). Two **desk-only** typing aids that produce clean text Claude acts on:
 - **`@`-file (mid-line):** `@` opens a fuzzy file-path menu (`git ls-files`, walk fallback, cached once/session;

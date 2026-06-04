@@ -5,7 +5,7 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-03
 
-### Co-Live Terminal M3.2B — ✅ `@`-file autocomplete + `!`bash — HARDWARE UAT C1–C6 PASS (branch, NOT merged; awaiting planner validation + merge)
+### Co-Live Terminal M3.2B — ✅ `@`-file autocomplete + `!`bash — DONE: hardware UAT C1–C6 PASS + planner-validated + MERGED to `main` `58af6e0`
 
 - **Scope (desk-only, zero Core/Hub change):** typing `@` opens a **mid-line** fuzzy file-path menu that inserts a
   repo-relative `@path` (Claude reads it with its **Read** tool); a `!`-line is delegated to Claude's **Bash** tool
