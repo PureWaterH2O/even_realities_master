@@ -327,9 +327,19 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         return
       }
       if (result.kind === 'bash') {
-        // TODO(Task 7): dispatch !bash (record history, POST result.text). For now,
-        // surface a placeholder note so the input isn't silently swallowed.
-        dispatch({ type: 'note', text: `!bash not yet wired: ${result.command}` })
+        const current = sessionIdRef.current
+        dispatch({ type: 'localUser', text: `! ${result.command}` })
+        void (async () => {
+          try {
+            const args = current !== undefined
+              ? { text: result.text, sessionId: current }
+              : { text: result.text, cwd: config?.cwd }
+            const res = await client.sendPrompt(args)
+            if (res.sessionId && res.sessionId !== sessionIdRef.current) setSessionId(res.sessionId)
+          } catch (err) {
+            dispatch({ type: 'note', text: `bash failed: ${err instanceof Error ? err.message : String(err)}` })
+          }
+        })()
         return
       }
       // result.kind === 'command'
@@ -561,6 +571,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       const interpreted = interpretInput(text)
       if (interpreted.kind === 'prompt' && interpreted.text !== '') {
         historyStore.append(historyKey, interpreted.text)
+      } else if (interpreted.kind === 'bash') {
+        historyStore.append(historyKey, text.trim())
       }
       // Reset navigation to the (possibly updated) tail after EVERY submit, so a later
       // ↑ starts from the most-recent entry even when this submit was a slash command.

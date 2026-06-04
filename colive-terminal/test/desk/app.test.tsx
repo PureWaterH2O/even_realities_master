@@ -1137,3 +1137,36 @@ describe('@-file autocomplete', () => {
     }
   })
 })
+
+describe('!bash delegation', () => {
+  it('a "!"-line is POSTed as a "run this" prompt (not executed locally)', async () => {
+    const hub = makeFakeHub()
+    const { stdin, lastFrame, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await write(stdin, '!npm test')
+      await write(stdin, '\r')
+      expect(hub.prompts).toHaveLength(1)
+      expect(hub.prompts[0]!.text).toContain('Run this shell command')
+      expect(hub.prompts[0]!.text).toContain('npm test')
+      expect(stripAnsi(lastFrame()!)).toContain('npm test') // transcript echoes the command
+    } finally {
+      unmount()
+    }
+  })
+
+  it('a submitted "!"-line is recalled by ↑ (recorded in history)', async () => {
+    const hub = makeFakeHub()
+    const store = memoryHistoryStore()
+    const { stdin, lastFrame, unmount } = render(
+      <App client={hub} sessionId="s1" config={{ historyStore: store, historyKey: 'k' }} />,
+    )
+    try {
+      await write(stdin, '!ls -la')
+      await write(stdin, '\r')
+      await write(stdin, '\x1b[A') // ↑ recalls the last submitted line
+      expect(stripAnsi(lastFrame()!)).toContain('!ls -la')
+    } finally {
+      unmount()
+    }
+  })
+})
