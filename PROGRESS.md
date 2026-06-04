@@ -3,6 +3,37 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
+## 2026-06-04
+
+### Co-Live Terminal M3.3a — ✅ Streaming-input Core (the refactor) — BUILT on `colive-terminal-m3.3a`, awaiting planner validation + hardware UAT (NOT merged)
+
+- **Scope:** drive the SDK in **streaming-input mode** via **one persistent `Query` per session** (was: one
+  `query({prompt:string})` per turn), fed by a new pushable `PromptInbox` (`src/core/promptInbox.ts`); a single
+  long-lived consumer loop maps every message through the **existing `handleMessage*` layer UNCHANGED** and detects
+  turn-end on the `result` message; `AbortController` interrupt → `Query.interrupt()`; fatal query error self-heals by
+  lazy reopen-with-`resume`. **Core change CONFINED to `session.ts` + `promptInbox.ts`** (no `events.ts`/`sessionManager.ts`/
+  `hub/`/`desk/` change → glasses byte-compat preserved).
+- **Built via subagent-driven TDD** (probe-first, two-stage review per task; reviewers verified all 12 `handle*` bodies
+  byte-identical main↔branch → emitted `CoLiveEvent`s unchanged).
+- **Task 1 live SDK probe (🧪 `knowledge/terminal-mode/streaming-input-probe.md`):** streaming mode emits **one `result`
+  per turn** ✅ and **unchanged `stream_event` shapes** ✅; **`init` arrives per-turn** (not once) but is BENIGN (emits no
+  events; `session_id` stable across turns) → mapping stays byte-identical, build proceeded as written. `SDKUserMessage`
+  text shape confirmed live.
+- **🔴→🧪 Interrupt behavior discovered + handled:** the real `Query.interrupt()` does **not throw** — it flushes a
+  **non-success `result`**, which `handleResult` mapped to a spurious `[ede_diagnostic]` **error banner** on every Esc
+  (a regression from the old silent abort). **Caught by the live self-test (Task 8), not by unit tests** (their fakes
+  optimistically modeled interrupt as a *success* result). Fixed: an `interrupting` flag makes the consumer loop suppress
+  the SDK's non-success interrupt-result → **clean idle** (no error/failed-result), while genuine error-results still
+  surface and a success-race result still passes through. Re-verified live: **error count 0**, session immediately usable.
+- **Dual self-test before handback (per the "no UAT on green tests alone" rule):** (Task 7) deterministic desk-render
+  preview frame + vhs PNG (`shot-m33a-session.png`); (Task 8) **LIVE local serve+desk** through the real Core via the Hub
+  HTTP/SSE API — full multi-tool turn arc emitted live & rendered faithfully (`shot-m33a-live.png`), sequential FIFO,
+  clean interrupt + immediate reuse, self-heal unit-verified (live trigger = hardware D5).
+- **Verified on-branch (controller-reverified):** **455 tests / 41 files green** (442 → **+13**), `tsc` exit 0,
+  **CONFINED ✓**, no test deleted/weakened (5 renamed in the abort→`Query.interrupt()` / per-turn→persistent adaptation).
+- **Next:** planner validates spec→claims→code, then merges; build chat does NOT push/merge.
+  Runbook: `projects/colive-terminal/m3.3a-uat-runbook.md` (D1–D5).
+
 ## 2026-06-03
 
 ### Co-Live Terminal M3.2B — ✅ `@`-file autocomplete + `!`bash — DONE: hardware UAT C1–C6 PASS + planner-validated + MERGED to `main` `58af6e0`
