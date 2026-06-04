@@ -1082,3 +1082,91 @@ describe('desk App', () => {
     cleanup()
   })
 })
+
+describe('@-file autocomplete', () => {
+  it('@ opens a fuzzy file menu and Tab inserts the repo-relative path mid-line', async () => {
+    const hub = makeFakeHub()
+    const FILES = ['src/desk/app.tsx', 'src/hub/routes.ts', 'README.md']
+    const { lastFrame, stdin, unmount } = render(
+      <App client={hub} sessionId="s1" config={{ listFiles: () => FILES }} />,
+    )
+    try {
+      await write(stdin, 'see @app')
+      expect(lastFrame()).toContain('@src/desk/app.tsx') // menu shows the match
+      await write(stdin, '\t')                           // Tab accepts the highlighted path
+      const f = stripAnsi(lastFrame()!)
+      expect(f).toContain('see @src/desk/app.tsx')       // inserted into the composer mid-line
+      expect(f).not.toContain('@src/hub/routes.ts')      // menu closed after accept
+    } finally {
+      unmount()
+    }
+  })
+
+  it('@ menu: ↓ then Tab inserts the SECOND match', async () => {
+    const hub = makeFakeHub()
+    const FILES = ['src/a.ts', 'src/ab.ts']
+    const { lastFrame, stdin, unmount } = render(
+      <App client={hub} sessionId="s1" config={{ listFiles: () => FILES }} />,
+    )
+    try {
+      await write(stdin, '@a')
+      expect(lastFrame()).toContain('@src/a.ts')
+      await write(stdin, '\x1b[B') // ↓ -> highlight second
+      await write(stdin, '\t')
+      expect(stripAnsi(lastFrame()!)).toContain('@src/ab.ts')
+    } finally {
+      unmount()
+    }
+  })
+
+  it('Esc dismisses the @ menu but preserves the typed line', async () => {
+    const hub = makeFakeHub()
+    const { lastFrame, stdin, unmount } = render(
+      <App client={hub} sessionId="s1" config={{ listFiles: () => ['src/desk/app.tsx'] }} />,
+    )
+    try {
+      await write(stdin, 'hello @app')
+      expect(lastFrame()).toContain('@src/desk/app.tsx') // menu open
+      await write(stdin, '\x1b')                         // Esc
+      await flush(60)                                    // ink debounces a lone ESC; wait past it
+      const f = stripAnsi(lastFrame()!)
+      expect(f).not.toContain('src/desk/app.tsx')        // menu gone
+      expect(f).toContain('hello @app')                  // line preserved (not nuked)
+    } finally {
+      unmount()
+    }
+  })
+})
+
+describe('!bash delegation', () => {
+  it('a "!"-line is POSTed as a "run this" prompt (not executed locally)', async () => {
+    const hub = makeFakeHub()
+    const { stdin, lastFrame, unmount } = render(<App client={hub} sessionId="s1" />)
+    try {
+      await write(stdin, '!npm test')
+      await write(stdin, '\r')
+      expect(hub.prompts).toHaveLength(1)
+      expect(hub.prompts[0]!.text).toContain('Run this shell command')
+      expect(hub.prompts[0]!.text).toContain('npm test')
+      expect(stripAnsi(lastFrame()!)).toContain('npm test') // transcript echoes the command
+    } finally {
+      unmount()
+    }
+  })
+
+  it('a submitted "!"-line is recalled by ↑ (recorded in history)', async () => {
+    const hub = makeFakeHub()
+    const store = memoryHistoryStore()
+    const { stdin, lastFrame, unmount } = render(
+      <App client={hub} sessionId="s1" config={{ historyStore: store, historyKey: 'k' }} />,
+    )
+    try {
+      await write(stdin, '!ls -la')
+      await write(stdin, '\r')
+      await write(stdin, '\x1b[A') // ↑ recalls the last submitted line
+      expect(stripAnsi(lastFrame()!)).toContain('!ls -la')
+    } finally {
+      unmount()
+    }
+  })
+})

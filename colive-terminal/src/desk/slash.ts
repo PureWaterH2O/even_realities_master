@@ -51,8 +51,22 @@ export interface PromptResult {
   text: string
 }
 
+/** A line beginning with "!" — a shell command delegated to Claude's Bash tool. */
+export interface BashResult {
+  kind: 'bash'
+  /** The raw command (everything after the leading "!", trimmed). */
+  command: string
+  /** The prompt text actually POSTed — a "run this and show output" instruction. */
+  text: string
+}
+
 /** The full result union returned by `interpretInput`. */
-export type InterpretedInput = CommandResult | HintResult | PromptResult
+export type InterpretedInput = CommandResult | HintResult | PromptResult | BashResult
+
+/** Wrap a shell command as an explicit instruction the raw SDK reliably runs via its Bash tool. */
+export function formatBashPrompt(cmd: string): string {
+  return ['Run this shell command and show me its output:', '```', cmd, '```'].join('\n')
+}
 
 /** The slash commands the desk client understands (sans leading "/"). */
 export const SLASH_COMMANDS = [
@@ -99,6 +113,13 @@ function helpMessage(): string {
  */
 export function interpretInput(raw: string): InterpretedInput {
   const trimmed = raw.trim()
+
+  // A line beginning with "!" is a shell command — delegated to Claude's Bash tool.
+  if (trimmed.startsWith('!')) {
+    const command = trimmed.slice(1).trim()
+    if (command === '') return { kind: 'prompt', text: '' } // lone "!" -> no-op (mirrors lone "/")
+    return { kind: 'bash', command, text: formatBashPrompt(command) }
+  }
 
   // No leading slash (or empty) -> ordinary prompt carrying the trimmed text.
   if (!trimmed.startsWith('/')) {

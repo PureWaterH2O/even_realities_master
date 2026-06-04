@@ -38,7 +38,8 @@ import type {
 } from '../core/events'
 import { interpretInput } from './slash'
 import type { MouseMode } from './slash'
-import { filterSlash } from './input/menu'
+import { filterSlash, atContext } from './input/menu'
+import { fuzzyFilter, defaultListFiles } from './input/files'
 import { slashMenuItems } from './slash'
 import { MOUSE_ON, MOUSE_OFF } from './mouse-mode'
 import { reduceBlocks, initialBlockState } from './render/blocks'
@@ -77,6 +78,8 @@ export interface AppConfig {
   historyStore?: HistoryStore
   /** Project key for per-project history (the Hub base URL or cwd). */
   historyKey?: string
+  /** Injected project file lister for @-autocomplete (defaults to git-backed defaultListFiles). */
+  listFiles?: (cwd: string) => string[]
 }
 
 /** Props for the root {@link App}. The HubClient is injected for testability. */
@@ -100,6 +103,9 @@ const WHEEL_STEP = 3
 // (trackpad / diagonal / Option+double-click) — byte-identical to real presses. A batch of >= 4
 // arrows in one synchronous tick is therefore a scroll-gesture artifact, not keystrokes.
 const ARROW_BURST_THRESHOLD = 4
+
+/** Max completion-menu rows shown (slash + @-file). */
+const MENU_LIMIT = 10
 
 const STATUS_LABEL: Record<StatusState, string> = {
   busy: 'busy',
@@ -161,17 +167,40 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // see the WHOLE batch and decide real-keypress vs scroll-gesture burst. See ARROW_BURST_THRESHOLD.
   const arrowBatchRef = useRef<{ keys: Array<'up' | 'down' | 'left' | 'right'>; scheduled: boolean }>({ keys: [], scheduled: false })
 
-  // Slash-command completion menu. It is open exactly when the composer holds a single
-  // leading-"/" token that matches at least one command (filterSlash returns the items,
-  // else null). app.tsx owns the highlight index; the items list is memoized once.
+  // @-file source + a lazy cache. The file list is enumerated once on first "@" use (git
+  // ls-files / bounded walk), then reused — declared ABOVE the menu-derivation block because
+  // atMatches calls ensureFiles(). Injectable via config.listFiles for tests.
+  const listFiles = config?.listFiles ?? defaultListFiles
+  const fileCwd = config?.cwd ?? process.cwd()
+  const filesRef = useRef<string[] | null>(null)
+  const ensureFiles = useCallback((): string[] => {
+    if (filesRef.current === null) {
+      try {
+        filesRef.current = listFiles(fileCwd)
+      } catch {
+        filesRef.current = []
+      }
+    }
+    return filesRef.current
+  }, [listFiles, fileCwd])
+
   const [menuIndex, setMenuIndex] = useState(0)
+  const [menuDismissed, setMenuDismissed] = useState(false)
   const menuItems = useMemo(() => slashMenuItems(), [])
-  const menu = filterSlash(B.toText(buf), menuItems) // null when the menu is closed
-  const menuOpen = menu !== null
-  const clampedMenuIndex = menu ? Math.min(menuIndex, menu.length - 1) : 0
-  // Reset the menu highlight to the top whenever the composer text changes (a re-filter).
-  // ↑/↓ move the highlight without changing the text, so they are unaffected.
-  useEffect(() => { setMenuIndex(0) }, [B.toText(buf)])
+
+  // Two mutually-exclusive completion menus. The slash menu owns the WHOLE buffer (a single
+  // leading-"/" token); the "@" menu owns a mid-line token under the cursor. Compute slash
+  // first; only look for an "@" context when the slash menu is closed — they can never both open.
+  const slashMenu = filterSlash(B.toText(buf), menuItems)
+  const atCtx = slashMenu === null && !menuDismissed ? atContext(buf.lines[buf.row]!, buf.col) : null
+  const atMatches = atCtx ? fuzzyFilter(ensureFiles(), atCtx.query, MENU_LIMIT) : []
+  const atMenu = atCtx && atMatches.length > 0 ? atMatches : null
+
+  const menuOpen = slashMenu !== null || atMenu !== null
+  const menuLength = slashMenu ? slashMenu.length : atMenu ? atMenu.length : 0
+  const clampedMenuIndex = menuOpen ? Math.min(menuIndex, menuLength - 1) : 0
+  // Reset the highlight + un-dismiss whenever the composer text changes (a re-filter).
+  useEffect(() => { setMenuIndex(0); setMenuDismissed(false) }, [B.toText(buf)])
 
   // Reserve lines for the chrome (scroll indicator + status line + 1 line of headroom)
   // PLUS the composer's own rows, which grow as the buffer gains lines. The headroom is
@@ -179,7 +208,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // total output exactly fills the terminal, the trailing newline scrolls the host and ink's
   // cursor math drifts (leaking lines into scrollback). Keeping output strictly shorter than
   // the terminal keeps the viewport a clean fixed region (UAT A1).
-  const menuRowCount = menuOpen ? menu!.length : 0
+  const menuRowCount = menuOpen ? menuLength : 0
   const inputRowCount = pending && pending.kind === 'question' ? 0 : renderInputRows(buf, { width }).length
   const reserved = 3 + inputRowCount + menuRowCount // 3 = indicator + status + headroom
   const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
@@ -295,6 +324,22 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       }
       if (result.kind === 'hint') {
         dispatch({ type: 'note', text: result.message })
+        return
+      }
+      if (result.kind === 'bash') {
+        const current = sessionIdRef.current
+        dispatch({ type: 'localUser', text: `! ${result.command}` })
+        void (async () => {
+          try {
+            const args = current !== undefined
+              ? { text: result.text, sessionId: current }
+              : { text: result.text, cwd: config?.cwd }
+            const res = await client.sendPrompt(args)
+            if (res.sessionId && res.sessionId !== sessionIdRef.current) setSessionId(res.sessionId)
+          } catch (err) {
+            dispatch({ type: 'note', text: `bash failed: ${err instanceof Error ? err.message : String(err)}` })
+          }
+        })()
         return
       }
       // result.kind === 'command'
@@ -463,7 +508,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     }
 
     if (key.escape) {
-      if (menuOpen) { setBuf(B.empty()); return }       // close the menu, clear the token
+      if (atMenu) { setMenuDismissed(true); return }   // @ menu: hide, keep the typed line
+      if (slashMenu) { setBuf(B.empty()); return }      // slash menu: clear the lone "/" token (unchanged)
       const sid = sessionIdRef.current
       if (sid !== undefined) void client.interrupt(sid).catch(() => {})
       return
@@ -474,9 +520,24 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     // Enter submits via the normal path (slash commands route locally, never POSTed)
     // and a printable char extends the buffer, which re-filters the menu.
     if (menuOpen && !pending) {
-      if (key.upArrow)   { setMenuIndex((i) => Math.max(0, Math.min(i, menu!.length - 1) - 1)); return }
-      if (key.downArrow) { setMenuIndex((i) => Math.min(menu!.length - 1, i + 1)); return }
-      if (key.tab) { setBuf(B.fromText('/' + menu![clampedMenuIndex]!.name)); setMenuIndex(0); return }
+      if (key.upArrow)   { setMenuIndex((i) => Math.max(0, Math.min(i, menuLength - 1) - 1)); return }
+      if (key.downArrow) { setMenuIndex((i) => Math.min(menuLength - 1, i + 1)); return }
+      if (key.tab) {
+        if (slashMenu) { setBuf(B.fromText('/' + slashMenu[clampedMenuIndex]!.name)); setMenuIndex(0); return }
+        if (atMenu && atCtx) {
+          const chosen = '@' + atMenu[clampedMenuIndex]! + ' ' // trailing space ends the token -> closes the menu
+          setBuf((b) => B.replaceRange(b, atCtx.start, atCtx.end, chosen))
+          setMenuIndex(0)
+          return
+        }
+      }
+      // The "@" menu also accepts on Enter; the slash menu deliberately does NOT (Enter submits it).
+      if (atMenu && atCtx && key.return) {
+        const chosen = '@' + atMenu[clampedMenuIndex]! + ' '
+        setBuf((b) => B.replaceRange(b, atCtx.start, atCtx.end, chosen))
+        setMenuIndex(0)
+        return
+      }
     }
 
     if (pending) {
@@ -510,6 +571,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       const interpreted = interpretInput(text)
       if (interpreted.kind === 'prompt' && interpreted.text !== '') {
         historyStore.append(historyKey, interpreted.text)
+      } else if (interpreted.kind === 'bash') {
+        historyStore.append(historyKey, text.trim())
       }
       // Reset navigation to the (possibly updated) tail after EVERY submit, so a later
       // ↑ starts from the most-recent entry even when this submit was a slash command.
@@ -590,11 +653,15 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
       {menuOpen ? (
         <Box flexDirection="column">
-          {menu!.map((item, i) => (
-            <Text key={item.name} inverse={i === clampedMenuIndex}>
-              {`/${item.name}  `}<Text dimColor>{item.desc}</Text>
-            </Text>
-          ))}
+          {slashMenu
+            ? slashMenu.map((item, i) => (
+                <Text key={item.name} inverse={i === clampedMenuIndex}>
+                  {`/${item.name}  `}<Text dimColor>{item.desc}</Text>
+                </Text>
+              ))
+            : atMenu!.map((path, i) => (
+                <Text key={path} inverse={i === clampedMenuIndex}>{`@${path}`}</Text>
+              ))}
         </Box>
       ) : null}
 

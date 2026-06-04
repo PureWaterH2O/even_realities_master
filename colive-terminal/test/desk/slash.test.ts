@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { interpretInput } from '../../src/desk/slash'
+import { interpretInput, formatBashPrompt } from '../../src/desk/slash'
 import type { InterpretedInput } from '../../src/desk/slash'
 
 /**
@@ -190,5 +190,28 @@ describe('interpretInput — case insensitivity of the command token', () => {
   it('unknown uppercase /FOO is a hint, still never a prompt', () => {
     const r = interpretInput('/FOO')
     expect(r.kind).toBe('hint')
+  })
+})
+
+describe('!bash', () => {
+  it('formatBashPrompt wraps the command in a run-and-show instruction', () => {
+    const t = formatBashPrompt('npm test')
+    expect(t).toContain('Run this shell command')
+    expect(t).toContain('npm test')
+  })
+  it('a "!"-line is a bash result carrying the command + transformed text', () => {
+    const r = interpretInput('!git status')
+    expect(r.kind).toBe('bash')
+    if (r.kind === 'bash') {
+      expect(r.command).toBe('git status')
+      expect(r.text).toBe(formatBashPrompt('git status'))
+    }
+  })
+  it('a lone "!" is a no-op prompt (mirrors lone "/")', () => {
+    expect(interpretInput('!')).toEqual({ kind: 'prompt', text: '' })
+    expect(interpretInput('!   ')).toEqual({ kind: 'prompt', text: '' })
+  })
+  it('an @-bearing line stays a verbatim prompt (no @ handling at submit)', () => {
+    expect(interpretInput('explain @src/app.tsx')).toEqual({ kind: 'prompt', text: 'explain @src/app.tsx' })
   })
 })
