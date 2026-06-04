@@ -1,7 +1,7 @@
 # Co-Live Terminal — Status
 
-**Current state:** ✅ **M3.3a "Streaming-input Core" — hardware UAT D1–D5 PASS + signed off (owner, 2026-06-04);
-on `colive-terminal-m3.3a`, awaiting planner spec→claims→code validation + merge (NOT yet merged).** The isolated
+**Current state:** ✅ **M3.3a "Streaming-input Core" — DONE: hardware UAT D1–D5 PASS + signed off (owner, 2026-06-04),
+planner-validated, MERGED to `main` `fde76c5`.** The isolated
 refactor that lands the streaming-input plumbing once, safely, before any
 b/c control feature rides on it. Drives the SDK via **one persistent `Query` per session** (was one `query({prompt:string})`
 per turn) fed by a new pushable `PromptInbox` (`src/core/promptInbox.ts`); a single long-lived consumer loop reuses the
@@ -21,7 +21,7 @@ two-stage review per task).
 - **Out of scope (b/c rungs):** `/model`, mode/plan toggle, `/compact`, `supportedCommands` → M3.3b; `settingSources`+skills,
   image paste, MCP → M3.3c.
 
-**Next:** hardware UAT D1–D5 **PASS + signed off** (owner, 2026-06-04). Planner does spec→claims→code validation, then merges. Build chat does NOT push/merge.
+**Next:** ✅ MERGED `fde76c5` (planner-validated 2026-06-04). M3.3 foundation laid → next rung **M3.3b** (runtime controls: `/model`, mode/plan toggle, `/compact` + `supportedCommands`). **Deferred (backlog):** queued-prompt-loss on a mid-drain fatal query error (narrow; fix = re-queue the in-flight prompt in `onConsumerError`).
 
 ---
 

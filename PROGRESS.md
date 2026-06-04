@@ -5,7 +5,7 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-04
 
-### Co-Live Terminal M3.3a — ✅ Streaming-input Core (the refactor) — BUILT + hardware UAT D1–D5 PASS (owner signed off 2026-06-04); on `colive-terminal-m3.3a`, awaiting planner spec→claims→code validation + merge (NOT yet merged)
+### Co-Live Terminal M3.3a — ✅ Streaming-input Core (the refactor) — DONE: hardware UAT D1–D5 PASS (owner signed off 2026-06-04) + planner-validated + MERGED to `main` `fde76c5`
 
 - **Hardware UAT (2026-06-04):** owner ran the full D1–D5 walk on real G2 + R1 and signed off — all PASS (render parity, FIFO, clean interrupt with no error banner + immediate reuse, glasses byte-compat, self-heal). Runbook signed: `projects/colive-terminal/m3.3a-uat-runbook.md`.
 
