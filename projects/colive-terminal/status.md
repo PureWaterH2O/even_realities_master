@@ -1,27 +1,36 @@
 # Co-Live Terminal — Status
 
-**Current state:** 🔧 **M3.2A "Composer" — composer core hardware-validated; A4-step & A6-copy DEFERRED; in planning
-review (NOT merged).** Branch `colive-terminal-m3.2a` (off `main` `8f9bb0f`) @ `b17be70`, built + fixed via
-subagent-driven TDD (impl → spec review → quality review per task). New pure `src/desk/input/` layer (`EditBuffer`
-model, per-project DI'd history, SGR-wheel parser, slash-filter, multi-line cursor render) + `app.tsx` rewired into a
-composer. **`↑/↓` drive the INPUT** (wheel scrolls the transcript). **ZERO Core/Hub change** — desk stays a pure Hub
-client. **391 tests / 36 files, typecheck 0 (clean-tree verified 2026-06-03).**
+**Current state:** 🔧 **M3.2B "`@`-file autocomplete + `!`bash" — candidate BUILT, NOT merged; awaiting planner
+validation + hardware UAT.** Branch `colive-terminal-m3.2b` (off `main`), 9 commits (`b43fe2d`…`ced735e`), built via
+subagent-driven TDD (10 tasks: impl → spec-compliance review → code-quality review per task; final whole-branch review
+APPROVED FOR HANDBACK). Two **desk-only** typing aids that produce clean text Claude acts on:
+- **`@`-file (mid-line):** `@` opens a fuzzy file-path menu (`git ls-files`, walk fallback, cached once/session;
+  `src/desk/input/files.ts` fuzzy ranker + DI'd source); Tab/Enter inserts a repo-relative `@path` via
+  `EditBuffer.replaceRange` (reuses the M3.2A popup widget; Esc dismisses keeping the line). On submit it's sent
+  **verbatim** — Claude reads it with its **Read** tool. New `atContext` in `menu.ts`.
+- **`!`bash (whole-line):** `formatBashPrompt` wraps the command as a "run this + show output" instruction;
+  `interpretInput` gains a `bash` kind; `app.tsx` POSTs it + echoes `! cmd`, **M1-permission-gated**, rendered as a normal
+  `Bash(...)` turn; recorded in composer history.
+- **ZERO Core/Hub change** (proven by an empty `git diff main -- src/core src/hub`); the desk **never reads file contents
+  and never runs a shell** — only enumerates *filenames*. **442 tests / 39 files, typecheck 0** (baseline 412 → **+30**;
+  controller-reverified on-branch). No test gaming. **Self-test GATE passed** (preview rig + vhs PNGs eyeballed — no
+  rendering bugs).
+- **Plan gap caught:** adding `BashResult` to `InterpretedInput` broke `app.tsx`'s typecheck (the `switch (result.command)`
+  narrows by elimination → new member dropped `.message`/`.view`/`.mode`); fixed via a placeholder in Task 5 → real
+  dispatch in Task 7.
 
-**Hardware UAT (2026-06-03, two rounds):** R1 — A3/B1/B2 PASS, A1 via Ctrl-J; flagged A2/A4/A6, A5=scope. Fix pass
-(each TDD'd + independently reviewed). R2 results:
-- **A2 ✅ FULL PASS** `29c93c8` — Option+word-nav via the readline `ESC-b`/`ESC-f` form (VS Code sends that, not the CSI
-  form) + Option+Backspace delete-word. Additive (CSI form kept).
-- **A4 ⏸ DEFERRED (not mission-critical)** `c537ac2` — fixed a **real, rig-verified stale-closure bug** (↑/↓ now functional
-  `setBuf` updaters + `nav`→ref), but post-paste **one-line stepping still fails on the VS Code terminal** → an additional
-  cause remains unpinned. Paste itself works. Opt-in `COLIVE_A4_LOG` logger stays wired for the next pass.
-- **A6 ⏸ DEFERRED → dedicated copy/paste phase** `9001f8a` (+ `21c6ead`) — shipped a runtime **`/select` ⇄ `/scroll`**
-  mouse-mode toggle, but **copy still does not work** in the user's VS Code setup. Whole copy/paste surface (selection
-  bypass, OSC 52 `/copy`, paste ergonomics) → its own phase, to be scoped in the planning chat.
-- **A5 ⏸** full skill/CLI slash set needs Hub-reported commands → **M3.3**.
+**Open risk (spec §6 R1):** `@`-mention auto-read relies on Claude's *initiative* (raw-SDK Core, no CC harness to inject
+contents) → the **C1/C2 hardware checkpoint**; fix (a faint desk-appended "please read" nudge) ships only if UAT shows
+it's needed (YAGNI). **UAT runbook:** `projects/colive-terminal/m3.2b-uat-runbook.md` (C1–C6).
 
-**Next:** planning chat reviews and decides whether M3.2A merges as-is (with A4/A6 deferred) or splits A4/A6 out. (The
-build's earlier review loops also caught 3 real bugs: backslash-continuation cursor anchor; history nav-reset after every
-submit; history read-dedup.)
+**Next:** planning chat does the spec→claims→code validation, then hardware UAT (C1–C6), then merge.
+
+_Previously:_ ✅ **M3.2A "Composer" DONE — merged to `main` `278f7c8` (planner-validated 2026-06-03)** (multiline/cursor/
+word nav, per-project history, paste, mouse-wheel scroll, slash menu, `/select`·`/scroll` toggle; zero Core/Hub change;
+391 tests; hardware-signed-off composer core). Follow-up **mouse-history-leak fix merged `2370b25`** (VS Code alt-scroll
+1007 → wheel becomes dense arrow-bursts; fixed via `isMouseReport` drop + `1007l` + density burst-detection; 412 tests;
+tradeoff: wheel no longer scrolls → PageUp/PageDown). **Deferred:** A4 post-paste ↑/↓ stepping (`COLIVE_A4_LOG` wired);
+A6 copy → resolved via **Option+drag**, copy/paste phase descoped; A5 full slash set → M3.3.
 
 _Previously:_ ✅ **M3.1 "Readable transcript" DONE — hardware-signed-off 2026-06-02, merged to `main`** (desk
 scrollback viewport, inline syntax-highlighted diffs, markdown, Ctrl-O verbose, todos panel, native-style tool

@@ -5,6 +5,33 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-03
 
+### Co-Live Terminal M3.2B — 🔧 `@`-file autocomplete + `!`bash — candidate BUILT (branch, NOT merged; awaiting planner validation + hardware UAT)
+
+- **Scope (desk-only, zero Core/Hub change):** typing `@` opens a **mid-line** fuzzy file-path menu that inserts a
+  repo-relative `@path` (Claude reads it with its **Read** tool); a `!`-line is delegated to Claude's **Bash** tool
+  (M1-permission-gated, renders as a normal `Bash(...)` turn). The desk **never reads file contents and never runs a
+  shell** — its only new fs touch is enumerating *filenames* (`git ls-files`, `readdir` fallback). `@` and `/` menus are
+  mutually exclusive by construction; `!` opens no menu.
+- **Built via subagent-driven TDD** (10 tasks: impl → spec-compliance review → code-quality review per task, fresh
+  subagent each; final whole-branch review = APPROVED FOR HANDBACK). New pure/DI'd modules: `src/desk/input/files.ts`
+  (fuzzy ranker + git-first/walk-fallback file source, cached once/session), `atContext` in `menu.ts`, `replaceRange` on
+  the immutable `EditBuffer`, a `bash` kind + `formatBashPrompt` in `slash.ts`; `app.tsx` unifies the slash/`@` menu
+  (Esc-dismiss keeps the line) + dispatches `!bash` + records it in composer history.
+- **Verified on-branch (controller-reverified, not agent self-report):** **442 tests / 39 files green** (baseline 412 →
+  **+30**), typecheck exit 0, **`git diff main -- src/core src/hub` empty** (zero Core/Hub change proven), no
+  `.skip`/`.only`, no deleted tests.
+- **Self-test GATE passed:** rendered the `@`-menu / mid-line insert / `!`bash echo / layout via the preview rig + vhs
+  PNGs and eyeballed them — no rendering bugs (`test/preview/m32b.preview.test.tsx`, `scripts/screenshots.sh`).
+- **Plan gap caught & fixed:** adding `BashResult` to the `InterpretedInput` union broke `app.tsx`'s typecheck — its
+  `switch (result.command)` narrows by **elimination**, so the new member dropped `.message`/`.view`/`.mode`. Resolved
+  with a minimal placeholder `bash` guard in Task 5, replaced by the real dispatch in Task 7. (Lesson: adding a union
+  member is NOT free under elimination-style narrowing.)
+- **Open risk (spec §6 R1):** `@`-mention auto-read relies on Claude's *initiative* (raw-SDK Core has no CC harness to
+  inject file contents) → the **C1/C2 hardware checkpoint**; the fix (a faint desk-appended "please read" nudge) ships
+  **only if UAT shows it's needed** (YAGNI). UAT runbook: `projects/colive-terminal/m3.2b-uat-runbook.md` (C1–C6).
+- **NOT merged** — handed back to the planning chat for spec→claims→code validation before hardware UAT. Branch
+  `colive-terminal-m3.2b`, 9 commits (`b43fe2d`…`ced735e`).
+
 ### Co-Live Terminal M3.2A — ✅ mouse-history-leak fix VALIDATED + MERGED (`2370b25`); copy/paste phase DESCOPED
 
 - **Copy resolved without a phase:** **Option+drag** selects + copies natively (terminal selection bypass with mouse
