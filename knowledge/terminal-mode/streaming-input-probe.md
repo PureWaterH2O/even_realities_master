@@ -49,6 +49,15 @@ needed.** One assumption (a) diverged but is fully benign (see below).
   `handleAssistant` emits nothing; for tool turns it emits a `tool_start` already deduped via `announcedToolIds`,
   so its position never changes *which* events are emitted. Task 6's golden test scripts its own order and is a
   self-consistent regression pin.
+- 🧪 **`Query.interrupt()` does NOT throw — it flushes a NON-SUCCESS `result` to end the interrupted turn**
+  (verified live against the real SDK, twice, deterministically; 2026-06-04). The flushed result carries an
+  `[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null` error. Our `handleResult` maps any
+  non-success result to an `error` + failed-`result` event, so naïvely this surfaced a spurious error banner on a
+  deliberate Esc (a regression vs the old `AbortController` path, which suppressed the aborted-stream throw and
+  framed a clean idle). **Fixed:** an `interrupting` flag (set by `interrupt()`, reset on every turn-end) makes the
+  consumer loop frame a clean idle for that flushed result and surface NO error/failed-result — matching the old
+  abort path. The session stays usable afterward (the next prompt drives a fresh turn on the same query — verified
+  in UAT D3). Genuine stream throws still go through `onConsumerError` and STILL surface an `error`.
 
 ## Implication for the build
 
@@ -60,14 +69,16 @@ as written (Tasks 2–9).**
 
 ## Open questions
 
-- Does `Query.interrupt()` emit a `result` for the interrupted turn (needed for turn-end framing on Esc)?
-  Not exercised by this probe — flagged for Task 4 (verified there via a fake whose `interrupt()` flushes a result,
-  and confirmed on real hardware in UAT D3).
 - Thinking/tool_use stream-block shapes were not exercised live here (text only). The golden test (Task 6) and the
   existing event-normalization suite pin those shapes against the known envelope.
+
+> **Resolved 2026-06-04:** "Does `Query.interrupt()` emit a `result`?" — yes (non-success); now a fact above.
 
 ## Change log
 
 - 2026-06-03: created. Live probe of streaming-input mode (SDK 0.3.158) for M3.3a Task 1. Three assumptions:
   one-result-per-turn ✅ HOLDS, stream_event shapes ✅ HOLD, one-init-at-start ❌ DIVERGES (per-turn init) but
   BENIGN (emits no events; stable session_id). Verdict: build proceeds as written.
+- 2026-06-04: resolved the open `Query.interrupt()` question — verified live (twice, deterministic) that it does
+  NOT throw but flushes a NON-SUCCESS `result` (with an `[ede_diagnostic]` error). Fixed the spurious-error-on-Esc
+  regression via an `interrupting` flag that suppresses that flushed result (clean idle, no error/failed-result).
