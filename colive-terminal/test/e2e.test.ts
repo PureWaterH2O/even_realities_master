@@ -33,16 +33,35 @@ import { createSseHub, type SseHub } from '../src/hub/sse'
 import { resolveConfig } from '../src/core/config'
 import { createHubClient, type HubClient } from '../src/desk/client'
 import type { CoLiveEvent } from '../src/core/events'
-import type { QueryFn } from '../src/core/session'
+import type { QueryFn, QueryLike } from '../src/core/session'
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 
 /** The fixed id our fake SDK assigns, so every turn maps to ONE continuous session. */
 const SESSION_ID = 'e2e-co-live-1'
 
-/** A scripted async-iterable of SDK messages (the subset session.ts maps to events). */
-function turn(messages: unknown[]): AsyncIterable<unknown> {
-  return (async function* () {
-    for (const m of messages) yield m
-  })()
+/** Extract the text of a pushed SDKUserMessage (textUserMessage shape). */
+function pushedText(msg: SDKUserMessage): string {
+  const content = (msg as { message?: { content?: unknown } }).message?.content
+  return typeof content === 'string' ? content : ''
+}
+
+/**
+ * Build a persistent-Query fake: ONE query() consumes the inbox and, per pushed
+ * prompt, yields that turn's scripted messages (built by `messagesFor(promptText)`,
+ * which ends with the turn's `result`). interrupt() is a no-op stub. This mirrors
+ * the real streaming-input SDK: one persistent query across all of a session's turns.
+ */
+function persistentQuery(messagesFor: (promptText: string) => unknown[]): QueryFn {
+  return ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+    const gen = (async function* () {
+      for await (const msg of args.prompt) {
+        for (const m of messagesFor(pushedText(msg))) yield m
+      }
+    })()
+    const q = gen as unknown as QueryLike
+    ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+    return q
+  }) as unknown as QueryFn
 }
 
 /** The proven happy-turn message shape (mirrors test/core/sessionManager happyTurn). */
@@ -65,10 +84,9 @@ function happyMessages(text: string): unknown[] {
   ]
 }
 
-/** A fake query: any prompt -> init -> assistant text ("reply to: <prompt>") -> result. */
+/** A fake query: each pushed prompt -> init -> assistant text ("reply to: <prompt>") -> result. */
 function makePromptQuery(): QueryFn {
-  return (({ prompt }: { prompt: string }) =>
-    turn(happyMessages(`reply to: ${prompt}`))) as unknown as QueryFn
+  return persistentQuery((prompt) => happyMessages(`reply to: ${prompt}`))
 }
 
 /**
@@ -101,8 +119,7 @@ function thinkingMessages(text: string, thinking: string): unknown[] {
 
 /** A fake query whose turn streams a thinking delta then the assistant text. */
 function makeThinkingQuery(thinking: string): QueryFn {
-  return (({ prompt }: { prompt: string }) =>
-    turn(thinkingMessages(`reply to: ${prompt}`, thinking))) as unknown as QueryFn
+  return persistentQuery((prompt) => thinkingMessages(`reply to: ${prompt}`, thinking))
 }
 
 /**
@@ -113,40 +130,46 @@ function makeThinkingQuery(thinking: string): QueryFn {
  */
 function makePermissionQuery(): QueryFn {
   return ((args: {
-    prompt: string
+    prompt: AsyncIterable<SDKUserMessage>
     options?: {
       canUseTool?: (t: string, i: Record<string, unknown>, o: unknown) => Promise<{ behavior: string }>
-      abortController?: AbortController
     }
   }) => {
     const canUseTool = args.options?.canUseTool
-    const signal = args.options?.abortController?.signal ?? new AbortController().signal
-    return (async function* () {
-      yield { type: 'system', subtype: 'init', session_id: SESSION_ID }
-      let outcome = 'no-gate'
-      if (canUseTool) {
-        const res = await canUseTool(
-          'Write',
-          { file_path: '/tmp/e2e-co-live.txt', content: 'hi' },
-          { signal, toolUseID: 'tu-e2e-1', suggestions: [] },
-        )
-        outcome = res.behavior
-      }
-      const text = `tool decision: ${outcome}`
-      yield { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } }
-      yield { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } }
-      yield { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }
-      yield {
-        type: 'result',
-        subtype: 'success',
-        session_id: SESSION_ID,
-        result: text,
-        total_cost_usd: 0,
-        num_turns: 1,
-        duration_ms: 1,
-        usage: { input_tokens: 0, output_tokens: 0 },
+    // No abortController option in streaming-input mode; the SDK still passes a
+    // signal in the canUseTool context, so supply a fresh one for the fake.
+    const signal = new AbortController().signal
+    const gen = (async function* () {
+      for await (const _msg of args.prompt) {
+        yield { type: 'system', subtype: 'init', session_id: SESSION_ID }
+        let outcome = 'no-gate'
+        if (canUseTool) {
+          const res = await canUseTool(
+            'Write',
+            { file_path: '/tmp/e2e-co-live.txt', content: 'hi' },
+            { signal, toolUseID: 'tu-e2e-1', suggestions: [] },
+          )
+          outcome = res.behavior
+        }
+        const text = `tool decision: ${outcome}`
+        yield { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } }
+        yield { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } }
+        yield { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          session_id: SESSION_ID,
+          result: text,
+          total_cost_usd: 0,
+          num_turns: 1,
+          duration_ms: 1,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        }
       }
     })()
+    const q = gen as unknown as QueryLike
+    ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+    return q
   }) as unknown as QueryFn
 }
 

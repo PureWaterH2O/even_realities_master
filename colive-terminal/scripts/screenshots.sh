@@ -42,6 +42,8 @@ FRAMES=(
   "m32b-c3-bash-typed:shot-m32b-c3-bash-typed"
   "m32b-c3-bash-submitted:shot-m32b-c3-bash-submitted"
   "m32b-layout:shot-m32b-layout"
+  # M3.3a desk-render regression (Core streaming refactor — events unchanged)
+  "m33a-session:shot-m33a-session"
 )
 
 echo "[1/2] capturing frames (PREVIEW=1 vitest test/preview)…"

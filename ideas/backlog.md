@@ -14,6 +14,7 @@ Running list of ideas for the glasses/ring. An idea graduates into a
 | Write a tiny BLE client against the G2 protocol (teleprompter/conversate) to validate the RE | firmware-ble | M–L | TBD | Confirms i-soxi/kalani service IDs on our firmware; brick-risk only for OTA paths (avoid). |
 | Independent confirmation of the G2 SoC once FCC photos unlock (2026-07-20) or via teardown | hardware | S (watch) / L (teardown) | TBD | Resolve Apollo510 vs 510B + EM9305. Could be just monitoring fccid.io. |
 | Capture an annotated dual-connection BLE sniff to resolve L/R pairing + PAwR | firmware-ble | M | TBD | Answers a foundational architecture open question no source has. |
+| Co-Live M3.3a edge case: re-drive a queued prompt lost on a mid-drain fatal query error | terminal-mode | S | TBD | In the persistent-`Query` model, if the consumer throws in the gap between a turn's `result` and the next queued prompt's first message, that buffered prompt is dropped (surfaces user_prompt→error→idle, not auto-retried). Not reachable in normal SDK flow (the generator continues to the next turn); flagged by the M3.3a final review. Fix = re-queue the in-flight prompt in `onConsumerError` so reopen-with-resume re-drives it. |
 
 ## Glasses + Obsidian Vault Integration (explored 2026-06-03)
 

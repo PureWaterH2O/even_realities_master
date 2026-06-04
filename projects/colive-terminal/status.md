@@ -1,6 +1,31 @@
 # Co-Live Terminal — Status
 
-**Current state:** ✅ **M3.2B "`@`-file autocomplete + `!`bash" — DONE: hardware UAT C1–C6 PASS (2026-06-03),
+**Current state:** ✅ **M3.3a "Streaming-input Core" — hardware UAT D1–D5 PASS + signed off (owner, 2026-06-04);
+on `colive-terminal-m3.3a`, awaiting planner spec→claims→code validation + merge (NOT yet merged).** The isolated
+refactor that lands the streaming-input plumbing once, safely, before any
+b/c control feature rides on it. Drives the SDK via **one persistent `Query` per session** (was one `query({prompt:string})`
+per turn) fed by a new pushable `PromptInbox` (`src/core/promptInbox.ts`); a single long-lived consumer loop reuses the
+**existing `handleMessage*` mapping UNCHANGED** (all 12 bodies verified byte-identical) and detects turn-end on `result`;
+`AbortController` → `Query.interrupt()`; fatal query error self-heals via lazy reopen-with-`resume`. **Core change CONFINED
+to `session.ts` + `promptInbox.ts`** → glasses/Hub/SSE byte-compat preserved. Built via subagent-driven TDD (probe-first,
+two-stage review per task).
+- **Live SDK probe (🧪):** streaming mode = one `result`/turn ✅, unchanged `stream_event` shapes ✅, per-turn `init`
+  (benign — no events, stable `session_id`) → byte-identical mapping. `knowledge/terminal-mode/streaming-input-probe.md`.
+- **Interrupt bug caught LIVE + fixed:** real `Query.interrupt()` flushes a **non-success `result`** (doesn't throw) →
+  was surfacing a spurious `[ede_diagnostic]` error banner on Esc. The **live self-test (Task 8) caught what unit tests
+  missed**; fix suppresses the non-success interrupt-result → **clean idle** (re-verified live, error count 0, session
+  immediately usable). Genuine error-results + success-race results unaffected.
+- **Gates:** **455 tests / 41 files green** (442 → +13), `tsc` 0, **CONFINED ✓**, no test gaming (5 renamed in the
+  abort→`Query.interrupt()` / per-turn→persistent adaptation). **Dual self-test passed** (deterministic preview PNG +
+  LIVE serve+desk run with screenshots). Runbook: `projects/colive-terminal/m3.3a-uat-runbook.md` (D1–D5).
+- **Out of scope (b/c rungs):** `/model`, mode/plan toggle, `/compact`, `supportedCommands` → M3.3b; `settingSources`+skills,
+  image paste, MCP → M3.3c.
+
+**Next:** hardware UAT D1–D5 **PASS + signed off** (owner, 2026-06-04). Planner does spec→claims→code validation, then merges. Build chat does NOT push/merge.
+
+---
+
+_Previously:_ ✅ **M3.2B "`@`-file autocomplete + `!`bash" — DONE: hardware UAT C1–C6 PASS (2026-06-03),
 planner-validated, MERGED to `main` `58af6e0`.** Built on branch `colive-terminal-m3.2b` (off `main`) via
 subagent-driven TDD (10 tasks: impl → spec-compliance review → code-quality review per task; final whole-branch review
 APPROVED FOR HANDBACK). Two **desk-only** typing aids that produce clean text Claude acts on:

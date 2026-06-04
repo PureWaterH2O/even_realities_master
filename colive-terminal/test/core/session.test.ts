@@ -2,32 +2,56 @@ import { describe, it, expect, vi } from 'vitest'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { ClaudeSession } from '../../src/core/session'
-import type { QueryFn } from '../../src/core/session'
+import type { QueryFn, QueryLike } from '../../src/core/session'
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { CoLiveEvent } from '../../src/core/events'
 
 /**
- * Build a fake SDK `query` fn from a list of message-producing factories.
- * Each call to the returned fn yields the next scripted turn's messages.
- * The fake records the `options` it was called with (per turn) for assertions.
+ * A persistent-Query fake: a single query() whose generator pulls one message
+ * from the inbox per turn and yields that turn's scripted SDK messages (ending
+ * with the turn's `result`). interrupt() is a no-op stub here; the
+ * interrupt-emits-result contract is asserted in Task 4 via a custom turn.
+ *
+ * The fake records the `options` it was opened with (once per query() OPEN —
+ * once per session, twice only after a reopen) and the text of every pushed
+ * prompt (drained from the inbox), so mechanics tests can assert what was sent.
  */
 function fakeQuery(turns: unknown[][]): {
   fn: QueryFn
-  calls: { prompt: unknown; options: any }[]
+  calls: Array<{ options?: any }>
+  pushed: string[]
 } {
-  const calls: { prompt: unknown; options: any }[] = []
-  let turnIndex = 0
-  const fn = ((args: { prompt: unknown; options?: any }) => {
-    const messages = turns[turnIndex] ?? []
-    turnIndex += 1
-    calls.push({ prompt: args.prompt, options: args.options })
-    return (async function* () {
-      for (const m of messages) {
-        yield m
+  const calls: Array<{ options?: any }> = []
+  const pushed: string[] = []
+  const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+    calls.push({ options: args.options })
+    let turn = 0
+    const gen = (async function* () {
+      for await (const msg of args.prompt) {
+        pushed.push(pushedText(msg))
+        const messages = turns[turn] ?? [resultMessage(`sess-${turn}`)]
+        turn++
+        for (const m of messages) yield m
       }
     })()
+    const q = gen as unknown as QueryLike
+    ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {
+      /* no-op stub; interrupt-emits-result is asserted in Task 4 via a custom turn */
+    }
+    return q
   }) as unknown as QueryFn
+  return { fn, calls, pushed }
+}
 
-  return { fn, calls }
+/** Extract the text of a pushed SDKUserMessage (textUserMessage shape). */
+function pushedText(msg: SDKUserMessage): string {
+  const content = (msg as { message?: { content?: unknown } }).message?.content
+  return typeof content === 'string' ? content : ''
+}
+
+/** Minimal SDK result message used to close a scripted turn. */
+function resultMessage(sessionId: string): Record<string, unknown> {
+  return { type: 'result', subtype: 'success', session_id: sessionId, result: '', usage: {} }
 }
 
 /** A minimal config object the session needs. */
@@ -128,7 +152,7 @@ describe('ClaudeSession — event normalization', () => {
 
   it('maps an SDK happy turn to the normalized event sequence', async () => {
     const emitted: CoLiveEvent[] = []
-    const { fn, calls } = fakeQuery([happyTurnMessages('sess-xyz')])
+    const { fn, calls, pushed } = fakeQuery([happyTurnMessages('sess-xyz')])
     const session = new ClaudeSession({
       config: makeConfig(),
       emit: (e) => emitted.push(e),
@@ -204,17 +228,21 @@ describe('ClaudeSession — event normalization', () => {
     // NO thinking text ever leaks: no text_delta carries the thinking content
     expect(emitted.some((e) => e.type === 'text_delta' && e.text.includes('secret'))).toBe(false)
 
-    // query was called with our owned config + includePartialMessages + an abortController
+    // ONE persistent query() OPEN carries our owned config + includePartialMessages
+    // (no abortController — interrupt is Query.interrupt() in streaming-input mode).
     expect(calls).toHaveLength(1)
-    expect(calls[0].prompt).toBe('do a thing')
     expect(calls[0].options.model).toBe('claude-opus-4-8')
     expect(calls[0].options.permissionMode).toBe('default')
     expect(calls[0].options.settingSources).toEqual([])
     expect(calls[0].options.includePartialMessages).toBe(true)
     expect(calls[0].options.canUseTool).toBe(stubCanUseTool)
-    expect(calls[0].options.abortController).toBeInstanceOf(AbortController)
+    expect(calls[0].options.abortController).toBeUndefined()
     // fresh session => no resume id
     expect(calls[0].options.resume).toBeUndefined()
+    // the prompt text reaches the SDK via the inbox (was calls[0].prompt) — and
+    // is echoed as the user_prompt event (the real contract).
+    expect(pushed).toEqual(['do a thing'])
+    expect(emitted[0]).toEqual({ type: 'user_prompt', text: 'do a thing' })
   })
 
   it('emits thinking_delta carrying the SDK thinking text (desk-only render)', async () => {
@@ -846,30 +874,41 @@ describe('ClaudeSession — resume', () => {
 describe('ClaudeSession — busy + enqueue', () => {
   it('queues a run() issued while busy and runs it after the current turn', async () => {
     const emitted: CoLiveEvent[] = []
-    // Two scripted turns. The first turn's stream blocks on a gate we control,
-    // so we can fire a second run() while the first is mid-flight.
+    // ONE persistent query consuming the inbox. The first turn blocks on a gate
+    // we control, so we can fire a second run() while the first is mid-flight.
     let releaseFirstTurn!: () => void
     const firstTurnGate = new Promise<void>((resolve) => {
       releaseFirstTurn = resolve
     })
 
-    let turnIndex = 0
     const calls: any[] = []
-    const fn = ((args: { prompt: unknown; options?: any }) => {
-      const idx = turnIndex
-      turnIndex += 1
-      calls.push({ prompt: args.prompt, options: args.options })
-      return (async function* () {
-        if (idx === 0) {
+    const pushed: string[] = []
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      calls.push({ options: args.options })
+      let turn = 0
+      const gen = (async function* () {
+        for await (const msg of args.prompt) {
+          pushed.push(pushedText(msg))
+          const idx = turn
+          turn += 1
           yield { type: 'system', subtype: 'init', session_id: 'busy-sess' }
-          // block until the test releases the gate
-          await firstTurnGate
-          yield { type: 'result', subtype: 'success', session_id: 'busy-sess', result: 'first', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
-        } else {
-          yield { type: 'system', subtype: 'init', session_id: 'busy-sess' }
-          yield { type: 'result', subtype: 'success', session_id: 'busy-sess', result: 'second', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
+          // The first turn blocks on the gate before its result; later turns end at once.
+          if (idx === 0) await firstTurnGate
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'busy-sess',
+            result: idx === 0 ? 'first' : 'second',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          }
         }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
     }) as unknown as QueryFn
 
     const session = new ClaudeSession({
@@ -886,18 +925,19 @@ describe('ClaudeSession — busy + enqueue', () => {
     await Promise.resolve()
     expect(session.busy).toBe(true)
 
-    // Issue a second run() while busy: it should be queued, not call query yet.
+    // Issue a second run() while busy: it should be queued (NOT a second query()).
     const secondRun = session.run('second prompt')
-    expect(calls).toHaveLength(1) // second query not yet started
+    expect(calls).toHaveLength(1) // still ONE query() — second prompt is queued
 
     // Release the first turn; both should now complete in order.
     releaseFirstTurn()
     await firstRun
     await secondRun
 
-    expect(calls).toHaveLength(2)
-    expect(calls[0].prompt).toBe('first prompt')
-    expect(calls[1].prompt).toBe('second prompt')
+    // Persistent query: still ONE query() OPEN across both turns; the prompts
+    // reached the SDK in order via the inbox (was calls[i].prompt).
+    expect(calls).toHaveLength(1)
+    expect(pushed).toEqual(['first prompt', 'second prompt'])
 
     // both user_prompts were echoed, second after first's result
     const promptTexts = emitted.filter((e) => e.type === 'user_prompt').map((e: any) => e.text)
@@ -914,17 +954,23 @@ describe('ClaudeSession — busy + enqueue', () => {
       releaseFirstTurn = resolve
     })
 
-    let turnIndex = 0
+    // ONE persistent query consuming the inbox; the first turn is gated.
     const order: number[] = []
-    const fn = (() => {
-      const idx = turnIndex
-      turnIndex += 1
-      return (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'dup-sess' }
-        if (idx === 0) await firstTurnGate
-        order.push(idx)
-        yield { type: 'result', subtype: 'success', session_id: 'dup-sess', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      let turn = 0
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          const idx = turn
+          turn += 1
+          yield { type: 'system', subtype: 'init', session_id: 'dup-sess' }
+          if (idx === 0) await firstTurnGate
+          order.push(idx)
+          yield { type: 'result', subtype: 'success', session_id: 'dup-sess', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
+        }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
     }) as unknown as QueryFn
 
     const session = new ClaudeSession({
@@ -952,25 +998,36 @@ describe('ClaudeSession — busy + enqueue', () => {
 })
 
 describe('ClaudeSession — interrupt', () => {
-  it('aborts the current turn via the abortController', async () => {
+  it('interrupts the in-flight turn via Query.interrupt() and stays usable', async () => {
+    // New contract (was: abortController.abort()). interrupt() invokes the held
+    // Query.interrupt(); the SDK flushes the in-flight turn's `result` (per the
+    // Task 1 probe / Task 4 model). Here interrupt() resolves a gate so the turn
+    // emits its result, ending the turn and leaving the session usable.
     const emitted: CoLiveEvent[] = []
-    let capturedSignal!: AbortSignal
+    let interruptCalled = false
     let releaseTurn!: () => void
     const turnGate = new Promise<void>((resolve) => {
       releaseTurn = resolve
     })
 
-    const fn = ((args: { prompt: unknown; options?: any }) => {
-      capturedSignal = args.options.abortController.signal
-      return (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'int-sess' }
-        // Wait until aborted OR released, then end the turn.
-        await new Promise<void>((resolve) => {
-          if (capturedSignal.aborted) return resolve()
-          capturedSignal.addEventListener('abort', () => resolve(), { once: true })
-          turnGate.then(() => resolve())
-        })
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          yield { type: 'system', subtype: 'init', session_id: 'int-sess' }
+          // Block until interrupt() (via the gate) flushes the turn's result.
+          await turnGate
+          // Real Query.interrupt() flushes a NON-SUCCESS result to end the
+          // interrupted turn (verified live — see streaming-input-probe.md).
+          yield { type: 'result', subtype: 'error_during_execution', session_id: 'int-sess', result: '', errors: [{ message: '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null' }], total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
+        }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {
+        // Real Query.interrupt() flushes a result for the in-flight turn.
+        interruptCalled = true
+        releaseTurn()
+      }
+      return q
     }) as unknown as QueryFn
 
     const session = new ClaudeSession({
@@ -984,14 +1041,16 @@ describe('ClaudeSession — interrupt', () => {
     const run = session.run('long task')
     await Promise.resolve()
     expect(session.busy).toBe(true)
-    expect(capturedSignal.aborted).toBe(false)
+    expect(interruptCalled).toBe(false)
 
     session.interrupt()
-    expect(capturedSignal.aborted).toBe(true)
+    expect(interruptCalled).toBe(true)
 
-    releaseTurn()
     await run
+    // session is usable again after interrupt (turn ended on the flushed result)
     expect(session.busy).toBe(false)
+    // a clean interrupt surfaces NO error event (the result framed turn-end)
+    expect(emitted.filter((e) => e.type === 'error')).toEqual([])
   })
 
   it('interrupt is a no-op when idle', async () => {
@@ -1008,22 +1067,36 @@ describe('ClaudeSession — interrupt', () => {
     expect(session.busy).toBe(false)
   })
 
-  it('emits NO error event when an aborted turn throws (the abort guard suppresses it)', async () => {
+  it('emits NO error event when a deliberate interrupt ends the turn', async () => {
+    // New contract (was: an aborted turn THROWS an AbortError and the catch guard
+    // swallows it). In streaming-input mode there is no abortController; a
+    // deliberate Query.interrupt() flushes the in-flight turn's `result` (per the
+    // Task 1 probe / Task 4 model) — so turn-end is framed by that result, not a
+    // thrown abort, and no error event is surfaced.
     const emitted: CoLiveEvent[] = []
-    let capturedSignal!: AbortSignal
-    // The stream throws AFTER abort — exactly the SDK's behavior when a turn is
-    // aborted mid-flight. The catch guard must swallow it (abort is not an error).
-    const fn = ((args: { prompt: unknown; options?: any }) => {
-      capturedSignal = args.options.abortController.signal
-      return (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'ab1' }
-        // Wait until aborted, then throw (as the SDK does on abort).
-        await new Promise<void>((resolve) => {
-          if (capturedSignal.aborted) return resolve()
-          capturedSignal.addEventListener('abort', () => resolve(), { once: true })
-        })
-        throw new Error('AbortError: The operation was aborted')
+    let releaseTurn!: () => void
+    const turnGate = new Promise<void>((resolve) => {
+      releaseTurn = resolve
+    })
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          yield { type: 'system', subtype: 'init', session_id: 'ab1' }
+          // Block until interrupt() (via the gate) flushes the turn's result.
+          await turnGate
+          // Real Query.interrupt() does NOT throw — it flushes a NON-SUCCESS
+          // result (carrying an [ede_diagnostic] error) to end the interrupted
+          // turn. handleResult maps any non-success result to an `error` +
+          // failed-`result` event, so without the interrupt-suppression fix this
+          // surfaces a spurious error banner on Esc (the live regression).
+          yield { type: 'result', subtype: 'error_during_execution', session_id: 'ab1', result: '', errors: [{ message: '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null' }], total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
+        }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {
+        releaseTurn()
+      }
+      return q
     }) as unknown as QueryFn
 
     const session = new ClaudeSession({
@@ -1041,8 +1114,12 @@ describe('ClaudeSession — interrupt', () => {
     session.interrupt()
     await run
 
-    // the abort guard suppressed the throw: NO error event
+    // a deliberate interrupt frames a clean idle: NO error event AND no failed
+    // `result` event are surfaced — pressing Esc is not an error.
     expect(emitted.filter((e) => e.type === 'error')).toEqual([])
+    expect(emitted.filter((e) => e.type === 'result')).toEqual([])
+    // and the turn still ends cleanly: terminal idle emitted, session idle.
+    expect(emitted.filter((e) => e.type === 'status' && e.state === 'idle')).toHaveLength(1)
     expect(session.busy).toBe(false)
   })
 
@@ -1071,6 +1148,74 @@ describe('ClaudeSession — interrupt', () => {
       { type: 'error', message: 'boom from the stream' },
     ])
     expect(session.busy).toBe(false)
+  })
+})
+
+describe('ClaudeSession — clean interrupt', () => {
+  it('interrupt ends the current turn and the session accepts the next prompt on the SAME query', async () => {
+    // Proof of the persistent-query contract: after an interrupt flushes the
+    // in-flight turn's result, the NEXT prompt drives a turn on the SAME query
+    // (no reopen) — `calls` stays length 1.
+    const calls: Array<{ options?: unknown }> = []
+    // Eagerly-created gate (resolver captured synchronously, so interrupt() can
+    // always wake the parked turn-1 generator regardless of microtask timing).
+    const pending: unknown[] = []
+    let wake!: () => void
+    const gate = new Promise<void>((r) => {
+      wake = r
+    })
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: unknown }) => {
+      calls.push({ options: args.options })
+      let turn = 0
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          const which = turn++
+          if (which === 0) {
+            // Turn 1: stream something, then PAUSE on the gate. interrupt()
+            // flushes a `result` (real Query.interrupt() ends the turn) + wakes.
+            yield {
+              type: 'stream_event',
+              event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } },
+            }
+            await gate
+            while (pending.length) yield pending.shift()
+          } else {
+            // Turn 2 (and beyond): no gate — complete immediately so the SAME
+            // query's consumer loop resolves run() without hanging.
+            yield { type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} }
+          }
+        }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {
+        // Real Query.interrupt() flushes a NON-SUCCESS result to end the turn.
+        pending.push({ type: 'result', subtype: 'error_during_execution', session_id: 's', result: '', errors: [{ message: '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null' }], usage: {} })
+        wake()
+      }
+      return q
+    }) as unknown as QueryFn
+
+    const events: string[] = []
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => events.push(e.type),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+
+    const turn1 = session.run('long thing')
+    await Promise.resolve()
+    session.interrupt()
+    await turn1
+
+    // The second prompt runs on the SAME persistent query — no reopen.
+    await session.run('next thing')
+
+    expect(calls).toHaveLength(1)
+    // BOTH turns drove (uniquely proves the 2nd turn ran on the same query, not
+    // just turn 1) — one user_prompt per turn.
+    expect(events.filter((t) => t === 'user_prompt')).toHaveLength(2)
   })
 })
 
@@ -1155,5 +1300,133 @@ describe('ClaudeSession — whenIdentified signal (real id-learning signal)', ()
     await session.start('resumed-id', realpathSync(tmpdir()))
     expect(session.sessionId).toBe('resumed-id')
     await expect(session.whenIdentified()).resolves.toBeUndefined()
+  })
+})
+
+describe('ClaudeSession — persistent streaming query', () => {
+  it('opens ONE query() across N sequential prompts', async () => {
+    const { fn, calls } = fakeQuery([happyTurnMessages('s'), happyTurnMessages('s')])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: () => {},
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('first')
+    await session.run('second')
+    expect(calls).toHaveLength(1) // one query(), two turns
+  })
+
+  it('detects turn-end on the result message and resolves run() per turn', async () => {
+    const events: string[] = []
+    const { fn } = fakeQuery([happyTurnMessages('s'), happyTurnMessages('s')])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => events.push(e.type),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('one')
+    await session.run('two')
+    expect(events.filter((t) => t === 'user_prompt')).toHaveLength(2)
+    expect(events.filter((t) => t === 'result')).toHaveLength(2)
+  })
+
+  it('close() ends the query gracefully — no spurious error event', async () => {
+    // Teardown closes the inbox, which ends the persistent generator gracefully
+    // (the consumer loop completes, it does NOT throw) — so close() must NOT hit
+    // the onConsumerError path and must NOT surface an error event.
+    const emitted: CoLiveEvent[] = []
+    const { fn } = fakeQuery([happyTurnMessages('s-close')])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => emitted.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('one')
+    session.close()
+    // let any consumer-loop completion settle
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(emitted.filter((e) => e.type === 'error')).toEqual([])
+  })
+})
+
+describe('ClaudeSession — self-heal on fatal query error', () => {
+  it('a dead query reopens with resume:<sessionId> on the next prompt', async () => {
+    // open #0 surfaces sess-1 via init, then THROWS -> onConsumerError emits
+    // `error`, marks the query dead, and resolves run('boom'); the next
+    // run('recover') reopens (open #1) carrying resume:'sess-1' (the captured id).
+    const calls: Array<{ options?: { resume?: string } }> = []
+    let openCount = 0
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: { resume?: string } }) => {
+      calls.push({ options: args.options })
+      const which = openCount++
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          if (which === 0) {
+            yield { type: 'system', subtype: 'init', session_id: 'sess-1' }
+            throw new Error('stream blew up')
+          }
+          yield { type: 'result', subtype: 'success', session_id: 'sess-1', result: '', usage: {} }
+        }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
+    }) as unknown as QueryFn
+
+    const events: string[] = []
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => events.push(e.type),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('boom') // opens, captures sess-1 via init, dies -> error + idle, run() resolves
+    await session.run('recover') // reopens with resume:sess-1
+    expect(events).toContain('error')
+    expect(calls).toHaveLength(2)
+    expect(calls[1]!.options?.resume).toBe('sess-1')
+  })
+})
+
+describe('ClaudeSession — golden event sequence', () => {
+  it('a thinking+text+tool turn maps to the exact event arc', async () => {
+    // Whole-sequence regression pin: thinking block -> text block -> streamed
+    // tool_use (re-carried by the final assistant message, must NOT double-emit)
+    // -> tool_result -> result. Locks the byte-identical event arc the mapping
+    // emits, so any drift in the normalization is caught.
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'g1' },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'hmm' } } },
+      { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'hi' } } },
+      { type: 'stream_event', event: { type: 'content_block_stop', index: 1 } },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 't1', name: 'Read', input: {} } } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { path: 'a.ts' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'file body', is_error: false }] } },
+      { type: 'result', subtype: 'success', session_id: 'g1', result: 'done', usage: { input_tokens: 5, output_tokens: 7 } },
+    ]
+    const events: unknown[] = []
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => events.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('go')
+    expect(events.map((e: any) => e.type)).toEqual([
+      'user_prompt', 'status', 'status', 'thinking_delta', 'status',
+      'status', 'text_delta', 'status', 'tool_start', 'tool_end', 'result', 'status',
+    ])
   })
 })

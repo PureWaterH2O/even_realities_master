@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { SessionManager } from '../../src/core/sessionManager'
-import type { QueryFn } from '../../src/core/session'
+import type { QueryFn, QueryLike } from '../../src/core/session'
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { TaggedEvent } from '../../src/core/sessionManager'
 
 /** A minimal config the manager needs (mirrors the session/permission slices). */
@@ -17,24 +18,41 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
 }
 
 /**
- * Build a fake SDK `query` fn from scripted per-turn message lists. Each call
- * yields the next turn's messages. Records the prompt + options per call.
+ * Build a persistent-Query fake from scripted per-turn message lists: ONE
+ * query() consumes the inbox, yielding each turn's messages as prompts arrive
+ * (each turn ends with its `result`). Records the `options` per query() OPEN
+ * (once per session, twice only after a reopen) and the text of every pushed
+ * prompt drained from the inbox. interrupt() is a no-op stub.
  */
 function fakeQuery(turns: unknown[][]): {
   fn: QueryFn
-  calls: { prompt: unknown; options: any }[]
+  calls: Array<{ options?: any }>
+  pushed: string[]
 } {
-  const calls: { prompt: unknown; options: any }[] = []
-  let turnIndex = 0
-  const fn = ((args: { prompt: unknown; options?: any }) => {
-    const messages = turns[turnIndex] ?? []
-    turnIndex += 1
-    calls.push({ prompt: args.prompt, options: args.options })
-    return (async function* () {
-      for (const m of messages) yield m
+  const calls: Array<{ options?: any }> = []
+  const pushed: string[] = []
+  const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+    calls.push({ options: args.options })
+    let turn = 0
+    const gen = (async function* () {
+      for await (const msg of args.prompt) {
+        pushed.push(pushedText(msg))
+        const messages = turns[turn] ?? []
+        turn += 1
+        for (const m of messages) yield m
+      }
     })()
+    const q = gen as unknown as QueryLike
+    ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+    return q
   }) as unknown as QueryFn
-  return { fn, calls }
+  return { fn, calls, pushed }
+}
+
+/** Extract the text of a pushed SDKUserMessage (textUserMessage shape). */
+function pushedText(msg: SDKUserMessage): string {
+  const content = (msg as { message?: { content?: unknown } }).message?.content
+  return typeof content === 'string' ? content : ''
 }
 
 /** Drain the microtask queue so an in-flight (ungated) turn runs to completion. */
@@ -147,40 +165,45 @@ describe('SessionManager — delayed init (real SDK timing, not mock timing)', (
     // microtask. A microtask busy-spin exits before this lands and fabricates a
     // `local:<uuid>` id; the real signal (whenIdentified) must wait for it.
     const tagged: TaggedEvent[] = []
-    const fn = ((args: { prompt: unknown; options?: any }) => {
-      const text = String(args.prompt)
-      return (async function* () {
-        // Delay the init past the microtask queue (the real first-turn lag).
-        await new Promise((r) => setTimeout(r, 5))
-        yield { type: 'system', subtype: 'init', session_id: 'REAL-ID' }
-        yield {
-          type: 'stream_event',
-          event: {
-            type: 'content_block_start',
-            index: 0,
-            content_block: { type: 'text' },
-          },
-        }
-        yield {
-          type: 'stream_event',
-          event: {
-            type: 'content_block_delta',
-            index: 0,
-            delta: { type: 'text_delta', text },
-          },
-        }
-        yield { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }
-        yield {
-          type: 'result',
-          subtype: 'success',
-          session_id: 'REAL-ID',
-          result: text,
-          total_cost_usd: 0,
-          num_turns: 1,
-          duration_ms: 1,
-          usage: { input_tokens: 0, output_tokens: 0 },
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      const gen = (async function* () {
+        for await (const msg of args.prompt) {
+          const text = pushedText(msg)
+          // Delay the init past the microtask queue (the real first-turn lag).
+          await new Promise((r) => setTimeout(r, 5))
+          yield { type: 'system', subtype: 'init', session_id: 'REAL-ID' }
+          yield {
+            type: 'stream_event',
+            event: {
+              type: 'content_block_start',
+              index: 0,
+              content_block: { type: 'text' },
+            },
+          }
+          yield {
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta',
+              index: 0,
+              delta: { type: 'text_delta', text },
+            },
+          }
+          yield { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'REAL-ID',
+            result: text,
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          }
         }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
     }) as unknown as QueryFn
 
     const mgr = new SessionManager({ config: makeConfig(), query: fn })
@@ -216,29 +239,39 @@ describe('SessionManager — delayed init (real SDK timing, not mock timing)', (
     expect(types).toContain('result')
   })
 
-  it('re-keys to the real id even when init is delayed, so resume passes the real id', async () => {
-    // A second prompt at the learned id must resume that transcript — proving the
-    // map was re-keyed to the real id (not stranded under a local: placeholder).
+  it('re-keys to the real id even when init is delayed; a second prompt continues the same live query', async () => {
+    // A second prompt at the learned id must reach the SAME live session — proving
+    // the map was re-keyed to the real id (not stranded under a local:
+    // placeholder). With the persistent streaming query, a live idle session keeps
+    // its query OPEN, so the second prompt is PUSHED onto the same inbox (no
+    // reopen, no per-turn resume) and the SDK continues the same transcript.
     const resumeArgs: (string | undefined)[] = []
+    const pushed: string[] = []
     let turn = 0
-    const fn = ((args: { prompt: unknown; options?: any }) => {
-      const idx = turn
-      turn += 1
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
       resumeArgs.push(args.options?.resume)
-      return (async function* () {
-        if (idx === 0) await new Promise((r) => setTimeout(r, 5))
-        yield { type: 'system', subtype: 'init', session_id: 'DELAYED-ID' }
-        yield {
-          type: 'result',
-          subtype: 'success',
-          session_id: 'DELAYED-ID',
-          result: '',
-          total_cost_usd: 0,
-          num_turns: 1,
-          duration_ms: 1,
-          usage: { input_tokens: 0, output_tokens: 0 },
+      const gen = (async function* () {
+        for await (const msg of args.prompt) {
+          pushed.push(pushedText(msg))
+          const idx = turn
+          turn += 1
+          if (idx === 0) await new Promise((r) => setTimeout(r, 5))
+          yield { type: 'system', subtype: 'init', session_id: 'DELAYED-ID' }
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'DELAYED-ID',
+            result: '',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          }
         }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
     }) as unknown as QueryFn
 
     const mgr = new SessionManager({ config: makeConfig(), query: fn })
@@ -249,10 +282,13 @@ describe('SessionManager — delayed init (real SDK timing, not mock timing)', (
     expect(mgr.getStatus('DELAYED-ID')).toBe('idle')
 
     const again = await mgr.prompt(id, 'second', makeConfig().projectDir)
+    // the map was re-keyed to the real id: the second prompt found the live session.
     expect(again).toBe('DELAYED-ID')
     await drain()
-    // the second turn resumed the REAL id (not a local: placeholder).
-    expect(resumeArgs[1]).toBe('DELAYED-ID')
+    // ONE persistent query() opened (fresh, so no resume); the second prompt was
+    // pushed onto the same inbox — the SDK saw BOTH prompts on one open query.
+    expect(resumeArgs).toEqual([undefined])
+    expect(pushed).toEqual(['first', 'second'])
   })
 })
 
@@ -267,26 +303,32 @@ describe('SessionManager — same-session serialization (M0 co-live finding)', (
 
     let turnIndex = 0
     const order: string[] = []
-    const calls: { prompt: unknown }[] = []
-    const fn = ((args: { prompt: unknown; options?: any }) => {
-      const idx = turnIndex
-      turnIndex += 1
-      calls.push({ prompt: args.prompt })
-      return (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'co-live' }
-        if (idx === 0) await firstGate
-        order.push(String(args.prompt))
-        yield {
-          type: 'result',
-          subtype: 'success',
-          session_id: 'co-live',
-          result: '',
-          total_cost_usd: 0,
-          num_turns: 1,
-          duration_ms: 1,
-          usage: { input_tokens: 0, output_tokens: 0 },
+    const calls: Array<{ options?: any }> = []
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      calls.push({ options: args.options })
+      const gen = (async function* () {
+        for await (const msg of args.prompt) {
+          const idx = turnIndex
+          turnIndex += 1
+          const text = pushedText(msg)
+          yield { type: 'system', subtype: 'init', session_id: 'co-live' }
+          if (idx === 0) await firstGate
+          order.push(text)
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'co-live',
+            result: '',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          }
         }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
     }) as unknown as QueryFn
 
     const mgr = new SessionManager({ config: makeConfig(), query: fn })
@@ -297,28 +339,34 @@ describe('SessionManager — same-session serialization (M0 co-live finding)', (
 
     expect(id).toBe('co-live')
     expect(mgr.getStatus(id!)).toBe('busy')
-    // only the first query has started.
+    // ONE persistent query has opened.
     expect(calls).toHaveLength(1)
 
-    // Second prompt to the SAME id while busy → enqueued, no new query yet.
+    // Second prompt to the SAME id while busy → enqueued onto the FIFO, NOT a new
+    // query (the persistent query stays open).
     const secondId = await mgr.prompt(id, 'second', makeConfig().projectDir)
     expect(secondId).toBe('co-live')
     expect(calls).toHaveLength(1)
 
-    // Release the first; both turns now drain in FIFO order.
+    // Release the first; both turns now drain in FIFO order on the same query.
     releaseFirst()
     // allow the queue to drain
     for (let i = 0; i < 30; i++) await Promise.resolve()
 
-    expect(calls).toHaveLength(2)
+    // still ONE query() OPEN; both prompts ran on it, in FIFO order.
+    expect(calls).toHaveLength(1)
     expect(order).toEqual(['first', 'second'])
     expect(mgr.getStatus(id!)).toBe('idle')
   })
 })
 
 describe('SessionManager — resume an existing-id session', () => {
-  it('resumes (passes the id to query.resume) when prompted with a known id that is idle', async () => {
-    const { fn, calls } = fakeQuery([happyTurn('known-id', 'a'), happyTurn('known-id', 'b')])
+  it('continues the same live query when prompted with a known id that is idle', async () => {
+    // (Was: a second turn passed query.resume === id.) With the persistent
+    // streaming query, a LIVE idle session keeps its query OPEN — so a second
+    // prompt at the same id pushes onto the same inbox and the SDK continues the
+    // same transcript, rather than reopening with a per-turn resume.
+    const { fn, calls, pushed } = fakeQuery([happyTurn('known-id', 'a'), happyTurn('known-id', 'b')])
     const mgr = new SessionManager({ config: makeConfig(), query: fn })
 
     const id = await mgr.prompt(undefined, 'first', makeConfig().projectDir)
@@ -326,11 +374,14 @@ describe('SessionManager — resume an existing-id session', () => {
     await drain()
     expect(mgr.getStatus(id!)).toBe('idle')
 
-    // a second prompt at the same id (now idle) resumes that transcript.
+    // a second prompt at the same id (now idle) continues that live transcript.
     await mgr.prompt(id, 'again', makeConfig().projectDir)
     await drain()
-    expect(calls).toHaveLength(2)
-    expect(calls[1].options.resume).toBe('known-id')
+    // ONE persistent query() OPEN (fresh start, so no per-turn resume); BOTH
+    // prompts reached the SDK on that one open query, in order.
+    expect(calls).toHaveLength(1)
+    expect(calls[0].options.resume).toBeUndefined()
+    expect(pushed).toEqual(['first', 'again'])
   })
 
   it('resumes a COLD on-disk session: an id never created in this manager → query.resume === that id', async () => {
@@ -372,26 +423,31 @@ describe('SessionManager — respondPermission / respondQuestion routing', () =>
     // turn proceeds only once the manager routes the decision back in. The fake
     // query drives canUseTool itself (as the SDK does) and records the result.
     const tagged: TaggedEvent[] = []
-    const wrapped = ((args: { prompt: unknown; options?: any }) => {
-      return (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'perm-sess' }
-        const decision = await args.options.canUseTool(
-          'Read',
-          { file_path: 'x' },
-          { signal: args.options.abortController.signal, toolUseID: 'tu-1' },
-        )
-        ;(wrapped as any).__decision = decision
-        yield {
-          type: 'result',
-          subtype: 'success',
-          session_id: 'perm-sess',
-          result: '',
-          total_cost_usd: 0,
-          num_turns: 1,
-          duration_ms: 1,
-          usage: { input_tokens: 0, output_tokens: 0 },
+    const wrapped = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          yield { type: 'system', subtype: 'init', session_id: 'perm-sess' }
+          const decision = await args.options.canUseTool(
+            'Read',
+            { file_path: 'x' },
+            { signal: new AbortController().signal, toolUseID: 'tu-1' },
+          )
+          ;(wrapped as any).__decision = decision
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'perm-sess',
+            result: '',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          }
         }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
     }) as unknown as QueryFn
 
     const mgr = new SessionManager({ config: makeConfig(), query: wrapped })
@@ -419,26 +475,31 @@ describe('SessionManager — respondPermission / respondQuestion routing', () =>
 
   it('routes a question answer to the right session broker', async () => {
     const tagged: TaggedEvent[] = []
-    const wrapped = ((args: { prompt: unknown; options?: any }) => {
-      return (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'q-sess' }
-        const decision = await args.options.canUseTool(
-          'AskUserQuestion',
-          { questions: [{ question: 'pick', options: [{ label: 'A' }] }] },
-          { signal: args.options.abortController.signal, toolUseID: 'q-1' },
-        )
-        ;(wrapped as any).__decision = decision
-        yield {
-          type: 'result',
-          subtype: 'success',
-          session_id: 'q-sess',
-          result: '',
-          total_cost_usd: 0,
-          num_turns: 1,
-          duration_ms: 1,
-          usage: { input_tokens: 0, output_tokens: 0 },
+    const wrapped = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          yield { type: 'system', subtype: 'init', session_id: 'q-sess' }
+          const decision = await args.options.canUseTool(
+            'AskUserQuestion',
+            { questions: [{ question: 'pick', options: [{ label: 'A' }] }] },
+            { signal: new AbortController().signal, toolUseID: 'q-1' },
+          )
+          ;(wrapped as any).__decision = decision
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'q-sess',
+            result: '',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          }
         }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
     }) as unknown as QueryFn
 
     const mgr = new SessionManager({ config: makeConfig(), query: wrapped })
@@ -466,22 +527,40 @@ describe('SessionManager — respondPermission / respondQuestion routing', () =>
 })
 
 describe('SessionManager — interrupt / getStatus', () => {
-  it('interrupt aborts the in-flight turn for that session', async () => {
-    let capturedSignal!: AbortSignal
+  it('interrupts the in-flight turn for that session via Query.interrupt()', async () => {
+    // New contract (was: abortController.abort()). mgr.interrupt(id) routes to
+    // the owning session's Query.interrupt(); the SDK flushes the in-flight turn's
+    // `result` (per the Task 1 probe / Task 4 model). Here interrupt() resolves a
+    // gate so the gated turn emits its result, returning the session to idle.
+    let interruptCalled = false
     let releaseTurn!: () => void
     const gate = new Promise<void>((resolve) => {
       releaseTurn = resolve
     })
-    const fn = ((args: { prompt: unknown; options?: any }) => {
-      capturedSignal = args.options.abortController.signal
-      return (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'int-sess' }
-        await new Promise<void>((resolve) => {
-          if (capturedSignal.aborted) return resolve()
-          capturedSignal.addEventListener('abort', () => resolve(), { once: true })
-          gate.then(() => resolve())
-        })
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: any }) => {
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          yield { type: 'system', subtype: 'init', session_id: 'int-sess' }
+          // Block until interrupt() (via the gate) flushes the turn's result.
+          await gate
+          yield {
+            type: 'result',
+            subtype: 'success',
+            session_id: 'int-sess',
+            result: '',
+            total_cost_usd: 0,
+            num_turns: 1,
+            duration_ms: 1,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          }
+        }
       })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {
+        interruptCalled = true
+        releaseTurn()
+      }
+      return q
     }) as unknown as QueryFn
 
     const mgr = new SessionManager({ config: makeConfig(), query: fn })
@@ -490,12 +569,11 @@ describe('SessionManager — interrupt / getStatus', () => {
     const id = await runP // resolves with id once the init message surfaces
     expect(id).toBe('int-sess')
     expect(mgr.getStatus(id!)).toBe('busy')
-    expect(capturedSignal.aborted).toBe(false)
+    expect(interruptCalled).toBe(false)
 
     mgr.interrupt(id!)
-    expect(capturedSignal.aborted).toBe(true)
+    expect(interruptCalled).toBe(true)
 
-    releaseTurn()
     for (let i = 0; i < 10; i++) await Promise.resolve()
     expect(mgr.getStatus(id!)).toBe('idle')
   })
