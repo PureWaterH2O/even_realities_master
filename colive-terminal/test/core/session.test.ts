@@ -1201,7 +1201,9 @@ describe('ClaudeSession — clean interrupt', () => {
     await session.run('next thing')
 
     expect(calls).toHaveLength(1)
-    expect(events).toContain('user_prompt')
+    // BOTH turns drove (uniquely proves the 2nd turn ran on the same query, not
+    // just turn 1) — one user_prompt per turn.
+    expect(events.filter((t) => t === 'user_prompt')).toHaveLength(2)
   })
 })
 
