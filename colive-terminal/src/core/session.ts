@@ -144,6 +144,14 @@ export class ClaudeSession {
   private inbox: PromptInbox | undefined
   /** True once a fatal consumer error killed the query; next run() reopens with resume. */
   private dead = false
+  /**
+   * True between a deliberate interrupt() and the turn-end it triggers. The real
+   * SDK ends an interrupted turn by flushing a NON-SUCCESS `result` (not a throw);
+   * this flag tells the consumer loop to frame a clean idle for that result and
+   * surface NO error/failed-result — pressing Esc is not an error. Reset on every
+   * turn-end so it can never leak into a later turn.
+   */
+  private interrupting = false
   /** Resolver for the in-flight turn's run() promise (settled on its `result`). */
   private currentTurnResolve: (() => void) | undefined
 
@@ -272,11 +280,15 @@ export class ClaudeSession {
   }
 
   /**
-   * Interrupt the in-flight turn via Query.interrupt(). No-op when no query is
-   * open. Stays `void` so SessionManager is unchanged. (Streaming-input stop
-   * path — docs/sdk-reference.md.)
+   * Interrupt the in-flight turn via Query.interrupt(). No-op when idle (so it
+   * never marks `interrupting` without a turn to end). Records the intent so the
+   * consumer loop suppresses the SDK's flushed non-success interrupt-result (a
+   * clean idle, no error). Stays `void` so SessionManager is unchanged.
+   * (Streaming-input stop path — docs/sdk-reference.md.)
    */
   interrupt(): void {
+    if (!this._busy) return
+    this.interrupting = true
     void this.q?.interrupt().catch(() => {})
   }
 
@@ -323,8 +335,17 @@ export class ClaudeSession {
     void (async () => {
       try {
         for await (const message of q) {
+          const isResult = isRecord(message) && message.type === 'result'
+          if (isResult && this.interrupting) {
+            // A deliberate Query.interrupt() ends the turn by flushing a
+            // (non-success) result. Match the old abort path: frame a clean idle
+            // and surface NO error or failed-result to the user — pressing Esc is
+            // not an error.
+            this.onTurnEnd()
+            continue
+          }
           this.handleMessage(message)
-          if (isRecord(message) && message.type === 'result') this.onTurnEnd()
+          if (isResult) this.onTurnEnd()
         }
       } catch (err) {
         this.onConsumerError(err)
@@ -358,6 +379,10 @@ export class ClaudeSession {
    * never drift in ordering. (The error path runs its `emit(error)` prefix first.)
    */
   private settleTurnAndDrain(): void {
+    // Clear the interrupt intent on EVERY turn-end path (normal result, the
+    // suppressed interrupt-result, or a fatal error) so it can never leak into a
+    // later turn and silence a legitimate non-success result.
+    this.interrupting = false
     this.stopStatsTimer()
     // If the turn ended without ever surfacing an id, release whenIdentified()
     // so the manager does not wait forever. No-op once already settled by init.

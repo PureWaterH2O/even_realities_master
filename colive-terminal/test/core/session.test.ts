@@ -1016,7 +1016,9 @@ describe('ClaudeSession — interrupt', () => {
           yield { type: 'system', subtype: 'init', session_id: 'int-sess' }
           // Block until interrupt() (via the gate) flushes the turn's result.
           await turnGate
-          yield { type: 'result', subtype: 'success', session_id: 'int-sess', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
+          // Real Query.interrupt() flushes a NON-SUCCESS result to end the
+          // interrupted turn (verified live — see streaming-input-probe.md).
+          yield { type: 'result', subtype: 'error_during_execution', session_id: 'int-sess', result: '', errors: [{ message: '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null' }], total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
         }
       })()
       const q = gen as unknown as QueryLike
@@ -1082,7 +1084,12 @@ describe('ClaudeSession — interrupt', () => {
           yield { type: 'system', subtype: 'init', session_id: 'ab1' }
           // Block until interrupt() (via the gate) flushes the turn's result.
           await turnGate
-          yield { type: 'result', subtype: 'success', session_id: 'ab1', result: '', total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
+          // Real Query.interrupt() does NOT throw — it flushes a NON-SUCCESS
+          // result (carrying an [ede_diagnostic] error) to end the interrupted
+          // turn. handleResult maps any non-success result to an `error` +
+          // failed-`result` event, so without the interrupt-suppression fix this
+          // surfaces a spurious error banner on Esc (the live regression).
+          yield { type: 'result', subtype: 'error_during_execution', session_id: 'ab1', result: '', errors: [{ message: '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null' }], total_cost_usd: 0, num_turns: 1, duration_ms: 1, usage: { input_tokens: 0, output_tokens: 0 } }
         }
       })()
       const q = gen as unknown as QueryLike
@@ -1107,8 +1114,12 @@ describe('ClaudeSession — interrupt', () => {
     session.interrupt()
     await run
 
-    // a deliberate interrupt frames turn-end via the flushed result: NO error event
+    // a deliberate interrupt frames a clean idle: NO error event AND no failed
+    // `result` event are surfaced — pressing Esc is not an error.
     expect(emitted.filter((e) => e.type === 'error')).toEqual([])
+    expect(emitted.filter((e) => e.type === 'result')).toEqual([])
+    // and the turn still ends cleanly: terminal idle emitted, session idle.
+    expect(emitted.filter((e) => e.type === 'status' && e.state === 'idle')).toHaveLength(1)
     expect(session.busy).toBe(false)
   })
 
@@ -1177,7 +1188,8 @@ describe('ClaudeSession — clean interrupt', () => {
       })()
       const q = gen as unknown as QueryLike
       ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {
-        pending.push({ type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} })
+        // Real Query.interrupt() flushes a NON-SUCCESS result to end the turn.
+        pending.push({ type: 'result', subtype: 'error_during_execution', session_id: 's', result: '', errors: [{ message: '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null' }], usage: {} })
         wake()
       }
       return q
