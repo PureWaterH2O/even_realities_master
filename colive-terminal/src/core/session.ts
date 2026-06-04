@@ -335,17 +335,22 @@ export class ClaudeSession {
     void (async () => {
       try {
         for await (const message of q) {
-          const isResult = isRecord(message) && message.type === 'result'
-          if (isResult && this.interrupting) {
-            // A deliberate Query.interrupt() ends the turn by flushing a
-            // (non-success) result. Match the old abort path: frame a clean idle
-            // and surface NO error or failed-result to the user — pressing Esc is
-            // not an error.
+          if (isRecord(message) && message.type === 'result') {
+            // Turn-end. A deliberate Query.interrupt() ends the turn by flushing a
+            // NON-SUCCESS `result`; suppress it (frame a clean idle, surface NO
+            // error/failed-result) — pressing Esc is not an error, matching the old
+            // abort path. A `success` result while interrupting means the turn
+            // naturally completed in a race with the interrupt, so let it through
+            // (handleResult emits it) rather than swallowing real work.
+            if (this.interrupting && message.subtype !== 'success') {
+              this.onTurnEnd()
+              continue
+            }
+            this.handleMessage(message)
             this.onTurnEnd()
             continue
           }
           this.handleMessage(message)
-          if (isResult) this.onTurnEnd()
         }
       } catch (err) {
         this.onConsumerError(err)
