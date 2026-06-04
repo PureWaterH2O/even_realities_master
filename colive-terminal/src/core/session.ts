@@ -2,22 +2,23 @@
  * ClaudeSession — one live `query()` wrapped as a single-owner turn driver that
  * normalizes the SDK message stream into our {@link CoLiveEvent} vocabulary.
  *
- * Responsibilities (Task 1.3 only):
+ * Responsibilities:
  *   - start(sessionId?, cwd): set up the session — resume `sessionId` if given,
  *     else fresh — and realpath the cwd (M0 🧪: `/tmp` -> `/private/tmp` symlink
  *     gotcha) so SDK session-store lookups stay stable.
- *   - run(text): drive one turn via `query()` with our OWNED config
- *     (model / permissionMode / settingSources from config, includePartialMessages,
- *     canUseTool, abortController) and map each SDK message to normalized events
- *     (status / tool_start / tool_end / text_delta / running_stats / result). A
+ *   - run(text): drive a turn via ONE persistent streaming `query()` per session
+ *     (fed by a {@link PromptInbox}) with our OWNED config (model / permissionMode
+ *     / settingSources from config, includePartialMessages, canUseTool). A single
+ *     long-lived consumer loop maps each SDK message to normalized events (status
+ *     / tool_start / tool_end / text_delta / running_stats / result); each turn
+ *     ends on its `result` message (the streaming-input turn-end signal). A
  *     `tool_start` (from a streaming or final tool_use) is paired with a `tool_end`
  *     when the SDK delivers the result as a `type:'user'` / `tool_result` message;
  *     a periodic `running_stats` heartbeat fires every 10s while the turn runs.
  *     A `busy` flag + FIFO queue: a run() issued mid-turn is enqueued and runs
  *     after the current turn drains.
- *   - interrupt(): abort the current turn via its AbortController. v1 uses string
- *     prompts, so `Query.interrupt()` is unavailable (streaming-input only) — the
- *     abort path is the supported stop (see docs/sdk-reference.md).
+ *   - interrupt(): interrupt the in-flight turn via `Query.interrupt()` (the
+ *     streaming-input stop path — see docs/sdk-reference.md).
  *
  * Decoupling: `canUseTool` (permissions — Task 1.4), `emit` (the Hub fan-out —
  * Task 1.5/2.x), and `query` (the SDK driver) are all INJECTED. This class does
@@ -29,24 +30,42 @@
  */
 import { realpathSync } from 'node:fs'
 import { query as sdkQuery } from '@anthropic-ai/claude-agent-sdk'
-import type { CanUseTool, PermissionMode, SettingSource } from '@anthropic-ai/claude-agent-sdk'
+import type {
+  CanUseTool,
+  PermissionMode,
+  SettingSource,
+  SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk'
 import type { CoLiveEvent } from './events'
+import { PromptInbox, textUserMessage } from './promptInbox'
 
 /** Emit callback: the single sink for all normalized events of this session. */
 export type Emit = (event: CoLiveEvent) => void
 
 /**
- * The injectable `query` driver. We type it structurally (an async-iterable of
- * SDK messages) rather than against the heavyweight SDK Beta types: at runtime
- * we only read string discriminator fields off each message. The default is the
- * real SDK `query`; tests substitute a fake.
+ * The streaming Query: the async-iterable of SDK messages + the control methods
+ * we use. We type it structurally (an async-iterable of SDK messages) rather
+ * than against the heavyweight SDK Beta types: at runtime we only read string
+ * discriminator fields off each message.
+ */
+export interface QueryLike extends AsyncIterable<unknown> {
+  interrupt(): Promise<void>
+}
+
+/**
+ * The injectable streaming-input `query` driver. The `prompt` is the persistent
+ * inbox (one per query OPEN), not a per-turn string. The default is the real SDK
+ * `query`; tests substitute a fake.
  */
 export type QueryFn = (args: {
-  prompt: string
+  prompt: AsyncIterable<SDKUserMessage>
   options?: QueryOptions
-}) => AsyncIterable<unknown>
+}) => QueryLike
 
-/** The subset of SDK `Options` we set per turn. */
+/**
+ * The subset of SDK `Options` we set at query-open. (No abortController —
+ * interrupt is Query.interrupt() in streaming-input mode.)
+ */
 export interface QueryOptions {
   model: string
   permissionMode: PermissionMode
@@ -55,7 +74,6 @@ export interface QueryOptions {
   resume?: string
   includePartialMessages: boolean
   canUseTool: CanUseTool
-  abortController: AbortController
   maxTurns?: number
 }
 
@@ -121,8 +139,13 @@ export class ClaudeSession {
    */
   private readonly queue: { text: string; resolve: () => void }[] = []
 
-  /** AbortController for the in-flight turn (so interrupt() can abort it). */
-  private currentAbort: AbortController | undefined
+  /** The held streaming Query + its inbox (one per open). Undefined until first run / after death. */
+  private q: QueryLike | undefined
+  private inbox: PromptInbox | undefined
+  /** True once a fatal consumer error killed the query; next run() reopens with resume. */
+  private dead = false
+  /** Resolver for the in-flight turn's run() promise (settled on its `result`). */
+  private currentTurnResolve: (() => void) | undefined
 
   /**
    * Kind of each currently-open streaming content block, keyed by its `index`,
@@ -243,58 +266,43 @@ export class ClaudeSession {
   async run(text: string): Promise<void> {
     if (this._busy) {
       // Queue and wait until this specific prompt's turn has been driven.
-      return this.enqueue(text)
+      return new Promise<void>((resolve) => this.queue.push({ text, resolve }))
     }
-    await this.driveTurn(text)
-    await this.drainQueue()
+    return new Promise<void>((resolve) => this.beginTurn(text, resolve))
   }
 
   /**
-   * Interrupt the in-flight turn by aborting its AbortController. No-op when idle.
-   * (v1 string-prompt mode: Query.interrupt() is streaming-input only; abort is
-   * the supported stop path — docs/sdk-reference.md.)
+   * Interrupt the in-flight turn via Query.interrupt(). No-op when no query is
+   * open. Stays `void` so SessionManager is unchanged. (Streaming-input stop
+   * path — docs/sdk-reference.md.)
    */
   interrupt(): void {
-    this.currentAbort?.abort()
+    void this.q?.interrupt().catch(() => {})
   }
 
-  /** Queue a prompt and resolve when its own turn has been driven. */
-  private enqueue(text: string): Promise<void> {
-    return new Promise<void>((resolve) => {
-      this.queue.push({ text, resolve })
-    })
-  }
-
-  /** Drain the FIFO queue, driving each queued prompt's turn in order. */
-  private async drainQueue(): Promise<void> {
-    let next = this.queue.shift()
-    while (next !== undefined) {
-      await this.driveTurn(next.text)
-      next.resolve()
-      next = this.queue.shift()
-    }
-  }
-
-  /**
-   * Drive exactly one turn: emit the prompt echo, build per-turn options, then
-   * iterate the SDK stream, mapping each message to normalized events.
-   */
-  private async driveTurn(text: string): Promise<void> {
+  /** Begin a turn: per-turn resets, ensure the query is open, push the prompt. */
+  private beginTurn(text: string, resolve: () => void): void {
     this._busy = true
-    this.emit({ type: 'user_prompt', text })
-    this.emit({ type: 'status', state: 'busy' })
+    this.currentTurnResolve = resolve
     this.idleEmitted = false
-
-    const abortController = new AbortController()
-    this.currentAbort = abortController
     this.openBlocks.clear()
     this.announcedToolIds.clear()
     this.openTools.clear()
     this.inputTokens = 0
     this.outputTokens = 0
     this.turnStartedAt = this.clock.now()
+    this.emit({ type: 'user_prompt', text })
+    this.emit({ type: 'status', state: 'busy' })
     this.startStatsTimer()
+    this.ensureQueryOpen()
+    this.inbox!.push(textUserMessage(text))
+  }
 
+  /** Open the persistent query (lazy / after death) and start its consumer loop. */
+  private ensureQueryOpen(): void {
+    if (this.q !== undefined && !this.dead) return
+    this.dead = false
+    this.inbox = new PromptInbox()
     const options: QueryOptions = {
       model: this.config.model,
       permissionMode: this.config.permissionMode,
@@ -302,36 +310,84 @@ export class ClaudeSession {
       cwd: this.cwd ?? realpathSync(process.cwd()),
       includePartialMessages: true,
       canUseTool: this.canUseTool,
-      abortController,
       ...(this._sessionId !== undefined ? { resume: this._sessionId } : {}),
       ...(this.config.maxTurns !== undefined ? { maxTurns: this.config.maxTurns } : {}),
     }
+    const q = this.query({ prompt: this.inbox, options })
+    this.q = q
+    this.startConsumer(q)
+  }
 
-    try {
-      const stream = this.query({ prompt: text, options })
-      for await (const message of stream) {
-        this.handleMessage(message)
+  /** The single long-lived loop: map every message; detect turn-end on `result`. */
+  private startConsumer(q: QueryLike): void {
+    void (async () => {
+      try {
+        for await (const message of q) {
+          this.handleMessage(message)
+          if (isRecord(message) && message.type === 'result') this.onTurnEnd()
+        }
+      } catch (err) {
+        this.onConsumerError(err)
       }
-    } catch (err) {
-      // An aborted turn throws here; that is a normal interrupt, not an error to
-      // surface. Anything else becomes an error event.
-      if (!abortController.signal.aborted) {
-        this.emit({ type: 'error', message: errorMessage(err) })
-      }
-    } finally {
-      this.stopStatsTimer()
-      this.currentAbort = undefined
-      this._busy = false
-      // If the turn ended without ever surfacing an id (e.g. an immediate stream
-      // error or interrupt before init), release whenIdentified() so the manager
-      // does not wait forever. No-op once already settled by the init message.
-      this.settleIdentified()
-      // Reliable turn-over signal. In string-prompt mode the SDK does NOT send a
-      // session_state_changed:idle — the stream just ends here — so emit the
-      // terminal `status: idle` the Even app needs to clear "thinking…" (deduped
-      // against a session_state_changed:idle that may already have emitted it).
-      this.emitIdle()
-    }
+    })()
+  }
+
+  /** Turn-end (on `result`): close out the turn, resolve run(), drain the FIFO. */
+  private onTurnEnd(): void {
+    this.settleTurnAndDrain()
+  }
+
+  /**
+   * Fatal consumer error: surface an `error` event, mark the query dead and drop
+   * the handles, then settle the turn. The next `run()` reopens with `resume`
+   * (lazy self-heal — spec §2 Option 1).
+   */
+  private onConsumerError(err: unknown): void {
+    this.dead = true
+    this.q = undefined
+    this.inbox = undefined
+    this.emit({ type: 'error', message: errorMessage(err) })
+    this.settleTurnAndDrain()
+  }
+
+  /**
+   * Shared turn-close, used by both the normal `result` turn-end and the
+   * fatal-error path: stop the stats heartbeat, settle whenIdentified(), emit the
+   * terminal idle, resolve this prompt's run(), then drain the FIFO (begin the
+   * next queued turn). Keeping this single-sourced means the two exit paths can
+   * never drift in ordering. (The error path runs its `emit(error)` prefix first.)
+   */
+  private settleTurnAndDrain(): void {
+    this.stopStatsTimer()
+    // If the turn ended without ever surfacing an id, release whenIdentified()
+    // so the manager does not wait forever. No-op once already settled by init.
+    this.settleIdentified()
+    // Reliable turn-over signal. In string-prompt mode the SDK does NOT send a
+    // session_state_changed:idle — so emit the terminal `status: idle` the Even
+    // app needs to clear "thinking…" (deduped against a session_state_changed
+    // :idle that may already have emitted it).
+    this.emitIdle()
+    this._busy = false
+    const resolve = this.currentTurnResolve
+    this.currentTurnResolve = undefined
+    resolve?.()
+    const next = this.queue.shift()
+    if (next !== undefined) this.beginTurn(next.text, next.resolve)
+  }
+
+  /**
+   * Close the persistent query (session teardown / new-session reset). Ends the
+   * consumer loop gracefully via `inbox.close()` (done:true), so it never trips
+   * `onConsumerError`. Intentionally caller-less in M3.3a: per the plan boundary
+   * a session's query lives until process exit (no per-session GC) — session
+   * eviction / a `/clear` reset that calls this is M3.4's concern.
+   */
+  close(): void {
+    this.inbox?.close()
+    this.q = undefined
+    this.inbox = undefined
+    this.dead = false
+    this.stopStatsTimer()
   }
 
   /** Emit the terminal `status: idle` at most once per turn. */
