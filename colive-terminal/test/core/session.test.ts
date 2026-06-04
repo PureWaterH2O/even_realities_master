@@ -1380,3 +1380,39 @@ describe('ClaudeSession — self-heal on fatal query error', () => {
     expect(calls[1]!.options?.resume).toBe('sess-1')
   })
 })
+
+describe('ClaudeSession — golden event sequence', () => {
+  it('a thinking+text+tool turn maps to the exact event arc', async () => {
+    // Whole-sequence regression pin: thinking block -> text block -> streamed
+    // tool_use (re-carried by the final assistant message, must NOT double-emit)
+    // -> tool_result -> result. Locks the byte-identical event arc the mapping
+    // emits, so any drift in the normalization is caught.
+    const messages = [
+      { type: 'system', subtype: 'init', session_id: 'g1' },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'hmm' } } },
+      { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'hi' } } },
+      { type: 'stream_event', event: { type: 'content_block_stop', index: 1 } },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 't1', name: 'Read', input: {} } } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { path: 'a.ts' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'file body', is_error: false }] } },
+      { type: 'result', subtype: 'success', session_id: 'g1', result: 'done', usage: { input_tokens: 5, output_tokens: 7 } },
+    ]
+    const events: unknown[] = []
+    const { fn } = fakeQuery([messages])
+    const session = new ClaudeSession({
+      config: makeConfig(),
+      emit: (e) => events.push(e),
+      canUseTool: stubCanUseTool,
+      query: fn,
+    })
+    await session.start(undefined, realpathSync(tmpdir()))
+    await session.run('go')
+    expect(events.map((e: any) => e.type)).toEqual([
+      'user_prompt', 'status', 'status', 'thinking_delta', 'status',
+      'status', 'text_delta', 'status', 'tool_start', 'tool_end', 'result', 'status',
+    ])
+  })
+})
