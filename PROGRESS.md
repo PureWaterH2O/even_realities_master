@@ -5,7 +5,7 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-03
 
-### Co-Live Terminal M3.2B — 🔧 `@`-file autocomplete + `!`bash — candidate BUILT (branch, NOT merged; awaiting planner validation + hardware UAT)
+### Co-Live Terminal M3.2B — ✅ `@`-file autocomplete + `!`bash — HARDWARE UAT C1–C6 PASS (branch, NOT merged; awaiting planner validation + merge)
 
 - **Scope (desk-only, zero Core/Hub change):** typing `@` opens a **mid-line** fuzzy file-path menu that inserts a
   repo-relative `@path` (Claude reads it with its **Read** tool); a `!`-line is delegated to Claude's **Bash** tool
@@ -26,11 +26,15 @@ built, what we decided. Newest entries on top.
   `switch (result.command)` narrows by **elimination**, so the new member dropped `.message`/`.view`/`.mode`. Resolved
   with a minimal placeholder `bash` guard in Task 5, replaced by the real dispatch in Task 7. (Lesson: adding a union
   member is NOT free under elimination-style narrowing.)
-- **Open risk (spec §6 R1):** `@`-mention auto-read relies on Claude's *initiative* (raw-SDK Core has no CC harness to
-  inject file contents) → the **C1/C2 hardware checkpoint**; the fix (a faint desk-appended "please read" nudge) ships
-  **only if UAT shows it's needed** (YAGNI). UAT runbook: `projects/colive-terminal/m3.2b-uat-runbook.md` (C1–C6).
-- **NOT merged** — handed back to the planning chat for spec→claims→code validation before hardware UAT. Branch
-  `colive-terminal-m3.2b`, 9 commits (`b43fe2d`…`ced735e`).
+- **✅ Hardware UAT — C1–C6 ALL PASS (2026-06-03, user, real G2 + R1).** The mid-line `@` pick + read, two-`@` lines,
+  `!`bash permission round-trip, popup nav + no `/`-vs-`@` collision, ignored-file exclusion, and the write-vs-read
+  permission flows all work perfectly.
+- **Spec §6 R1 — ✅ RESOLVED:** the one real risk was whether Claude *auto-reads* an `@`-mention (raw-SDK Core has no CC
+  harness to inject contents). **C1/C2 passed — Claude auto-read the mentioned file(s)** — so the desk-appended "please
+  read" nudge is **not needed** and was not shipped (YAGNI holds). Runbook signed off:
+  `projects/colive-terminal/m3.2b-uat-runbook.md`.
+- **NOT merged by the build chat** (per instruction) — handed to the planning chat for spec→claims→code validation, then
+  merge (hardware UAT already signed off). Branch `colive-terminal-m3.2b`, 9 commits (`b43fe2d`…`ced735e`).
 
 ### Co-Live Terminal M3.2A — ✅ mouse-history-leak fix VALIDATED + MERGED (`2370b25`); copy/paste phase DESCOPED
 

@@ -1,7 +1,7 @@
 # Co-Live Terminal — Status
 
-**Current state:** 🔧 **M3.2B "`@`-file autocomplete + `!`bash" — candidate BUILT, NOT merged; awaiting planner
-validation + hardware UAT.** Branch `colive-terminal-m3.2b` (off `main`), 9 commits (`b43fe2d`…`ced735e`), built via
+**Current state:** ✅🔧 **M3.2B "`@`-file autocomplete + `!`bash" — HARDWARE UAT C1–C6 PASS (2026-06-03); awaiting
+planner validation + merge (NOT merged by build chat).** Branch `colive-terminal-m3.2b` (off `main`), built via
 subagent-driven TDD (10 tasks: impl → spec-compliance review → code-quality review per task; final whole-branch review
 APPROVED FOR HANDBACK). Two **desk-only** typing aids that produce clean text Claude acts on:
 - **`@`-file (mid-line):** `@` opens a fuzzy file-path menu (`git ls-files`, walk fallback, cached once/session;
@@ -19,11 +19,13 @@ APPROVED FOR HANDBACK). Two **desk-only** typing aids that produce clean text Cl
   narrows by elimination → new member dropped `.message`/`.view`/`.mode`); fixed via a placeholder in Task 5 → real
   dispatch in Task 7.
 
-**Open risk (spec §6 R1):** `@`-mention auto-read relies on Claude's *initiative* (raw-SDK Core, no CC harness to inject
-contents) → the **C1/C2 hardware checkpoint**; fix (a faint desk-appended "please read" nudge) ships only if UAT shows
-it's needed (YAGNI). **UAT runbook:** `projects/colive-terminal/m3.2b-uat-runbook.md` (C1–C6).
+**Spec §6 R1 — ✅ RESOLVED in UAT:** `@`-mention auto-read relies on Claude's *initiative* (raw-SDK Core, no CC harness
+to inject contents). **C1/C2 PASSED on hardware — Claude auto-read the mentioned file(s)** — so the desk-appended "please
+read" nudge was **not needed** and not shipped (YAGNI holds). **UAT runbook (signed off):**
+`projects/colive-terminal/m3.2b-uat-runbook.md` (C1–C6 all PASS, R1 auto-read YES).
 
-**Next:** planning chat does the spec→claims→code validation, then hardware UAT (C1–C6), then merge.
+**Next:** planning chat does the spec→claims→code validation, then merges (hardware UAT already signed off). Build chat
+will NOT push/merge (per instruction).
 
 _Previously:_ ✅ **M3.2A "Composer" DONE — merged to `main` `278f7c8` (planner-validated 2026-06-03)** (multiline/cursor/
 word nav, per-project history, paste, mouse-wheel scroll, slash menu, `/select`·`/scroll` toggle; zero Core/Hub change;
