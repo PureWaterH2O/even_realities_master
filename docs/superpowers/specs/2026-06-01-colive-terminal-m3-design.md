@@ -149,14 +149,15 @@ Each rung carries a written UAT run-book; bugs found on hardware are fixed and r
 
 | Rung | Contents | Core change | Acceptance (hardware-UAT) |
 |---|---|---|---|
-| **M3.1 — Readable transcript** | scrollback viewport, diff/syntax, Ctrl-O expand, markdown, todos panel, **thinking display** | tiny (thinking event) | read a real multi-tool session end-to-end: scroll back, expand a tool, see a diff + the thinking |
-| **M3.2 — Input & autocomplete** | editor (cursor / history / multiline / paste), slash menu, `@`-file autocomplete, `!`bash | none | compose a real multiline prompt with file refs without friction; recall history |
-| **M3.3 — Streaming-input Core + controls** | **the refactor** → `/compact`, `/model`, mode toggle / plan mode, MCP, **image paste**, clean interrupt, `settingSources` flip (+ skills loading) | **big** | flip mode mid-session, switch model, run `/compact`, paste an image, load a skill — all on hardware |
-| **M3.4 — Multi-session** | session command-center (status badges) + live file-watch pane + **message source tags** (`[glasses]`/`[mac]` provenance; adds `source` to `user_prompt`) | some (+ `source` event field) | run ≥2 chats; glance the dashboard; jump between; watch files change; **see colored source tags distinguishing glasses- vs desk-sent messages** |
-| **M3.5 — Aesthetic pass** | theming / polish gate (aesthetics also folded into each rung) | none | "I want to look at this all day" sign-off |
+| **M3.1 — Readable transcript** ✅ | scrollback viewport, diff/syntax, Ctrl-O expand, markdown, todos panel, **thinking display** | tiny (thinking event) | read a real multi-tool session end-to-end: scroll back, expand a tool, see a diff + the thinking |
+| **M3.2 — Input & autocomplete** ✅ | editor (cursor / history / multiline / paste), slash menu, `@`-file autocomplete, `!`bash | none | compose a real multiline prompt with file refs without friction; recall history |
+| **M3.3 — Streaming-input Core + controls** ✅ | **the refactor** → `/model`, mode toggle / plan mode, clean interrupt, `settingSources` flip deferred | **big** | flip mode mid-session, switch model — all on hardware |
+| **M3.5 — Aesthetic pass** 🟨 | **Reordered before M3.4.** Reference-frame comparison system (25 scenarios); systematic native-parity rendering fixes; customization brainstorm. | none | "indistinguishable at a glance" from native Claude Code in the same VS Code terminal |
+| **M3.4 — Multi-session** *(deferred — revisit after M3.5)* | session command-center (status badges) + live file-watch pane + **message source tags** (`[glasses]`/`[mac]` provenance; adds `source` to `user_prompt`) | some (+ `source` event field) | run ≥2 chats; glance the dashboard; jump between; watch files change; **see colored source tags distinguishing glasses- vs desk-sent messages** |
 
 After **M3.1 + M3.2** the cockpit is a usable daily driver (readable + typeable) *before* the risky refactor.
-Aesthetics are folded into every rung; M3.5 is the final polish gate, not the only place polish happens.
+
+> **2026-06-06 reorder:** M3.5 moved ahead of M3.4. The aesthetic pass will significantly reshape the desk rendering layer, so it makes sense to achieve visual parity first and then decide what M3.4 (multi-session) looks like on the new foundation. M3.4's necessity and scope will be revisited after M3.5 ships.
 
 ## 8. Risks
 

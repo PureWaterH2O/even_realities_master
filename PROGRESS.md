@@ -5,6 +5,14 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-06
 
+### Co-Live Terminal M3.5 — 🟨 Aesthetic pass — STARTED (reordered before M3.4)
+
+- **Decision:** M3.5 (aesthetic pass) moved ahead of M3.4 (multi-session). The rendering layer will change significantly during parity work, so it makes sense to nail the visual foundation first and revisit M3.4's scope afterward.
+- **Approach:** Reference Frame Catalog + Replay Harness — 25 scenarios comparing native Claude screenshots against our desk's replay frames. Differences cataloged → fixed by element group → UAT → customization brainstorm.
+- **Spec:** `docs/superpowers/specs/2026-06-06-colive-terminal-m3.5-aesthetic-pass-design.md`
+- **Plan:** `docs/superpowers/plans/2026-06-06-colive-terminal-m3.5-aesthetic-pass.md`
+- **Builder Run 1 (Tasks 1-5):** comparison infrastructure — in progress (4.8 ultracode).
+
 ### Co-Live Terminal M3.3b — ✅ HARDWARE UAT PASS (owner sign-off) → runtime controls SHIP (merged to `main` via `--no-ff`)
 
 - **Owner hardware UAT (2026-06-06): PASS — ship M3.3b desk controls.** Re-verified green before merge against tool output (not the notes): `npx tsc --noEmit` exit 0; `npx vitest run` **476 passed / 43 files**; additive invariant re-checked — `events.ts`/`sse.ts` **0-line diff vs main** (glasses byte-compat). 13 commits `main..branch`.

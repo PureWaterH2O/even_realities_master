@@ -1,6 +1,16 @@
 # Co-Live Terminal — Status
 
-**Current state:** ✅ **M3.3b "Runtime controls" — DONE + SHIPPED: owner hardware UAT PASS (2026-06-06),
+**Current state:** 🟨 **M3.5 "Aesthetic pass" — IN PROGRESS (reordered before M3.4, 2026-06-06).** Systematic
+native-parity rendering pass: reference-frame comparison system (25 scenarios, snap.sh capture helper, replay harness
+extension) → difference catalog → element-by-element rendering fixes → UAT → customization brainstorm. Fidelity target:
+"indistinguishable at a glance" from native Claude Code in the same VS Code terminal. Builder Run 1 (comparison
+infrastructure, Tasks 1-5) in progress. M3.4 deferred — scope to be revisited after M3.5 ships.
+- **Spec:** `docs/superpowers/specs/2026-06-06-colive-terminal-m3.5-aesthetic-pass-design.md`
+- **Plan:** `docs/superpowers/plans/2026-06-06-colive-terminal-m3.5-aesthetic-pass.md`
+
+---
+
+_Previously:_ ✅ **M3.3b "Runtime controls" — DONE + SHIPPED: owner hardware UAT PASS (2026-06-06),
 planner re-verified the merged tree, merged `--no-ff` (`5b92fd7`) + pushed to `origin/main` (`7998ec0`).**
 Two runtime controls on the M3.3a persistent `Query` — a curated **`/model`** picker (Opus 4.8 / Sonnet 4.6 / Haiku 4.5)
 and a **`/mode`** toggle (Default / Accept-edits / Plan) — via a new **additive** desk→Hub→Core `POST /api/control` path
