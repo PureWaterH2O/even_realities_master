@@ -63,6 +63,7 @@ export interface ManagerFacade {
   respondPermission(sessionId: string, toolUseId: string, decision: PermissionDecision): void
   respondQuestion(sessionId: string, toolUseId: string, answer: string): void
   interrupt(sessionId: string): void
+  control(sessionId: string, action: 'setModel' | 'setMode', value: string): Promise<void>
   getStatus(sessionId: string): 'busy' | 'idle' | 'unknown'
   subscribe(cb: (tagged: { sessionId: string; event: CoLiveEvent }) => void): () => void
 }
@@ -253,6 +254,19 @@ export function mountRoutes(deps: RouteDeps): Router {
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
     manager.interrupt(sessionId)
     res.json({ ok: true })
+  })
+
+  // POST /api/control {sessionId, action: 'setModel'|'setMode', value} -> 202
+  router.post('/control', (req, res, next) => {
+    const body = req.body as { sessionId?: unknown; action?: unknown; value?: unknown }
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+    const action = body.action === 'setModel' || body.action === 'setMode' ? body.action : undefined
+    const value = typeof body.value === 'string' ? body.value : undefined
+    if (sessionId === '' || action === undefined || value === undefined) {
+      res.status(400).json({ error: 'control requires {sessionId, action: setModel|setMode, value}' })
+      return
+    }
+    manager.control(sessionId, action, value).then(() => res.status(202).json({ ok: true })).catch(next)
   })
 
   // GET /api/status?sessionId=
