@@ -1476,3 +1476,78 @@ describe('ClaudeSession — task 1: in-flight prompt survives a fatal query erro
     expect(openCount).toBe(2) // exactly one reopen
   })
 })
+
+describe('ClaudeSession — runtime controls', () => {
+  // Corrected for Task 1's re-drive contract: open #0 SUCCEEDS on its first prompt
+  // (captures sess-1), then DIES on its second prompt — i.e. AFTER the control has
+  // been applied — so the self-heal reopen (#1) rebuilds options from the updated
+  // config and carries the chosen model/mode + resume. (The plan's original fake
+  // died on the first prompt, which Task 1 now auto-recovers before setModel runs.)
+  function controlFake() {
+    const log: Array<{ m?: string; mode?: string; resume?: string }> = []
+    let n = 0
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: { resume?: string; model?: string; permissionMode?: string } }) => {
+      log.push({ resume: args.options?.resume, m: args.options?.model, mode: args.options?.permissionMode })
+      const which = n++
+      let p = 0
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          const turn = p++
+          if (which === 0 && turn === 0) {
+            // open #0, first prompt: capture the id and succeed -> a live session
+            yield { type: 'system', subtype: 'init', session_id: 'sess-1' }
+            yield { type: 'result', subtype: 'success', session_id: 'sess-1', result: '', usage: {} }
+          } else if (which === 0 && turn === 1) {
+            // open #0, second prompt: die AFTER the control was applied -> self-heal reopen
+            throw new Error('die')
+          } else {
+            // reopen (#1+): succeed, carrying the chosen model/mode + resume
+            yield { type: 'result', subtype: 'success', session_id: 'sess-1', result: '', usage: {} }
+          }
+        }
+      })()
+      const q = gen as unknown as QueryLike & { setModel?: (m?: string) => Promise<void>; setPermissionMode?: (mode: string) => Promise<void> }
+      q.interrupt = async () => {}
+      q.setModel = async (m) => { log.push({ m }) }
+      q.setPermissionMode = async (mode) => { log.push({ mode }) }
+      return q
+    }) as unknown as QueryFn
+    return { fn, log }
+  }
+
+  it('setModel calls the live Query and updates config (so a reopen preserves it)', async () => {
+    const { fn, log } = controlFake()
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('open it')              // open #0 captures sess-1, succeeds; q stays live
+    await session.setModel('claude-sonnet-4-6') // live call + config update
+    expect(log.some((e) => e.m === 'claude-sonnet-4-6')).toBe(true) // live call recorded
+    await session.run('reopen')               // open #0's 2nd prompt dies -> reopen #1 carries the choice
+    const reopen = log.find((e) => e.resume === 'sess-1')
+    expect(reopen?.m).toBe('claude-sonnet-4-6') // GATE: self-heal preserved the chosen model
+  })
+
+  it('setPermissionMode updates config and survives a reopen', async () => {
+    const { fn, log } = controlFake()
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('open it')
+    await session.setPermissionMode('plan')
+    await session.run('reopen')
+    expect(log.find((e) => e.resume === 'sess-1')?.mode).toBe('plan')
+  })
+
+  it('a rejecting control never throws', async () => {
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage> }) => {
+      const gen = (async function* () { for await (const _ of args.prompt) yield { type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} } })()
+      const q = gen as unknown as QueryLike & { setModel?: (m?: string) => Promise<void> }
+      q.interrupt = async () => {}
+      q.setModel = async () => { throw new Error('nope') }
+      return q
+    }) as unknown as QueryFn
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('go')
+    await expect(session.setModel('x')).resolves.toBeUndefined() // no throw
+  })
+})

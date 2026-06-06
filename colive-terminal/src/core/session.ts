@@ -50,6 +50,8 @@ export type Emit = (event: CoLiveEvent) => void
  */
 export interface QueryLike extends AsyncIterable<unknown> {
   interrupt(): Promise<void>
+  setModel?(model?: string): Promise<void>
+  setPermissionMode?(mode: PermissionMode): Promise<void>
 }
 
 /**
@@ -115,7 +117,7 @@ export interface ClaudeSessionDeps {
  * runs at a time; concurrent run() calls queue.
  */
 export class ClaudeSession {
-  private readonly config: SessionConfig
+  private config: SessionConfig
   private readonly emit: Emit
   private readonly canUseTool: CanUseTool
   private readonly query: QueryFn
@@ -294,6 +296,22 @@ export class ClaudeSession {
     if (!this._busy) return
     this.interrupting = true
     void this.q?.interrupt().catch(() => {})
+  }
+
+  /**
+   * Switch the model at runtime: call the live Query's setModel (subsequent turns) AND update
+   * config so a self-heal reopen (ensureQueryOpen builds options from config) keeps the choice.
+   * No-throw — a control must never crash a session. With no live query, updates config only.
+   */
+  async setModel(model: string): Promise<void> {
+    this.config = { ...this.config, model }
+    try { await this.q?.setModel?.(model) } catch { /* control is best-effort */ }
+  }
+
+  /** Switch the permission mode at runtime (same contract as setModel). */
+  async setPermissionMode(mode: PermissionMode): Promise<void> {
+    this.config = { ...this.config, permissionMode: mode }
+    try { await this.q?.setPermissionMode?.(mode) } catch { /* best-effort */ }
   }
 
   /** Begin a turn: per-turn resets, ensure the query is open, push the prompt. */
