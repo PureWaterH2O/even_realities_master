@@ -1127,11 +1127,25 @@ describe('ClaudeSession — interrupt', () => {
     const emitted: CoLiveEvent[] = []
     // A generic (non-abort) throw from the stream — the abort signal is NOT set,
     // so the catch guard must surface a single error event.
-    const fn = (() =>
-      (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'ab2' }
-        throw new Error('boom from the stream')
-      })()) as unknown as QueryFn
+    let open = 0
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage> }) => {
+      const which = open++
+      const gen = (async function* () {
+        if (which === 0) {
+          // first open: a non-abort throw escapes the stream (one error surfaced)
+          yield { type: 'system', subtype: 'init', session_id: 'ab2' }
+          throw new Error('boom from the stream')
+        }
+        // Task 1: the single retry reopens-with-resume and recovers cleanly, so
+        // exactly ONE error is surfaced for the one escaped throw.
+        for await (const _msg of args.prompt) {
+          yield { type: 'result', subtype: 'success', session_id: 'ab2', result: '', usage: {} }
+        }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
+    }) as unknown as QueryFn
 
     const session = new ClaudeSession({
       config: makeConfig(),
@@ -1428,5 +1442,37 @@ describe('ClaudeSession — golden event sequence', () => {
       'user_prompt', 'status', 'status', 'thinking_delta', 'status',
       'status', 'text_delta', 'status', 'tool_start', 'tool_end', 'result', 'status',
     ])
+  })
+})
+
+describe('ClaudeSession — task 1: in-flight prompt survives a fatal query error', () => {
+  it('re-drives the in-flight prompt once on reopen (not dropped), then gives up on a second death', async () => {
+    let openCount = 0
+    const seen: string[] = []
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: { resume?: string } }) => {
+      const which = openCount++
+      const gen = (async function* () {
+        for await (const msg of args.prompt) {
+          seen.push((msg as any).message.content)
+          if (which === 0) {
+            yield { type: 'system', subtype: 'init', session_id: 'sess-1' }
+            throw new Error('die-1') // first open: die mid-turn
+          }
+          if (which === 1) throw new Error('die-2') // reopen: die again -> must NOT loop forever
+          yield { type: 'result', subtype: 'success', session_id: 'sess-1', result: '', usage: {} }
+        }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
+    }) as unknown as QueryFn
+
+    const events: string[] = []
+    const session = new ClaudeSession({ config: makeConfig(), emit: (e) => events.push(e.type), canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('keep me') // dies, re-queues, reopens (resume), dies again, gives up
+    expect(seen.filter((t) => t === 'keep me')).toHaveLength(2) // driven twice (original + 1 retry), not lost, not infinite
+    expect(events.filter((t) => t === 'error')).toHaveLength(2) // an error per death; no loop
+    expect(openCount).toBe(2) // exactly one reopen
   })
 })

@@ -627,10 +627,14 @@ describe('SessionManager — pre-init buffering (consistent tagging)', () => {
     // No real id surfaced, so prompt() falls back to the local id.
     expect(id).toBeDefined()
     expect(id!.startsWith('local:')).toBe(true)
-    // the error event was still delivered (flushed under the local id).
+    // Task 1: a deterministic pre-init failure surfaces the error, retries once
+    // (the reopen also fails before init), then gives up — TWO errors, both
+    // flushed under the local id (no real id was ever learned).
     const errs = tagged.filter((t) => t.event.type === 'error')
-    expect(errs).toHaveLength(1)
-    expect(errs[0].event).toEqual({ type: 'error', message: 'boom before init' })
-    expect(errs[0].sessionId).toBe(id)
+    expect(errs).toHaveLength(2)
+    for (const e of errs) {
+      expect(e.event).toEqual({ type: 'error', message: 'boom before init' })
+      expect(e.sessionId).toBe(id)
+    }
   })
 })
