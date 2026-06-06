@@ -1206,4 +1206,30 @@ describe('runtime control pickers (/model, /mode)', () => {
     expect(fake.controls.at(-1)).toMatchObject({ action: 'setMode', value: 'plan' })
     cleanup()
   })
+
+  it('Esc dismisses an open picker WITHOUT interrupting the session', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/model')
+    expect(lastFrame()).toContain('Opus 4.8')        // picker open
+    await write(stdin, '\x1b')                        // Esc
+    await flush(60)                                   // past ink's ESC debounce
+    expect(fake.interrupts).toHaveLength(0)           // did NOT interrupt the session
+    expect(lastFrame()).not.toContain('Opus 4.8')     // picker dismissed
+    cleanup()
+  })
+
+  it('/clear resets the status-line mode back to default', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/mode'); await write(stdin, '\x1b[B'); await write(stdin, '\x1b[B'); await write(stdin, '\r') // pick Plan
+    expect(stripAnsi(lastFrame()!)).toContain('· plan')
+    await write(stdin, '/clear'); await write(stdin, '\r')   // new session
+    await flush()
+    expect(stripAnsi(lastFrame()!)).toContain('· default')
+    expect(stripAnsi(lastFrame()!)).not.toContain('· plan')
+    cleanup()
+  })
 })

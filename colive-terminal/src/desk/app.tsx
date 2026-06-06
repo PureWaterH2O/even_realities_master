@@ -156,7 +156,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // /api/info (the serve default) and updated optimistically when a /model or /mode pick lands.
   const [currentModel, setCurrentModel] = useState<string>('')
   const [currentMode, setCurrentMode] = useState<string>('default')
-  useEffect(() => { void client.getInfo().then((i) => setCurrentModel(i.model)).catch(() => {}) }, [client])
+  useEffect(() => { void client.getInfo().then((i) => setCurrentModel((cur) => cur || i.model)).catch(() => {}) }, [client])
 
   // Bracketed paste rides ink's separate channel (never reaches useInput), so multi-line
   // pasted text lands in the buffer and can never trigger per-char or submit logic.
@@ -359,6 +359,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
           dispatch({ type: 'clear' })
           setStatus({ state: 'idle' })
           setPending(undefined)
+          setCurrentMode('default')
+          void client.getInfo().then((i) => setCurrentModel(i.model)).catch(() => {})
           return
         case 'note':
           dispatch({ type: 'note', text: result.message })
@@ -518,6 +520,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     }
 
     if (key.escape) {
+      if (pickerChoices) { setBuf(B.empty()); return }  // picker: Esc clears the token (closes it), never interrupts
       if (atMenu) { setMenuDismissed(true); return }   // @ menu: hide, keep the typed line
       if (slashMenu) { setBuf(B.empty()); return }      // slash menu: clear the lone "/" token (unchanged)
       const sid = sessionIdRef.current
@@ -666,7 +669,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
       <Box>
         <Text dimColor>
-          [{statusLabel}{tokenStr}]{currentModel ? ` · ${shortModel(currentModel)}` : ''}{` · ${currentMode}`} {sid ? `session ${sid}` : 'new session'}
+          [{statusLabel}{currentModel ? ` · ${shortModel(currentModel)}` : ''}{` · ${currentMode}`}{tokenStr}] {sid ? `session ${sid}` : 'new session'}
           {mouseMode === 'select' ? ' · select-mode (wheel off · ⇧/⌥-drag to copy)' : ''}
         </Text>
       </Box>
