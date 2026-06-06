@@ -44,6 +44,10 @@ FRAMES=(
   "m32b-layout:shot-m32b-layout"
   # M3.3a desk-render regression (Core streaming refactor — events unchanged)
   "m33a-session:shot-m33a-session"
+  # M3.3b control pickers + status line
+  "m33b-model-picker:shot-m33b-model-picker"
+  "m33b-mode-picker:shot-m33b-mode-picker"
+  "m33b-status-plan:shot-m33b-status-plan"
 )
 
 echo "[1/2] capturing frames (PREVIEW=1 vitest test/preview)…"

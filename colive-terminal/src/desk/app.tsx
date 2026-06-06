@@ -41,6 +41,7 @@ import type { MouseMode } from './slash'
 import { filterSlash, atContext } from './input/menu'
 import { fuzzyFilter, defaultListFiles } from './input/files'
 import { slashMenuItems } from './slash'
+import { menuForCommand, actionForCommand } from './controls'
 import { MOUSE_ON, MOUSE_OFF } from './mouse-mode'
 import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
@@ -151,6 +152,12 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // /select flips to 'select' (mouse OFF) so native click-drag copy works.
   const [mouseMode, setMouseMode] = useState<MouseMode>('scroll')
 
+  // M3.3b: the active model/mode shown in the status line. currentModel is seeded from the Hub's
+  // /api/info (the serve default) and updated optimistically when a /model or /mode pick lands.
+  const [currentModel, setCurrentModel] = useState<string>('')
+  const [currentMode, setCurrentMode] = useState<string>('default')
+  useEffect(() => { void client.getInfo().then((i) => setCurrentModel((cur) => cur || i.model)).catch(() => {}) }, [client])
+
   // Bracketed paste rides ink's separate channel (never reaches useInput), so multi-line
   // pasted text lands in the buffer and can never trigger per-char or submit logic.
   usePaste((text) => { setBuf((b) => B.insertText(b, text)) })
@@ -191,13 +198,16 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // Two mutually-exclusive completion menus. The slash menu owns the WHOLE buffer (a single
   // leading-"/" token); the "@" menu owns a mid-line token under the cursor. Compute slash
   // first; only look for an "@" context when the slash menu is closed — they can never both open.
-  const slashMenu = filterSlash(B.toText(buf), menuItems)
-  const atCtx = slashMenu === null && !menuDismissed ? atContext(buf.lines[buf.row]!, buf.col) : null
+  // M3.3b: an EXACT picker command (/model, /mode) opens a second-level value menu that takes
+  // precedence over — and is mutually exclusive with — the slash and @ menus.
+  const pickerChoices = menuForCommand(B.toText(buf).trim())
+  const slashMenu = pickerChoices === null ? filterSlash(B.toText(buf), menuItems) : null
+  const atCtx = pickerChoices === null && slashMenu === null && !menuDismissed ? atContext(buf.lines[buf.row]!, buf.col) : null
   const atMatches = atCtx ? fuzzyFilter(ensureFiles(), atCtx.query, MENU_LIMIT) : []
   const atMenu = atCtx && atMatches.length > 0 ? atMatches : null
 
-  const menuOpen = slashMenu !== null || atMenu !== null
-  const menuLength = slashMenu ? slashMenu.length : atMenu ? atMenu.length : 0
+  const menuOpen = pickerChoices !== null || slashMenu !== null || atMenu !== null
+  const menuLength = pickerChoices ? pickerChoices.length : slashMenu ? slashMenu.length : atMenu ? atMenu.length : 0
   const clampedMenuIndex = menuOpen ? Math.min(menuIndex, menuLength - 1) : 0
   // Reset the highlight + un-dismiss whenever the composer text changes (a re-filter).
   useEffect(() => { setMenuIndex(0); setMenuDismissed(false) }, [B.toText(buf)])
@@ -349,6 +359,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
           dispatch({ type: 'clear' })
           setStatus({ state: 'idle' })
           setPending(undefined)
+          setCurrentMode('default')
+          void client.getInfo().then((i) => setCurrentModel(i.model)).catch(() => {})
           return
         case 'note':
           dispatch({ type: 'note', text: result.message })
@@ -508,6 +520,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     }
 
     if (key.escape) {
+      if (pickerChoices) { setBuf(B.empty()); return }  // picker: Esc clears the token (closes it), never interrupts
       if (atMenu) { setMenuDismissed(true); return }   // @ menu: hide, keep the typed line
       if (slashMenu) { setBuf(B.empty()); return }      // slash menu: clear the lone "/" token (unchanged)
       const sid = sessionIdRef.current
@@ -522,6 +535,16 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     if (menuOpen && !pending) {
       if (key.upArrow)   { setMenuIndex((i) => Math.max(0, Math.min(i, menuLength - 1) - 1)); return }
       if (key.downArrow) { setMenuIndex((i) => Math.min(menuLength - 1, i + 1)); return }
+      if (pickerChoices && (key.tab || key.return)) {
+        const choice = pickerChoices[clampedMenuIndex]!
+        const action = actionForCommand(B.toText(buf).trim())!
+        const sid = sessionIdRef.current
+        if (sid !== undefined) void client.setControl(sid, action, choice.value).catch(() => {})
+        if (action === 'setModel') setCurrentModel(choice.value)
+        else setCurrentMode(choice.value)
+        dispatch({ type: 'note', text: `✓ ${action === 'setModel' ? 'model' : 'mode'} → ${choice.name}${sid === undefined ? ' (applies once a session starts)' : ''}` })
+        setBuf(B.empty()); setMenuIndex(0); return
+      }
       if (key.tab) {
         if (slashMenu) { setBuf(B.fromText('/' + slashMenu[clampedMenuIndex]!.name)); setMenuIndex(0); return }
         if (atMenu && atCtx) {
@@ -646,14 +669,20 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
       <Box>
         <Text dimColor>
-          [{statusLabel}{tokenStr}] {sid ? `session ${sid}` : 'new session'}
+          [{statusLabel}{currentModel ? ` · ${shortModel(currentModel)}` : ''}{` · ${currentMode}`}{tokenStr}] {sid ? `session ${sid}` : 'new session'}
           {mouseMode === 'select' ? ' · select-mode (wheel off · ⇧/⌥-drag to copy)' : ''}
         </Text>
       </Box>
 
       {menuOpen ? (
         <Box flexDirection="column">
-          {slashMenu
+          {pickerChoices
+            ? pickerChoices.map((c, i) => (
+                <Text key={c.value} inverse={i === clampedMenuIndex}>
+                  {`${c.name}  `}<Text dimColor>{c.desc}</Text>
+                </Text>
+              ))
+            : slashMenu
             ? slashMenu.map((item, i) => (
                 <Text key={item.name} inverse={i === clampedMenuIndex}>
                   {`/${item.name}  `}<Text dimColor>{item.desc}</Text>
@@ -711,6 +740,10 @@ function PendingPrompt({ pending, input }: { pending: Pending; input: string }):
     </Box>
   )
 }
+
+/** Short status-line label for a model id: claude-opus-4-8 -> opus-4-8; strips a trailing -YYYYMMDD. */
+const shortModel = (id: string): string =>
+  id.replace(/^claude-/, '').replace(/-\d{8}$/, '')
 
 /** Drop a single trailing "\" from the buffer's current line (backslash-continuation). */
 function trimTrailingBackslash(b: EditBuffer): EditBuffer {

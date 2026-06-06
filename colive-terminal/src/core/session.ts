@@ -50,6 +50,8 @@ export type Emit = (event: CoLiveEvent) => void
  */
 export interface QueryLike extends AsyncIterable<unknown> {
   interrupt(): Promise<void>
+  setModel?(model?: string): Promise<void>
+  setPermissionMode?(mode: PermissionMode): Promise<void>
 }
 
 /**
@@ -115,7 +117,7 @@ export interface ClaudeSessionDeps {
  * runs at a time; concurrent run() calls queue.
  */
 export class ClaudeSession {
-  private readonly config: SessionConfig
+  private config: SessionConfig
   private readonly emit: Emit
   private readonly canUseTool: CanUseTool
   private readonly query: QueryFn
@@ -137,7 +139,7 @@ export class ClaudeSession {
    * the corresponding run() promise settles when *that* prompt's turn completes
    * — robust even when two queued prompts share the same text.
    */
-  private readonly queue: { text: string; resolve: () => void }[] = []
+  private readonly queue: { text: string; resolve: () => void; retried?: boolean }[] = []
 
   /** The held streaming Query + its inbox (one per open). Undefined until first run / after death. */
   private q: QueryLike | undefined
@@ -154,6 +156,10 @@ export class ClaudeSession {
   private interrupting = false
   /** Resolver for the in-flight turn's run() promise (settled on its `result`). */
   private currentTurnResolve: (() => void) | undefined
+  /** The in-flight turn's prompt text (Task 1: re-queued to the FRONT on a fatal error). */
+  private currentTurnText: string | undefined
+  /** True when the in-flight turn is a single-retry of a re-queued prompt (Task 1 guard). */
+  private currentTurnRetried = false
 
   /**
    * Kind of each currently-open streaming content block, keyed by its `index`,
@@ -276,7 +282,7 @@ export class ClaudeSession {
       // Queue and wait until this specific prompt's turn has been driven.
       return new Promise<void>((resolve) => this.queue.push({ text, resolve }))
     }
-    return new Promise<void>((resolve) => this.beginTurn(text, resolve))
+    return new Promise<void>((resolve) => this.beginTurn(text, resolve, false))
   }
 
   /**
@@ -292,10 +298,28 @@ export class ClaudeSession {
     void this.q?.interrupt().catch(() => {})
   }
 
+  /**
+   * Switch the model at runtime: call the live Query's setModel (subsequent turns) AND update
+   * config so a self-heal reopen (ensureQueryOpen builds options from config) keeps the choice.
+   * No-throw — a control must never crash a session. With no live query, updates config only.
+   */
+  async setModel(model: string): Promise<void> {
+    this.config = { ...this.config, model }
+    try { await this.q?.setModel?.(model) } catch { /* control is best-effort */ }
+  }
+
+  /** Switch the permission mode at runtime (same contract as setModel). */
+  async setPermissionMode(mode: PermissionMode): Promise<void> {
+    this.config = { ...this.config, permissionMode: mode }
+    try { await this.q?.setPermissionMode?.(mode) } catch { /* best-effort */ }
+  }
+
   /** Begin a turn: per-turn resets, ensure the query is open, push the prompt. */
-  private beginTurn(text: string, resolve: () => void): void {
+  private beginTurn(text: string, resolve: () => void, retried: boolean): void {
     this._busy = true
     this.currentTurnResolve = resolve
+    this.currentTurnText = text
+    this.currentTurnRetried = retried
     this.idleEmitted = false
     this.openBlocks.clear()
     this.announcedToolIds.clear()
@@ -373,6 +397,14 @@ export class ClaudeSession {
     this.q = undefined
     this.inbox = undefined
     this.emit({ type: 'error', message: errorMessage(err) })
+    // Task 1: don't drop the in-flight prompt on a fatal error. Re-queue it to the FRONT so the
+    // lazy reopen-with-resume re-drives it. Guard with `retried` so a deterministically-crashing
+    // prompt can't loop forever — a second death gives up (the error is already surfaced).
+    if (this.currentTurnText !== undefined && this.currentTurnResolve !== undefined && !this.currentTurnRetried) {
+      this.queue.unshift({ text: this.currentTurnText, resolve: this.currentTurnResolve, retried: true })
+      this.currentTurnResolve = undefined // detach so settleTurnAndDrain won't resolve it early
+      this.currentTurnText = undefined
+    }
     this.settleTurnAndDrain()
   }
 
@@ -400,9 +432,10 @@ export class ClaudeSession {
     this._busy = false
     const resolve = this.currentTurnResolve
     this.currentTurnResolve = undefined
+    this.currentTurnText = undefined
     resolve?.()
     const next = this.queue.shift()
-    if (next !== undefined) this.beginTurn(next.text, next.resolve)
+    if (next !== undefined) this.beginTurn(next.text, next.resolve, next.retried === true)
   }
 
   /**

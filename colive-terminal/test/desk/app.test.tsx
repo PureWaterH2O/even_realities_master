@@ -35,6 +35,8 @@ interface FakeHub extends HubClient {
   permissions: Array<{ sessionId: string; decision: string; toolUseId?: string }>
   questions: Array<{ sessionId: string; answer: string; toolUseId?: string }>
   interrupts: string[]
+  /** Recorded setControl calls. */
+  controls: Array<{ action: string; value: string }>
   subscribeCalls: Array<{ sessionId: string; opts?: SubscribeOptions }>
   closeCount: number
   /** How many times fetchTranscript was called and with what id. */
@@ -51,6 +53,7 @@ function makeFakeHub(opts?: {
     permissions: [],
     questions: [],
     interrupts: [],
+    controls: [],
     subscribeCalls: [],
     transcriptCalls: [],
     closeCount: 0,
@@ -82,6 +85,12 @@ function makeFakeHub(opts?: {
     async fetchTranscript(sessionId) {
       fake.transcriptCalls.push(sessionId)
       return opts?.transcript ?? []
+    },
+    async setControl(_sessionId, action, value) {
+      fake.controls.push({ action, value })
+    },
+    async getInfo() {
+      return { model: 'claude-opus-4-8' }
     },
   }
   return fake
@@ -1168,5 +1177,59 @@ describe('!bash delegation', () => {
     } finally {
       unmount()
     }
+  })
+})
+
+describe('runtime control pickers (/model, /mode)', () => {
+  it('/model opens the model picker; ↓ + Tab sends setModel Sonnet and shows a note', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/model')
+    expect(lastFrame()).toContain('Opus 4.8')        // value picker open
+    expect(lastFrame()).toContain('Sonnet 4.6')
+    await write(stdin, '\x1b[B')                      // ↓ -> Sonnet
+    await write(stdin, '\t')                          // Tab accept
+    expect(fake.controls.at(-1)).toMatchObject({ action: 'setModel', value: 'claude-sonnet-4-6' })
+    expect(stripAnsi(lastFrame()!)).toContain('model → Sonnet 4.6')
+    cleanup()
+  })
+
+  it('/mode opens the mode picker; ↓↓ + Enter sends setMode plan', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/mode')
+    expect(lastFrame()).toContain('Plan')
+    await write(stdin, '\x1b[B'); await write(stdin, '\x1b[B') // ↓↓ -> Plan
+    await write(stdin, '\r')                                    // Enter accept
+    expect(fake.controls.at(-1)).toMatchObject({ action: 'setMode', value: 'plan' })
+    cleanup()
+  })
+
+  it('Esc dismisses an open picker WITHOUT interrupting the session', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/model')
+    expect(lastFrame()).toContain('Opus 4.8')        // picker open
+    await write(stdin, '\x1b')                        // Esc
+    await flush(60)                                   // past ink's ESC debounce
+    expect(fake.interrupts).toHaveLength(0)           // did NOT interrupt the session
+    expect(lastFrame()).not.toContain('Opus 4.8')     // picker dismissed
+    cleanup()
+  })
+
+  it('/clear resets the status-line mode back to default', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/mode'); await write(stdin, '\x1b[B'); await write(stdin, '\x1b[B'); await write(stdin, '\r') // pick Plan
+    expect(stripAnsi(lastFrame()!)).toContain('· plan')
+    await write(stdin, '/clear'); await write(stdin, '\r')   // new session
+    await flush()
+    expect(stripAnsi(lastFrame()!)).toContain('· default')
+    expect(stripAnsi(lastFrame()!)).not.toContain('· plan')
+    cleanup()
   })
 })

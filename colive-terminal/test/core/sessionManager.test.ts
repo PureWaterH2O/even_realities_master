@@ -627,10 +627,52 @@ describe('SessionManager — pre-init buffering (consistent tagging)', () => {
     // No real id surfaced, so prompt() falls back to the local id.
     expect(id).toBeDefined()
     expect(id!.startsWith('local:')).toBe(true)
-    // the error event was still delivered (flushed under the local id).
+    // Task 1: a deterministic pre-init failure surfaces the error, retries once
+    // (the reopen also fails before init), then gives up — TWO errors, both
+    // flushed under the local id (no real id was ever learned).
     const errs = tagged.filter((t) => t.event.type === 'error')
-    expect(errs).toHaveLength(1)
-    expect(errs[0].event).toEqual({ type: 'error', message: 'boom before init' })
-    expect(errs[0].sessionId).toBe(id)
+    expect(errs).toHaveLength(2)
+    for (const e of errs) {
+      expect(e.event).toEqual({ type: 'error', message: 'boom before init' })
+      expect(e.sessionId).toBe(id)
+    }
+  })
+})
+
+describe('SessionManager.control', () => {
+  it('routes setModel/setMode to the session; unknown session/action is a no-op', async () => {
+    const controls: Array<{ kind: 'model' | 'mode'; value: string }> = []
+    // A fake whose live Query records control calls and stays live after the first
+    // turn (init surfaces the id) so control() reaches it.
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: unknown }) => {
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          yield { type: 'system', subtype: 'init', session_id: 'ctrl-sess' }
+          yield { type: 'result', subtype: 'success', session_id: 'ctrl-sess', result: '', usage: {} }
+        }
+      })()
+      const q = gen as unknown as QueryLike & { setModel?: (m?: string) => Promise<void>; setPermissionMode?: (mode: string) => Promise<void> }
+      q.interrupt = async () => {}
+      q.setModel = async (m) => { controls.push({ kind: 'model', value: m ?? '' }) }
+      q.setPermissionMode = async (mode) => { controls.push({ kind: 'mode', value: mode }) }
+      return q
+    }) as unknown as QueryFn
+
+    const mgr = new SessionManager({ config: makeConfig(), query: fn })
+    const id = await mgr.prompt(undefined, 'open', makeConfig().projectDir)
+    await drain()
+    expect(id).toBe('ctrl-sess')
+
+    await mgr.control(id!, 'setModel', 'claude-sonnet-4-6')
+    await mgr.control(id!, 'setMode', 'plan')
+    expect(controls).toEqual([
+      { kind: 'model', value: 'claude-sonnet-4-6' },
+      { kind: 'mode', value: 'plan' },
+    ])
+
+    // unknown session id and an unrecognized action are silent no-ops (never throw, never delegate)
+    await expect(mgr.control('no-such-id', 'setModel', 'x')).resolves.toBeUndefined()
+    await expect(mgr.control(id!, 'bogus' as 'setModel', 'x')).resolves.toBeUndefined()
+    expect(controls).toHaveLength(2)
   })
 })

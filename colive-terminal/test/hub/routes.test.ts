@@ -16,6 +16,7 @@ function makeFakeManager() {
     respondPermission: vi.fn(),
     respondQuestion: vi.fn(),
     interrupt: vi.fn(),
+    control: vi.fn(async (_sessionId?: string, _action?: string, _value?: string) => {}),
     getStatus: vi.fn(() => 'idle' as const),
     subscribe(cb: (t: TaggedEvent) => void): () => void {
       subscribers.add(cb)
@@ -321,6 +322,26 @@ describe('POST /api/interrupt', () => {
       .expect(200)
     expect(manager.interrupt).toHaveBeenCalledWith('s9')
     expect((await request(app).post('/api/interrupt').set('Authorization', `Bearer ${TOKEN}`).send({ sessionId: 's9' })).body).toEqual({ ok: true })
+  })
+})
+
+describe('POST /api/control (additive)', () => {
+  it('delegates to manager.control and returns 202', async () => {
+    const { app, manager } = makeApp()
+    const res = await request(app)
+      .post('/api/control')
+      .set('authorization', `Bearer ${TOKEN}`)
+      .send({ sessionId: 's1', action: 'setModel', value: 'claude-sonnet-4-6' })
+    expect(res.status).toBe(202)
+    expect(manager.control).toHaveBeenCalledWith('s1', 'setModel', 'claude-sonnet-4-6')
+  })
+
+  it('rejects a bad body with 400 and missing auth with 401', async () => {
+    const { app } = makeApp()
+    const bad = await request(app).post('/api/control').set('authorization', `Bearer ${TOKEN}`).send({ sessionId: 's1' })
+    expect(bad.status).toBe(400)
+    const noAuth = await request(app).post('/api/control').send({ sessionId: 's1', action: 'setModel', value: 'x' })
+    expect(noAuth.status).toBe(401)
   })
 })
 

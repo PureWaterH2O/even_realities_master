@@ -1,7 +1,7 @@
 ---
-title: Streaming-input mode — SDK message-stream probe (M3.3a)
+title: Streaming-input mode — SDK message-stream probe (M3.3a + M3.3b)
 domain: terminal-mode
-last_updated: 2026-06-03
+last_updated: 2026-06-06
 overall_confidence: 🧪
 ---
 
@@ -59,6 +59,18 @@ needed.** One assumption (a) diverged but is fully benign (see below).
   abort path. The session stays usable afterward (the next prompt drives a fresh turn on the same query — verified
   in UAT D3). Genuine stream throws still go through `onConsumerError` and STILL surface an `error`.
 
+- 🧪 **Runtime `setModel` / `setPermissionMode` do NOT fork the `session_id` (M3.3b).** Probed live against
+  `@anthropic-ai/claude-agent-sdk@0.3.158` (2026-06-06): one persistent streaming query, three turns with
+  `q.setModel(haiku→sonnet)` after turn 1 and `q.setPermissionMode('acceptEdits')` after turn 2. The **per-turn
+  `init` correctly reflects the new `model=` / `permissionMode=`** while the **`session_id` stays identical at
+  every `init` and `result`** (one unique id across all three turns). Both controls are sent as control requests
+  to the running CLI (`{subtype:'set_model'}` / `{subtype:'set_permission_mode'}`) — they swap the setting on the
+  *same* session, never resume/fork. **Why it matters:** this resolved a Co-Live M3.3b hardware-UAT scare ("switch
+  the model and the glasses start a new session"). Root cause was NOT a fork — the desk control path is additive
+  (`POST /api/control`, emits no client events, never mints a session) and the owner had simply *backed out* of
+  the glasses session to reach a menu (manual navigation). Co-live stayed in sync across the switch; the desk
+  kept the same chat. No code change needed.
+
 ## Implication for the build
 
 The spec §6 mitigation ("if any differ, adjust the turn-boundary/mapping before building") is **not triggered**:
@@ -82,3 +94,7 @@ as written (Tasks 2–9).**
 - 2026-06-04: resolved the open `Query.interrupt()` question — verified live (twice, deterministic) that it does
   NOT throw but flushes a NON-SUCCESS `result` (with an `[ede_diagnostic]` error). Fixed the spurious-error-on-Esc
   regression via an `interrupting` flag that suppresses that flushed result (clean idle, no error/failed-result).
+- 2026-06-06: M3.3b runtime-control probe — `setModel`/`setPermissionMode` do NOT fork `session_id` (per-turn
+  `init` reflects the new model/mode; id stable across both controls). Resolved the M3.3b UAT "glasses start a new
+  session on model switch" as NOT-a-bug (no fork; additive desk-only control; owner had manually backed out of the
+  glasses session). No code change.

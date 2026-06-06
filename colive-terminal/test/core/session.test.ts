@@ -1127,11 +1127,25 @@ describe('ClaudeSession — interrupt', () => {
     const emitted: CoLiveEvent[] = []
     // A generic (non-abort) throw from the stream — the abort signal is NOT set,
     // so the catch guard must surface a single error event.
-    const fn = (() =>
-      (async function* () {
-        yield { type: 'system', subtype: 'init', session_id: 'ab2' }
-        throw new Error('boom from the stream')
-      })()) as unknown as QueryFn
+    let open = 0
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage> }) => {
+      const which = open++
+      const gen = (async function* () {
+        if (which === 0) {
+          // first open: a non-abort throw escapes the stream (one error surfaced)
+          yield { type: 'system', subtype: 'init', session_id: 'ab2' }
+          throw new Error('boom from the stream')
+        }
+        // Task 1: the single retry reopens-with-resume and recovers cleanly, so
+        // exactly ONE error is surfaced for the one escaped throw.
+        for await (const _msg of args.prompt) {
+          yield { type: 'result', subtype: 'success', session_id: 'ab2', result: '', usage: {} }
+        }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
+    }) as unknown as QueryFn
 
     const session = new ClaudeSession({
       config: makeConfig(),
@@ -1428,5 +1442,132 @@ describe('ClaudeSession — golden event sequence', () => {
       'user_prompt', 'status', 'status', 'thinking_delta', 'status',
       'status', 'text_delta', 'status', 'tool_start', 'tool_end', 'result', 'status',
     ])
+  })
+})
+
+describe('ClaudeSession — task 1: in-flight prompt survives a fatal query error', () => {
+  it('re-drives the in-flight prompt once on reopen (not dropped), then gives up on a second death', async () => {
+    let openCount = 0
+    const seen: string[] = []
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: { resume?: string } }) => {
+      const which = openCount++
+      const gen = (async function* () {
+        for await (const msg of args.prompt) {
+          seen.push((msg as any).message.content)
+          if (which === 0) {
+            yield { type: 'system', subtype: 'init', session_id: 'sess-1' }
+            throw new Error('die-1') // first open: die mid-turn
+          }
+          if (which === 1) throw new Error('die-2') // reopen: die again -> must NOT loop forever
+          yield { type: 'result', subtype: 'success', session_id: 'sess-1', result: '', usage: {} }
+        }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
+    }) as unknown as QueryFn
+
+    const events: string[] = []
+    const session = new ClaudeSession({ config: makeConfig(), emit: (e) => events.push(e.type), canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('keep me') // dies, re-queues, reopens (resume), dies again, gives up
+    expect(seen.filter((t) => t === 'keep me')).toHaveLength(2) // driven twice (original + 1 retry), not lost, not infinite
+    expect(events.filter((t) => t === 'error')).toHaveLength(2) // an error per death; no loop
+    expect(openCount).toBe(2) // exactly one reopen
+  })
+})
+
+describe('ClaudeSession — runtime controls', () => {
+  // Corrected for Task 1's re-drive contract: open #0 SUCCEEDS on its first prompt
+  // (captures sess-1), then DIES on its second prompt — i.e. AFTER the control has
+  // been applied — so the self-heal reopen (#1) rebuilds options from the updated
+  // config and carries the chosen model/mode + resume. (The plan's original fake
+  // died on the first prompt, which Task 1 now auto-recovers before setModel runs.)
+  function controlFake() {
+    const log: Array<{ m?: string; mode?: string; resume?: string }> = []
+    let n = 0
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: { resume?: string; model?: string; permissionMode?: string } }) => {
+      log.push({ resume: args.options?.resume, m: args.options?.model, mode: args.options?.permissionMode })
+      const which = n++
+      let p = 0
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) {
+          const turn = p++
+          if (which === 0 && turn === 0) {
+            // open #0, first prompt: capture the id and succeed -> a live session
+            yield { type: 'system', subtype: 'init', session_id: 'sess-1' }
+            yield { type: 'result', subtype: 'success', session_id: 'sess-1', result: '', usage: {} }
+          } else if (which === 0 && turn === 1) {
+            // open #0, second prompt: die AFTER the control was applied -> self-heal reopen
+            throw new Error('die')
+          } else {
+            // reopen (#1+): succeed, carrying the chosen model/mode + resume
+            yield { type: 'result', subtype: 'success', session_id: 'sess-1', result: '', usage: {} }
+          }
+        }
+      })()
+      const q = gen as unknown as QueryLike & { setModel?: (m?: string) => Promise<void>; setPermissionMode?: (mode: string) => Promise<void> }
+      q.interrupt = async () => {}
+      q.setModel = async (m) => { log.push({ m }) }
+      q.setPermissionMode = async (mode) => { log.push({ mode }) }
+      return q
+    }) as unknown as QueryFn
+    return { fn, log }
+  }
+
+  it('setModel calls the live Query and updates config (so a reopen preserves it)', async () => {
+    const { fn, log } = controlFake()
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('open it')              // open #0 captures sess-1, succeeds; q stays live
+    await session.setModel('claude-sonnet-4-6') // live call + config update
+    expect(log.some((e) => e.m === 'claude-sonnet-4-6')).toBe(true) // live call recorded
+    await session.run('reopen')               // open #0's 2nd prompt dies -> reopen #1 carries the choice
+    const reopen = log.find((e) => e.resume === 'sess-1')
+    expect(reopen?.m).toBe('claude-sonnet-4-6') // GATE: self-heal preserved the chosen model
+  })
+
+  it('setPermissionMode updates config and survives a reopen', async () => {
+    const { fn, log } = controlFake()
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('open it')
+    await session.setPermissionMode('plan')
+    await session.run('reopen')
+    expect(log.find((e) => e.resume === 'sess-1')?.mode).toBe('plan')
+  })
+
+  it('a rejecting control never throws', async () => {
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage> }) => {
+      const gen = (async function* () { for await (const _ of args.prompt) yield { type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} } })()
+      const q = gen as unknown as QueryLike & { setModel?: (m?: string) => Promise<void> }
+      q.interrupt = async () => {}
+      q.setModel = async () => { throw new Error('nope') }
+      return q
+    }) as unknown as QueryFn
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('go')
+    await expect(session.setModel('x')).resolves.toBeUndefined() // no throw
+  })
+
+  it('with no live query, updates config only; the next lazy open carries the chosen model', async () => {
+    // Spec §3.1: a control applied BEFORE the first run (no live query yet) updates
+    // config only; the lazily-opened query then carries the chosen model.
+    const opens: Array<{ model?: string }> = []
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: { model?: string } }) => {
+      opens.push({ model: args.options?.model })
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) yield { type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
+    }) as unknown as QueryFn
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.setModel('claude-sonnet-4-6') // no live query yet -> config only
+    await session.run('first')                  // lazy open #0 must carry the chosen model
+    expect(opens[0]?.model).toBe('claude-sonnet-4-6')
   })
 })

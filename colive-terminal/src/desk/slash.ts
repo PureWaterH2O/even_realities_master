@@ -88,6 +88,8 @@ const COMMAND_HELP: ReadonlyArray<readonly [string, string]> = [
   ['/select', 'disable mouse reporting so you can select/copy text (wheel scroll off)'],
   ['/scroll', 're-enable mouse-wheel scrolling (default)'],
   ['/help', 'list the available slash commands'],
+  ['/model', 'switch the model (Opus / Sonnet / Haiku)'],
+  ['/mode', 'switch permission mode (default / accept-edits / plan)'],
 ]
 
 /** Menu source for the M3.2A slash-command completion popup, derived from COMMAND_HELP. */
