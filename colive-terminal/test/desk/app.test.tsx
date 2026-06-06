@@ -35,6 +35,8 @@ interface FakeHub extends HubClient {
   permissions: Array<{ sessionId: string; decision: string; toolUseId?: string }>
   questions: Array<{ sessionId: string; answer: string; toolUseId?: string }>
   interrupts: string[]
+  /** Recorded setControl calls. */
+  controls: Array<{ action: string; value: string }>
   subscribeCalls: Array<{ sessionId: string; opts?: SubscribeOptions }>
   closeCount: number
   /** How many times fetchTranscript was called and with what id. */
@@ -51,6 +53,7 @@ function makeFakeHub(opts?: {
     permissions: [],
     questions: [],
     interrupts: [],
+    controls: [],
     subscribeCalls: [],
     transcriptCalls: [],
     closeCount: 0,
@@ -83,7 +86,9 @@ function makeFakeHub(opts?: {
       fake.transcriptCalls.push(sessionId)
       return opts?.transcript ?? []
     },
-    async setControl() {},
+    async setControl(_sessionId, action, value) {
+      fake.controls.push({ action, value })
+    },
     async getInfo() {
       return { model: 'claude-opus-4-8' }
     },
@@ -1172,5 +1177,33 @@ describe('!bash delegation', () => {
     } finally {
       unmount()
     }
+  })
+})
+
+describe('runtime control pickers (/model, /mode)', () => {
+  it('/model opens the model picker; ↓ + Tab sends setModel Sonnet and shows a note', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/model')
+    expect(lastFrame()).toContain('Opus 4.8')        // value picker open
+    expect(lastFrame()).toContain('Sonnet 4.6')
+    await write(stdin, '\x1b[B')                      // ↓ -> Sonnet
+    await write(stdin, '\t')                          // Tab accept
+    expect(fake.controls.at(-1)).toMatchObject({ action: 'setModel', value: 'claude-sonnet-4-6' })
+    expect(stripAnsi(lastFrame()!)).toContain('model → Sonnet 4.6')
+    cleanup()
+  })
+
+  it('/mode opens the mode picker; ↓↓ + Enter sends setMode plan', async () => {
+    const fake = makeFakeHub()
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/mode')
+    expect(lastFrame()).toContain('Plan')
+    await write(stdin, '\x1b[B'); await write(stdin, '\x1b[B') // ↓↓ -> Plan
+    await write(stdin, '\r')                                    // Enter accept
+    expect(fake.controls.at(-1)).toMatchObject({ action: 'setMode', value: 'plan' })
+    cleanup()
   })
 })
