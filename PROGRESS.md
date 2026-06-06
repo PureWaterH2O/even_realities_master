@@ -5,6 +5,14 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-06
 
+### Co-Live Terminal M3.3b — ✅ HARDWARE UAT PASS (owner sign-off) → runtime controls SHIP (merged to `main` via `--no-ff`)
+
+- **Owner hardware UAT (2026-06-06): PASS — ship M3.3b desk controls.** Re-verified green before merge against tool output (not the notes): `npx tsc --noEmit` exit 0; `npx vitest run` **476 passed / 43 files**; additive invariant re-checked — `events.ts`/`sse.ts` **0-line diff vs main** (glasses byte-compat). 13 commits `main..branch`.
+- **E1 model switch — PASS.** Desk stays the **same chat** with the model switched. Independently corroborated by a **live SDK probe** (`@anthropic-ai/claude-agent-sdk@0.3.158`, 2026-06-06): a mid-session `setModel` (and `setPermissionMode`) swaps `model=`/`permissionMode=` in the per-turn `init` and does **NOT fork the `session_id`** (one unique id across 3 turns). **E2 plan — PASS** ("planning worked as expected"). E3 accept-edits / E4 self-heal carried by the pre-UAT live self-test + unit gates (not separately re-run on hardware; owner satisfied).
+- **🧪 UAT scare triaged → NOT a bug: "switch model ⇒ glasses start a new session."** Root cause is NOT a fork (probe-verified) and NOT the control path (additive `POST /api/control`, emits no glasses events, never mints a session; `SessionManager` freezes `currentId`). Owner clarified: glasses co-live was **in sync** before the switch; the "new session" was the owner **manually backing out** of the glasses session to reach a menu. Desk↔glasses co-live **session-sharing** (controls reflected on the glasses) is the **documented open engineering problem** (`knowledge/limitations.md`) → **deferred** (out of M3.3b's additive scope).
+- **`/context` is thin (shows only `Context: status: …`) — working as built, pre-dates M3.3b.** Not a regression; owner opted not to enrich it this rung (candidate future enhancement: model/mode/session/tokens).
+- **Knowledge:** `terminal-mode/streaming-input-probe.md` extended with the M3.3b control-probe fact (no `session_id` fork). **Runbook:** `projects/colive-terminal/m3.3b-uat-runbook.md` signed off (UAT result table + triage). **Next rung (M3.3c):** `/compact` + `supportedCommands` (probe-first); deferred candidates — status-line mode seeded from Hub, pre-session deferred-apply, desk↔glasses co-live session-sharing, `/context` enrichment.
+
 ### Co-Live Terminal M3.3b — ✅ PLANNER-VALIDATED (PASS) — runtime controls; still NOT merged, pending owner hardware UAT E1–E5
 
 - **Validation verdict (planner chat, 2026-06-06): PASS.** Validated spec→claims→code against tool output, not the notes:
