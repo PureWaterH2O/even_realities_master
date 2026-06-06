@@ -192,6 +192,17 @@ export class SessionManager {
     this.sessions.get(sessionId)?.session.interrupt()
   }
 
+  /**
+   * Apply a runtime control to a session's live Query. Desk-only (the Even app never calls it).
+   * Unknown session or action is a silent no-op — a control must never throw across the Hub boundary.
+   */
+  async control(sessionId: string, action: 'setModel' | 'setMode', value: string): Promise<void> {
+    const entry = this.sessions.get(sessionId)
+    if (entry === undefined) return
+    if (action === 'setModel') await entry.session.setModel(value)
+    else if (action === 'setMode') await entry.session.setPermissionMode(value as PermissionMode)
+  }
+
   /** Coarse status of `sessionId`: 'busy' while a turn runs, else 'idle'; 'unknown' if absent. */
   getStatus(sessionId: string): SessionStatus {
     const entry = this.sessions.get(sessionId)
