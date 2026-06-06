@@ -5,6 +5,19 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-06
 
+### Co-Live Terminal M3.3b — ✅ PLANNER-VALIDATED (PASS) — runtime controls; still NOT merged, pending owner hardware UAT E1–E5
+
+- **Validation verdict (planner chat, 2026-06-06): PASS.** Validated spec→claims→code against tool output, not the notes:
+  - **Additive invariant ✅** — `git diff main -- routes.ts | grep "^-.*router\.(get|post)"` empty (only `+/control` added); `events.ts`/`sse.ts` 0 changes → glasses byte-compat.
+  - **Tests/typecheck ✅** — `npm test` 476 passed / 43 files (delta **+21**: 21 added, 0 removed, re-counted from `main`); `npm run typecheck` exit 0.
+  - **No test gaming ✅** — no `it/test/describe` removed across the FULL test diff; no `.skip`/`.only`. The only removed `expect`s = `toHaveLength(1)`→`(2)` in `sessionManager.test.ts`, a legitimate strengthening (Task-1's re-drive surfaces 2 errors on a deterministic pre-init failure; loop still asserts each error's shape+sessionId; `it()` title byte-identical).
+  - **Task-1 retry guard ✅** — `onConsumerError` re-queues in-flight prompt to FRONT once; `currentTurnRetried` guard → 2nd death gives up (no infinite loop); test: driven twice / 2 errors / exactly 1 reopen.
+  - **Self-heal (E4) ✅** — `setModel`/`setPermissionMode` update `this.config` first (now mutable) then best-effort live call; reopen-carries-choice test + builder's adversarial inverse.
+  - **Esc-aborts-turn fix ✅** — `if (pickerChoices) { setBuf(B.empty()); return }` is first in the escape handler; only short-circuits when a picker is open (genuine Esc→interrupt preserved); regression test asserts `interrupts.length === 0` + picker dismissed.
+  - **Live self-test E2/E3 🟡** — preview frames + VHS PNGs present/correct; E2/E3 live-SDK behavior is the builder's run log (not independently re-reproducible from artifacts) → definitive re-verification is the hardware UAT.
+- **Correction:** branch HEAD is `8bb571f` with **13 commits** (builder reported `a479a34`/11); the two extra are the docs commits (`a479a34` runbook + `8bb571f` this log), both after code freeze.
+- **Not merged.** Merge waits on owner hardware UAT E1–E5 (`projects/colive-terminal/m3.3b-uat-runbook.md`). Next rung after merge: `/compact` + `supportedCommands` (probe-first).
+
 ### Co-Live Terminal M3.3b — 🟡 Runtime controls (`/model` + `/mode`) — CODE-COMPLETE on branch `colive-terminal-m3.3b` (HEAD `a479a34`, 11 commits) — NOT merged; pending planner validation + hardware UAT E1–E5
 
 - **Scope:** two runtime controls on the M3.3a persistent `Query` — a curated **`/model`** picker (Opus 4.8 / Sonnet 4.6 / Haiku 4.5) and a **`/mode`** toggle (Default / Accept-edits / Plan) — via a new **additive** desk→Hub→Core `POST /api/control` path (`client.setControl` → `SessionManager.control` → `ClaudeSession.setModel`/`setPermissionMode`, which call the live `Query` method AND update `this.config` so a self-heal reopen preserves the choice). Desk reuses the M3.2 `CompletionMenu` as a two-level picker + shows model/mode in the status line. **Task 1** also closed the M3.3a queued-prompt-loss edge: re-drive the in-flight prompt **once** on a fatal query error (single-retry guard).
