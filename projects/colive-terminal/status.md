@@ -1,6 +1,27 @@
 # Co-Live Terminal — Status
 
-**Current state:** ✅ **M3.3a "Streaming-input Core" — DONE: hardware UAT D1–D5 PASS + signed off (owner, 2026-06-04),
+**Current state:** ✅ **M3.3b "Runtime controls" — DONE + SHIPPED: owner hardware UAT PASS (2026-06-06),
+planner re-verified the merged tree, merged `--no-ff` (`5b92fd7`) + pushed to `origin/main` (`7998ec0`).**
+Two runtime controls on the M3.3a persistent `Query` — a curated **`/model`** picker (Opus 4.8 / Sonnet 4.6 / Haiku 4.5)
+and a **`/mode`** toggle (Default / Accept-edits / Plan) — via a new **additive** desk→Hub→Core `POST /api/control` path
+(`client.setControl` → `SessionManager.control` → `ClaudeSession.setModel`/`setPermissionMode`, which call the live
+`Query` AND write `this.config` so a self-heal reopen preserves the choice). Plus **Task-1**: re-drive the in-flight
+prompt **once** on a fatal query error (single-retry guard). Desk reuses the M3.2 `CompletionMenu` as a two-level picker
+and shows model/mode in the status line.
+- **UAT (owner, 2026-06-06):** **E1 model-switch PASS** (desk stays the same chat, model switched), **E2 plan PASS**;
+  E3/E4 carried by the pre-UAT live self-test + unit gates. **Scare "switch model ⇒ glasses new session" = NOT a bug** —
+  live SDK probe: `setModel`/`setPermissionMode` do **not** fork `session_id`; control path is additive/desk-only and
+  never mints a session; owner had manually backed out of the glasses session to reach a menu (co-live stayed in sync).
+- **Gates (re-verified on merged `main` by the planner before push):** **476 tests / 43 files green** (+21), `tsc` 0,
+  **additive intact** vs old `main` `b972c91` (`events.ts`/`sse.ts` 0-diff, no Hub route removed, no tests removed). Push
+  `b972c91..7998ec0`; `origin/main` 0 ahead.
+- **Deferred → M3.3c:** desk↔glasses co-live session-sharing (the documented open eng problem, `knowledge/limitations.md`),
+  status-line mode-seed-from-Hub, pre-session deferred-apply, `/context` enrichment. **Next core rung:** `/compact` +
+  `supportedCommands` (probe-first).
+
+---
+
+**Previously:** ✅ **M3.3a "Streaming-input Core" — DONE: hardware UAT D1–D5 PASS + signed off (owner, 2026-06-04),
 planner-validated, MERGED to `main` `fde76c5`.** The isolated
 refactor that lands the streaming-input plumbing once, safely, before any
 b/c control feature rides on it. Drives the SDK via **one persistent `Query` per session** (was one `query({prompt:string})`
