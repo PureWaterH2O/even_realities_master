@@ -179,3 +179,143 @@ export const tall: CoLiveEvent[] = [
   { type: 'status', state: 'busy' },
   { type: 'text_delta', text: Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n') },
 ]
+
+/* ------------------------------------------------------------------ */
+/* M3.5 aesthetic-pass scenarios                                       */
+/* One event sequence per reference scenario that isn't already        */
+/* covered by the cockpit/markdownDoc/inProgress/tall/thinking/diffEdit */
+/* set above. The keystroke-driven reference states (slash menu,       */
+/* pickers, interrupt) need no event array — the aesthetic preview     */
+/* test drives those with capture()/key() directly.                    */
+/* ------------------------------------------------------------------ */
+
+/** 01 — Idle: no events at all — just the app chrome (prompt + status line). */
+export const idle: CoLiveEvent[] = []
+
+/** 02 — Simple Q&A: one user prompt + one short assistant response. */
+export const simpleQA: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Say hello' },
+  { type: 'status', state: 'busy' },
+  { type: 'text_delta', text: 'Hello! What can I help you with today?' },
+  ...endTurn('Hello! What can I help you with today?'),
+]
+
+/** 03 — Streaming: a text_delta in progress (no result yet — still streaming). */
+export const streaming: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Count from 1 to 20' },
+  { type: 'status', state: 'busy' },
+  { type: 'text_delta', text: '1\n2\n3\n4\n5\n6\n7\n8\n9\n10' },
+]
+
+/** 05 — Tool Read: a completed Read tool call. */
+export const toolRead: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Read the file CLAUDE.md' },
+  { type: 'status', state: 'busy' },
+  toolStart('Read', 'r1'),
+  toolEnd('Read', 'r1', 'Read completed', { file_path: 'CLAUDE.md' }, '# CLAUDE.md\n\nProject instructions...'),
+  { type: 'text_delta', text: "I've read the file. Here's what it contains..." },
+  ...endTurn("I've read the file. Here's what it contains..."),
+]
+
+/** 06 — Tool Bash: a completed Bash tool call with output. */
+export const toolBash: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Run ls -la in the current directory' },
+  { type: 'status', state: 'busy' },
+  toolStart('Bash', 'b1'),
+  toolEnd('Bash', 'b1', 'Bash completed', { command: 'ls -la', description: 'List files' }, { stdout: 'total 32\ndrwxr-xr-x  5 user  staff  160 Jun  6 12:00 .\n-rw-r--r--  1 user  staff  245 Jun  6 11:00 CLAUDE.md\n-rw-r--r--  1 user  staff  1024 Jun  6 10:00 package.json', stderr: '', interrupted: false }),
+  { type: 'text_delta', text: 'Here are the files in the current directory.' },
+  ...endTurn('Here are the files in the current directory.'),
+]
+
+/** 09 — Permission prompt: a tool requiring permission (rendered as inline prompt). */
+export const permission: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Delete the file /tmp/m35-test.txt' },
+  { type: 'status', state: 'busy' },
+  { type: 'text_delta', text: "I'll delete that file for you." },
+  toolStart('Bash', 'b1'),
+  {
+    type: 'permission_request',
+    toolName: 'Bash',
+    toolUseId: 'b1',
+    description: 'rm /tmp/m35-test.txt',
+    detail: 'Delete file /tmp/m35-test.txt',
+    options: [
+      { key: 'allow', text: 'Allow' },
+      { key: 'deny', text: 'Deny' },
+      { key: 'allow_always', text: 'Allow always' },
+    ],
+    suggestions: [],
+  } as CoLiveEvent,
+]
+
+/** 13 — Error diagnostic: a failed tool result. */
+export const errorDiag: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Read /tmp/no-such-file-12345.txt' },
+  { type: 'status', state: 'busy' },
+  toolStart('Read', 'r1'),
+  toolEnd('Read', 'r1', 'Read failed', { file_path: '/tmp/no-such-file-12345.txt' }, { error: 'ENOENT: no such file or directory' }),
+  { type: 'text_delta', text: "The file doesn't exist." },
+  ...endTurn("The file doesn't exist."),
+]
+
+/** 14 — Status line while busy: running_stats mid-turn (no result yet). */
+export const statusBusy: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Explain the theory of relativity in detail' },
+  { type: 'status', state: 'busy' },
+  { type: 'thinking_delta', text: 'Let me organize my thoughts about relativity...' },
+  { type: 'running_stats', durationMs: 3200, inputTokens: 850, outputTokens: 120 },
+  { type: 'text_delta', text: "## Special Relativity\n\nEinstein's theory of special relativity..." },
+]
+
+/** 16 — Question prompt: Claude asks the user a question with multiple-choice options. */
+export const question: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Ask me about my preferences' },
+  { type: 'status', state: 'busy' },
+  { type: 'text_delta', text: "I'd like to understand your preferences better." },
+  toolStart('AskUserQuestion', 'q1'),
+  {
+    type: 'user_question',
+    question: 'Which programming language do you prefer?',
+    toolUseId: 'q1',
+    options: ['TypeScript', 'Python', 'Rust'],
+  } as CoLiveEvent,
+]
+
+/** 17 — Background Bash: a tool_start with no tool_end yet (still running). */
+export const backgroundCmd: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Run sleep 5 && echo done in the background' },
+  { type: 'status', state: 'busy' },
+  { type: 'text_delta', text: "I'll run that command in the background." },
+  toolStart('Bash', 'bg1'),
+]
+
+/** 18 — Subagent: an Agent tool invocation. */
+export const subagent: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Spawn a subagent to answer: what is 2+2?' },
+  { type: 'status', state: 'busy' },
+  toolStart('Agent', 'a1'),
+  toolEnd('Agent', 'a1', 'Agent completed', { prompt: 'What is 2+2?', description: 'Math question' }, { result: '4' }),
+  { type: 'text_delta', text: 'The subagent reports: 2+2 = 4.' },
+  ...endTurn('The subagent reports: 2+2 = 4.'),
+]
+
+/** 20 — Cost summary: a completed turn with cost/token data visible. */
+export const costSummary: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Summarize this project' },
+  { type: 'status', state: 'busy' },
+  { type: 'text_delta', text: 'This project builds a Co-Live Terminal for Even Realities G2 smart glasses.' },
+  {
+    type: 'result',
+    success: true,
+    text: 'This project builds a Co-Live Terminal for Even Realities G2 smart glasses.',
+    sessionId: 's-preview',
+    costUsd: 0.0342,
+    provider: 'claude',
+    turns: 5,
+    durationMs: 8700,
+    inputTokens: 12480,
+    outputTokens: 2106,
+  } as CoLiveEvent,
+  { type: 'running_stats', durationMs: 8700, inputTokens: 12480, outputTokens: 2106 },
+  { type: 'status', state: 'idle' },
+]
