@@ -1550,4 +1550,24 @@ describe('ClaudeSession — runtime controls', () => {
     await session.run('go')
     await expect(session.setModel('x')).resolves.toBeUndefined() // no throw
   })
+
+  it('with no live query, updates config only; the next lazy open carries the chosen model', async () => {
+    // Spec §3.1: a control applied BEFORE the first run (no live query yet) updates
+    // config only; the lazily-opened query then carries the chosen model.
+    const opens: Array<{ model?: string }> = []
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage>; options?: { model?: string } }) => {
+      opens.push({ model: args.options?.model })
+      const gen = (async function* () {
+        for await (const _msg of args.prompt) yield { type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} }
+      })()
+      const q = gen as unknown as QueryLike
+      ;(q as { interrupt: () => Promise<void> }).interrupt = async () => {}
+      return q
+    }) as unknown as QueryFn
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.setModel('claude-sonnet-4-6') // no live query yet -> config only
+    await session.run('first')                  // lazy open #0 must carry the chosen model
+    expect(opens[0]?.model).toBe('claude-sonnet-4-6')
+  })
 })
