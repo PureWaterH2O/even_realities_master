@@ -11,7 +11,13 @@ built, what we decided. Newest entries on top.
 - **Approach:** Reference Frame Catalog + Replay Harness — 25 scenarios comparing native Claude screenshots against our desk's replay frames. Differences cataloged → fixed by element group → UAT → customization brainstorm.
 - **Spec:** `docs/superpowers/specs/2026-06-06-colive-terminal-m3.5-aesthetic-pass-design.md`
 - **Plan:** `docs/superpowers/plans/2026-06-06-colive-terminal-m3.5-aesthetic-pass.md`
-- **Builder Run 1 (Tasks 1-5):** comparison infrastructure — in progress (4.8 ultracode).
+- **Builder Run 1 (Tasks 1-5) ✅ DONE 2026-06-06 — comparison infrastructure built + self-verified (5 commits `c230ed4..69e769d` on `main`; NOT pushed):**
+  - `projects/colive-terminal/aesthetic/snap.sh` (macOS `screencapture` helper, 25 named scenarios, no-arg progress checklist) · `scenarios.md` (25-scenario capture runbook) · `reference/.gitkeep`.
+  - `colive-terminal/test/preview/scenarios.ts` **+12 replay event sequences** (idle, simpleQA, streaming, toolRead, toolBash, permission, errorDiag, statusBusy, question, backgroundCmd, subagent, costSummary) — **additive**, the existing 6 (cockpit/markdownDoc/inProgress/tall/thinking/diffEdit) untouched.
+  - `colive-terminal/test/preview/aesthetic.preview.test.tsx` (NEW — 25 scenario tests; keystroke-driven states 15/19/21–25 driven via `capture()`/`key()`) + `catalog.md` stub + `replay` symlink → `preview-out/aesthetic/`.
+  - **Self-verified (tool output):** `npx tsc --noEmit` exit 0 · `npx vitest run` **501 passed / 44 files** (+25 from 476) · `PREVIEW=1` dump → **56 frames** (28×{txt,ansi}) in `preview-out/aesthetic/` · `snap.sh` no-arg → exit 1 + 25-item checklist, executable.
+  - **2 plan-code fixes (documented in commits):** added the required `suggestions: []` to the `permission` event (`events.ts` `PermissionRequestEvent` requires it; the plan's `as CoLiveEvent` cast had hidden the omission); 13-error assertion `toContain('failed')` → `toContain('/tmp/no-such-file-12345.txt')` (`rows.ts` encodes tool errors as **red color only**, computed from `summary` → `stripAnsi` drops it, so "failed" is never in plain text). Plan prose said "13 new scenarios"; its own code block defines exactly the **12** implemented (the set the preview test imports).
+  - **Next gate → 👤 user:** reference-capture session — run **native** Claude Code through the 25 scenarios with `snap.sh`, then the planner catalogs diffs (`catalog.md`, D-001…) before Builder Run 2 (Phase B rendering fixes, Tasks 6–15). Tasks 6+ intentionally NOT started (they depend on the reference frames).
 
 ### Co-Live Terminal M3.3b — ✅ HARDWARE UAT PASS (owner sign-off) → runtime controls SHIP (merged to `main` via `--no-ff`)
 
