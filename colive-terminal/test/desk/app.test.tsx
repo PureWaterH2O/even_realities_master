@@ -83,6 +83,10 @@ function makeFakeHub(opts?: {
       fake.transcriptCalls.push(sessionId)
       return opts?.transcript ?? []
     },
+    async setControl() {},
+    async getInfo() {
+      return { model: 'claude-opus-4-8' }
+    },
   }
   return fake
 }

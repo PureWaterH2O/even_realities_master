@@ -86,6 +86,12 @@ export interface HubClient {
   /** POST /api/interrupt {sessionId}. */
   interrupt(sessionId: string): Promise<void>
 
+  /** POST /api/control {sessionId, action, value}. */
+  setControl(sessionId: string, action: 'setModel' | 'setMode', value: string): Promise<void>
+
+  /** GET /api/info -> { model, version, provider, ... }; resolves with at least the model. */
+  getInfo(): Promise<{ model: string }>
+
   /** GET /api/sessions/:id/transcript; resolves with the transcript array. */
   fetchTranscript(sessionId: string): Promise<TranscriptEntry[]>
 }
@@ -254,6 +260,19 @@ export function createHubClient(options: HubClientOptions): HubClient {
     await postJson('/api/interrupt', { sessionId })
   }
 
+  async function setControl(
+    sessionId: string,
+    action: 'setModel' | 'setMode',
+    value: string,
+  ): Promise<void> {
+    await postJson('/api/control', { sessionId, action, value })
+  }
+
+  async function getInfo(): Promise<{ model: string }> {
+    const info = (await getJson('/api/info')) as { model?: unknown } | undefined
+    return { model: typeof info?.model === 'string' ? info.model : '' }
+  }
+
   async function fetchTranscript(sessionId: string): Promise<TranscriptEntry[]> {
     const json = (await getJson(`/api/sessions/${encodeURIComponent(sessionId)}/transcript`)) as
       | { transcript?: unknown }
@@ -268,6 +287,8 @@ export function createHubClient(options: HubClientOptions): HubClient {
     respondPermission,
     respondQuestion,
     interrupt,
+    setControl,
+    getInfo,
     fetchTranscript,
   }
 }

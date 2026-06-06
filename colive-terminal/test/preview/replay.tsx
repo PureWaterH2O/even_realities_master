@@ -49,6 +49,10 @@ export function makeReplayClient(transcript: TranscriptEntry[] = []): HubClient 
     async fetchTranscript() {
       return transcript
     },
+    async setControl() {},
+    async getInfo() {
+      return { model: 'claude-opus-4-8' }
+    },
   }
 }
 

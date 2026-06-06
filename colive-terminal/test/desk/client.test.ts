@@ -167,6 +167,29 @@ describe('createHubClient — request/response endpoints (injected fetch)', () =
   })
 })
 
+describe('createHubClient — setControl + getInfo (injected fetch)', () => {
+  it('setControl POSTs /api/control with the action + value (bearer auth)', async () => {
+    const { fetchImpl, calls } = makeFakeFetch(() => ({ status: 202, json: { ok: true } }))
+    const client = createHubClient({ baseUrl: 'http://hub.local', token: TOKEN, fetch: fetchImpl })
+    await client.setControl('s1', 'setMode', 'plan')
+    expect(calls).toHaveLength(1)
+    expect(calls[0].method).toBe('POST')
+    expect(new URL(calls[0].url).pathname).toBe('/api/control')
+    expect(calls[0].headers['authorization']).toBe(`Bearer ${TOKEN}`)
+    expect(calls[0].body).toEqual({ sessionId: 's1', action: 'setMode', value: 'plan' })
+  })
+
+  it('getInfo GETs /api/info and returns the model', async () => {
+    const { fetchImpl, calls } = makeFakeFetch(() => ({ status: 200, json: { model: 'claude-opus-4-8', version: '1', provider: 'claude' } }))
+    const client = createHubClient({ baseUrl: 'http://hub.local', token: TOKEN, fetch: fetchImpl })
+    const info = await client.getInfo()
+    expect(info.model).toBe('claude-opus-4-8')
+    expect(calls[0].method).toBe('GET')
+    expect(new URL(calls[0].url).pathname).toBe('/api/info')
+    expect(calls[0].headers['authorization']).toBe(`Bearer ${TOKEN}`)
+  })
+})
+
 describe('createHubClient — subscribe (real stub Hub on port 0)', () => {
   let server: http.Server | undefined
   let close: (() => void) | undefined
