@@ -35,10 +35,13 @@ Snap: `./projects/colive-terminal/aesthetic/snap.sh 02-simple-qa`
 ## 03 — Streaming response
 
 ```
-Count from 1 to 20, one number per line
+Count from 1 to 300, one number per line, slowly
 ```
 
-Snap **while the response is still streaming** (you'll see text appearing line by line).
+Snap **while the response is still streaming** — numbers must still be actively
+appearing, BEFORE the prompt box returns and BEFORE any `✱ …for Ns` summary line
+shows. (A short count like 1→20 finishes in ~1s and can't be caught mid-stream —
+use a long, slow one.)
 
 Snap: `./projects/colive-terminal/aesthetic/snap.sh 03-streaming`
 
