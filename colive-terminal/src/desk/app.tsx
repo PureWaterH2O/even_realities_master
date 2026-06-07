@@ -226,7 +226,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // D-008: an in-turn activity line (`✱ Working… (Ns · ↑ N tokens)`) shows while a
   // turn is active; reserve a row for it so it never pushes output past the viewport.
   const busyActive = STATUS_LABEL[status.state] !== 'idle' && !pending
-  const reserved = 3 + inputRowCount + menuRowCount + (busyActive ? 1 : 0) // 3 = indicator + status + headroom
+  // 4 = scroll indicator + status line + "← for agents" hint (D-009) + headroom.
+  const reserved = 4 + inputRowCount + menuRowCount + (busyActive ? 1 : 0)
   const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
@@ -649,12 +650,16 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
   /* ------------------------- render ------------------------- */
 
-  const statusLabel = STATUS_LABEL[status.state]
-  const tokenStr =
-    status.inputTokens !== undefined || status.outputTokens !== undefined
-      ? ` · ${(status.inputTokens ?? 0) + (status.outputTokens ?? 0)} tokens (${status.inputTokens ?? 0} in / ${status.outputTokens ?? 0} out)`
-      : ''
-  const sid = sessionIdRef.current
+  // D-009: native pipe-separated status line — "Opus 4.8 (1M context) | tokens: N".
+  // We lack native's ctx%/5h/7d rate-limit data, so we show what we have (model +
+  // total tokens). The permission mode is surfaced only when it's NOT the default
+  // (plan / accept-edits matter and the banner — which shows mode — scrolls away
+  // after the first turn). The select-mode affordance is preserved as a suffix.
+  const statusSegments = [currentModel ? modelDisplayName(currentModel) : 'Claude']
+  if (currentMode !== 'default') statusSegments.push(currentMode)
+  statusSegments.push(`tokens: ${(status.inputTokens ?? 0) + (status.outputTokens ?? 0)}`)
+  let statusLine = statusSegments.join(' | ')
+  if (mouseMode === 'select') statusLine += ' · select-mode (wheel off · ⇧/⌥-drag to copy)'
 
   // D-008: in-turn activity line — "✱ <verb>… (Ns · ↑ N tokens)". Seconds + input
   // tokens come from running_stats; the verb is deterministic in the elapsed time.
@@ -692,11 +697,9 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         </Box>
       ) : null}
 
-      <Box>
-        <Text dimColor>
-          [{statusLabel}{currentModel ? ` · ${shortModel(currentModel)}` : ''}{` · ${currentMode}`}{tokenStr}] {sid ? `session ${sid}` : 'new session'}
-          {mouseMode === 'select' ? ' · select-mode (wheel off · ⇧/⌥-drag to copy)' : ''}
-        </Text>
+      <Box flexDirection="column">
+        <Text dimColor>{statusLine}</Text>
+        <Text dimColor>← for agents</Text>
       </Box>
 
       {menuOpen ? (
@@ -805,10 +808,6 @@ function Banner({ model, mode, cwd }: { model: string; mode: string; cwd: string
     </Box>
   )
 }
-
-/** Short status-line label for a model id: claude-opus-4-8 -> opus-4-8; strips a trailing -YYYYMMDD. */
-const shortModel = (id: string): string =>
-  id.replace(/^claude-/, '').replace(/-\d{8}$/, '')
 
 /** Drop a single trailing "\" from the buffer's current line (backslash-continuation). */
 function trimTrailingBackslash(b: EditBuffer): EditBuffer {

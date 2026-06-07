@@ -179,7 +179,8 @@ describe('aesthetic preview', () => {
   it('20-cost-summary: token/cost display', async () => {
     const frames = await capture([...costSummary.map(emit), snap('cost')])
     dump('20-cost-summary', frames)
-    expect(frames[0]!.plain).toContain('12480')
+    // D-009 status line shows the total token count (12480 in + 2106 out = 14586).
+    expect(frames[0]!.plain).toContain('tokens: 14586')
   })
 
   it('21-effort-picker: /effort UI', async () => {

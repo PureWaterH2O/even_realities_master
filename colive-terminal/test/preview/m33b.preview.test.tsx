@@ -41,7 +41,7 @@ describe('M3.3b control pickers preview', () => {
   it('status line shows the active model + mode after a pick', async () => {
     const frames = await capture([key('/mode'), key('\x1b[B'), key('\x1b[B'), key('\r'), snap('m33b-status-plan')])
     dump(frames)
-    expect(frames[0]!.plain).toContain('plan')      // mode picked
-    expect(frames[0]!.plain).toContain('opus-4-8')  // model seeded from getInfo (short label)
+    expect(frames[0]!.plain).toContain('plan')              // mode picked (status-line segment)
+    expect(frames[0]!.plain).toContain('Opus 4.8 (1M context)') // model display name (D-009)
   })
 })

@@ -203,10 +203,12 @@ describe('desk App', () => {
     fake.emit({ type: 'status', state: 'think_start' })
     fake.emit({ type: 'running_stats', durationMs: 5000, inputTokens: 100, outputTokens: 42 })
     await flush()
-    const frame = lastFrame() ?? ''
-    // The status label and a token count should both be visible somewhere.
-    expect(frame.toLowerCase()).toContain('think')
-    expect(frame).toMatch(/142|100|42/)
+    const frame = stripAnsi(lastFrame() ?? '')
+    // D-009: native pipe status line (model + total tokens) + the activity spinner
+    // conveys the in-turn state (the bracketed [thinking] label is gone).
+    expect(frame).toContain('Opus 4.8 (1M context)')
+    expect(frame).toContain('✱')                   // in-turn activity spinner
+    expect(frame).toMatch(/142|100|42/)            // a token count (total 142, or ↑ 100)
   })
 
   it('renders an inline permission prompt with option labels and posts the chosen key', async () => {
@@ -1224,16 +1226,17 @@ describe('runtime control pickers (/model, /mode)', () => {
     cleanup()
   })
 
-  it('/clear resets the status-line mode back to default', async () => {
+  it('/clear resets the permission mode back to default', async () => {
     const fake = makeFakeHub()
     const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
     await flush()
     await write(stdin, '/mode'); await write(stdin, '\x1b[B'); await write(stdin, '\x1b[B'); await write(stdin, '\r') // pick Plan
-    expect(stripAnsi(lastFrame()!)).toContain('· plan')
+    expect(stripAnsi(lastFrame()!)).toContain('| plan') // non-default mode shown as a status-line segment (D-009)
     await write(stdin, '/clear'); await write(stdin, '\r')   // new session
     await flush()
-    expect(stripAnsi(lastFrame()!)).toContain('· default')
-    expect(stripAnsi(lastFrame()!)).not.toContain('· plan')
+    // After /clear the transcript is empty, so the banner shows the (reset) mode.
+    expect(stripAnsi(lastFrame()!)).toContain('default mode')
+    expect(stripAnsi(lastFrame()!)).not.toContain('plan')
     cleanup()
   })
 })
