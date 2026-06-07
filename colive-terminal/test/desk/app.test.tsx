@@ -324,6 +324,129 @@ describe('desk App', () => {
     expect(fake.questions).toEqual([{ sessionId: 's1', answer: 'bar.ts', toolUseId: 'q-1' }])
   })
 
+  // D-032 (BLOCKER): the permission prompt renders a "›" selection indicator, so it
+  // must be arrow-navigable + Enter-confirmable, not digit-only.
+  it('confirms the highlighted permission option on Enter (default = first option)', async () => {
+    const fake = makeFakeHub()
+    const { stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'permission_request',
+      toolName: 'Bash',
+      description: 'Run a shell command',
+      detail: 'rm -rf /tmp/x',
+      toolUseId: 'tu-9',
+      options: [
+        { text: 'Yes', key: 'allow' },
+        { text: 'No', key: 'deny' },
+      ],
+      suggestions: [],
+    })
+    await flush()
+    await write(stdin, '\r') // Enter confirms the highlighted (index 0 -> allow)
+    expect(fake.permissions).toEqual([{ sessionId: 's1', decision: 'allow', toolUseId: 'tu-9' }])
+  })
+
+  it('arrow-navigates permission options and confirms the selection with Enter', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'permission_request',
+      toolName: 'Bash',
+      description: 'Run a shell command',
+      detail: 'rm -rf /tmp/x',
+      toolUseId: 'tu-9',
+      options: [
+        { text: 'Yes', key: 'allow' },
+        { text: 'No', key: 'deny' },
+      ],
+      suggestions: [],
+    })
+    await flush()
+    await write(stdin, '\x1b[B') // ↓ -> highlight option 2 ("No" -> deny)
+    // The "›" marker + highlight follow the selection to option 2.
+    expect(stripAnsi(lastFrame() ?? '')).toContain('› 2. No')
+    await write(stdin, '\r') // Enter confirms the highlighted option
+    expect(fake.permissions).toEqual([{ sessionId: 's1', decision: 'deny', toolUseId: 'tu-9' }])
+  })
+
+  it('clamps permission arrow navigation at the list bounds', async () => {
+    const fake = makeFakeHub()
+    const { stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'permission_request',
+      toolName: 'Bash',
+      description: 'Run a shell command',
+      detail: 'rm -rf /tmp/x',
+      toolUseId: 'tu-9',
+      options: [
+        { text: 'Yes', key: 'allow' },
+        { text: 'No', key: 'deny' },
+      ],
+      suggestions: [],
+    })
+    await flush()
+    await write(stdin, '\x1b[A') // ↑ at the top edge stays on option 1
+    await write(stdin, '\r')
+    expect(fake.permissions).toEqual([{ sessionId: 's1', decision: 'allow', toolUseId: 'tu-9' }])
+  })
+
+  it('still selects a permission option directly by digit (bypasses the index)', async () => {
+    const fake = makeFakeHub()
+    const { stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'permission_request',
+      toolName: 'Bash',
+      description: 'Run a shell command',
+      detail: 'rm -rf /tmp/x',
+      toolUseId: 'tu-9',
+      options: [
+        { text: 'Yes', key: 'allow' },
+        { text: 'No', key: 'deny' },
+      ],
+      suggestions: [],
+    })
+    await flush()
+    await write(stdin, '2') // digit 2 -> deny, regardless of the highlighted index
+    expect(fake.permissions).toEqual([{ sessionId: 's1', decision: 'deny', toolUseId: 'tu-9' }])
+  })
+
+  it('arrow-navigates question options and confirms the selection with Enter (no typed text)', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'user_question',
+      question: 'Which file?',
+      toolUseId: 'q-1',
+      options: ['foo.ts', 'bar.ts'],
+    })
+    await flush()
+    await write(stdin, '\x1b[B') // ↓ -> highlight bar.ts
+    expect(stripAnsi(lastFrame() ?? '')).toContain('› 2. bar.ts')
+    await write(stdin, '\r') // Enter confirms the highlighted option
+    expect(fake.questions).toEqual([{ sessionId: 's1', answer: 'bar.ts', toolUseId: 'q-1' }])
+  })
+
+  it('Enter on a question with typed free text submits the text (not the highlighted option)', async () => {
+    const fake = makeFakeHub()
+    const { stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'user_question',
+      question: 'Which file?',
+      toolUseId: 'q-1',
+      options: ['foo.ts', 'bar.ts'],
+    })
+    await flush()
+    await write(stdin, 'baz.ts') // free-text answer
+    await write(stdin, '\r')
+    expect(fake.questions).toEqual([{ sessionId: 's1', answer: 'baz.ts', toolUseId: 'q-1' }])
+  })
+
   it('sends a normal line as a prompt on Enter (and does not treat it as a command)', async () => {
     const fake = makeFakeHub()
     const { stdin } = mount(<App client={fake} sessionId="s1" />)

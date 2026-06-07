@@ -152,6 +152,10 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const width = (stdout?.columns ?? 80)
   const [status, setStatus] = useState<StatusInfo>({ state: 'idle' })
   const [pending, setPending] = useState<Pending | undefined>(undefined)
+  // D-032: which option is highlighted in the inline permission/question prompt.
+  // ↑/↓ move it, Enter confirms it, digit keys bypass it. Reset to the first
+  // option whenever a new prompt appears (effect below).
+  const [permissionIndex, setPermissionIndex] = useState(0)
   const [buf, setBuf] = useState<EditBuffer>(B.empty)
   // UAT A6 — runtime mouse-reporting mode. Defaults to 'scroll' (mouse ON, wheel
   // scrolls the transcript) to match the alt-screen enter sequence in src/index.ts.
@@ -217,6 +221,9 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   const clampedMenuIndex = menuOpen ? Math.min(menuIndex, menuLength - 1) : 0
   // Reset the highlight + un-dismiss whenever the composer text changes (a re-filter).
   useEffect(() => { setMenuIndex(0); setMenuDismissed(false) }, [B.toText(buf)])
+  // D-032: reset the permission/question highlight to the first option whenever the
+  // pending prompt changes (a new prompt, or it clears).
+  useEffect(() => { setPermissionIndex(0) }, [pending])
 
   // Reserve lines for the chrome (scroll indicator + status line + 1 line of headroom)
   // PLUS the composer's own rows, which grow as the buffer gains lines. The headroom is
@@ -587,12 +594,26 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     }
 
     if (pending) {
+      // D-032: ↑/↓ move the highlight (clamped to the option list); digit keys still
+      // select an option directly, bypassing the highlight.
+      const optionCount = pending.event.options.length
+      if (key.upArrow)   { setPermissionIndex((i) => Math.max(0, i - 1)); return }
+      if (key.downArrow) { setPermissionIndex((i) => Math.min(optionCount - 1, i + 1)); return }
       if (/^[1-9]$/.test(ch)) { resolvePending(Number.parseInt(ch, 10) - 1); return }
       if (pending.kind === 'question') {
-        if (key.return) { submitQuestionText(B.toText(buf)); setBuf(B.empty()); return }
+        // Enter submits typed free text when present (the "Type something" path);
+        // with no typed text it confirms the highlighted option (arrow-select).
+        if (key.return) {
+          const typed = B.toText(buf)
+          if (typed !== '') { submitQuestionText(typed); setBuf(B.empty()); return }
+          resolvePending(permissionIndex); return
+        }
         if (key.backspace || key.delete) { setBuf(B.deleteBackward); return }
         if (ch && !key.ctrl && !key.meta) setBuf((b) => B.insertText(b, ch))
+        return
       }
+      // permission: Enter confirms the highlighted option.
+      if (key.return) { resolvePending(permissionIndex); return }
       return
     }
 
@@ -704,7 +725,14 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         </Box>
       ) : null}
 
-      {pending ? <PendingPrompt pending={pending} input={B.toText(buf)} width={width} /> : null}
+      {pending ? (
+        <PendingPrompt
+          pending={pending}
+          input={B.toText(buf)}
+          width={width}
+          selectedIndex={Math.min(permissionIndex, pending.event.options.length - 1)}
+        />
+      ) : null}
 
       {busyActive ? (
         <Box>
@@ -788,7 +816,7 @@ function buildPickerPanel(
  * D-018): no rounded box, a leading rule, a header, the body, numbered options
  * (option 1 pre-highlighted, matching native's default), and a key-hint footer.
  */
-function PendingPrompt({ pending, input, width }: { pending: Pending; input: string; width: number }): React.ReactElement {
+function PendingPrompt({ pending, input, width, selectedIndex }: { pending: Pending; input: string; width: number; selectedIndex: number }): React.ReactElement {
   const rule = '─'.repeat(Math.max(1, width))
   if (pending.kind === 'permission') {
     const e = pending.event
@@ -803,13 +831,13 @@ function PendingPrompt({ pending, input, width }: { pending: Pending; input: str
         <Text>Do you want to proceed?</Text>
         {e.options.map((opt, i) => (
           <Text key={opt.key + String(i)}>
-            {i === 0 ? <Text color="blue">{'› '}</Text> : '  '}
+            {i === selectedIndex ? <Text color="blue">{'› '}</Text> : '  '}
             {`${i + 1}. `}
-            {i === 0 ? <Text color="blue">{opt.text}</Text> : opt.text}
+            {i === selectedIndex ? <Text color="blue">{opt.text}</Text> : opt.text}
           </Text>
         ))}
         <Text> </Text>
-        <Text dimColor>Esc to cancel · Tab to amend · ctrl+e to explain</Text>
+        <Text dimColor>Enter to confirm · ↑/↓ to navigate · Esc to cancel · Tab to amend</Text>
       </Box>
     )
   }
@@ -823,9 +851,9 @@ function PendingPrompt({ pending, input, width }: { pending: Pending; input: str
       <Text bold>{e.question}</Text>
       {e.options.map((opt, i) => (
         <Text key={opt + String(i)}>
-          {i === 0 ? <Text color="#a78bfa">{'› '}</Text> : '  '}
+          {i === selectedIndex ? <Text color="#a78bfa">{'› '}</Text> : '  '}
           {`${i + 1}. `}
-          {i === 0 ? <Text color="#a78bfa">{opt}</Text> : opt}
+          {i === selectedIndex ? <Text color="#a78bfa">{opt}</Text> : opt}
         </Text>
       ))}
       <Text>{`  ${extras + 1}. Type something`}</Text>
