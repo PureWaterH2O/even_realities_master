@@ -26,8 +26,8 @@ Severity: **major** (structurally wrong / unmistakable) · **medium** (noticeabl
 | Diffs (T12) | D-016 | minor |
 | Permission / Question (T13) | D-017, D-018 | major |
 | Menus / Pickers (T14) | D-019, D-020, D-021 | medium |
-| Behavioral / Scrollback (T15) | D-022 | medium |
-| Deep views — likely descoped (not T6–15) | D-023…D-027 | — |
+| Behavioral / Scrollback (T15) | D-022, D-028 | medium |
+| Deep views — **DESCOPED** (not T6–15) | D-023…D-027 | — |
 
 **Headline:** the transcript *body* is close in places (markdown tables + `▌` blockquotes already match;
 tool headers are `Name(arg)` on both sides), but the **chrome** is unmistakably different — no banner, a
@@ -38,12 +38,13 @@ implement at all.
 
 ---
 
-## ⚠️ Decisions needed from the planner (judgment calls)
+## ✅ Planner decisions (resolved 2026-06-06)
 
-1. **Prompt glyph:** plan Task 6 said change `>` → `❯` (U+2771). The **actual native glyph is `›` (U+203A)** — thinner. Use `›`. *(affects D-002, D-003)*
-2. **Collapsed thinking (D-012):** native leaves **no** inline stub (thinking folds away; only a `✱ Worked for Ns` footer remains). Ours shows `💭 thinking (N lines) — Ctrl-O`. Match native (hide it) or keep our discoverable stub? Our stub is arguably *better* UX — recommend keeping but restyling.
-3. **Scrollback (D-022):** native has **no in-app scroll indicator** (it relies on terminal-native scrollback). Ours runs a managed pinned viewport + `rows N–M of Z` indicator — load-bearing for the desk's fixed-region redraw (UAT A1). Matching native = drop the viewport, a big regression risk. **Recommend KEEP ours** and mark D-022 won't-fix.
-4. **Deep dashboards (D-023…D-027):** native `/cost`, `/usage`, `/config`, `/memory`, `/effort` are rich full-screen views. M3.5's bar is "indistinguishable **at a glance**" for the daily-driver chrome, not byte-parity on stats dashboards. **Recommend descope** `/cost`·`/usage`·`/config`·`/memory` for M3.5; consider only `/effort` if effort becomes a desk control.
+1. **Prompt glyph: `›` (U+203A) confirmed.** The plan guessed `❯` (U+2771) — wrong. Native uses the thinner `›`. *(affects D-002, D-003)*
+2. **Collapsed thinking (D-012): KEEP our stub, restyle.** Our `💭 thinking (N lines) — Ctrl-O` is better UX than native's total hide. Restyle: drop the emoji, use native-style dim italic, e.g. `· thinking (N lines) — ctrl+o to expand`.
+3. **Scrollback (D-022): WON'T-FIX.** Our managed viewport is load-bearing for the Ink-based fixed-region redraw. Accept the divergence.
+4. **Deep dashboards (D-023…D-027): DESCOPED from M3.5.** These are feature work, not aesthetic fixes. `/config` and `/memory` aren't even implemented. Revisit in a future rung.
+5. **Interrupt state: ADDED as D-028.** Native shows `└ Interrupted · What should Claude do instead?` — a distinctive pattern we should match.
 
 ---
 
@@ -141,12 +142,16 @@ implement at all.
 
 ## Behavioral / Scrollback — plan Task 15 · `src/desk/render/window.ts`, `app.tsx`
 
-**D-022 — Scrollback indicator** · **medium** · scenario 12 · fix: `window.ts` / `app.tsx` · **see Decision 3 — recommend won't-fix**
-- Native: no in-app indicator; terminal-native scrollback. Ours: a pinned viewport + `rows N–M of Z (pinned ▼) / ▲▼ PgUp/PgDn · End`. Keep ours (load-bearing for the desk's fixed-region redraw); accept the divergence.
+**D-022 — Scrollback indicator** · ~~medium~~ **won't-fix** · scenario 12 · **Decision 3: KEEP OURS**
+- Native: no in-app indicator; terminal-native scrollback. Ours: a pinned viewport + `rows N–M of Z (pinned ▼) / ▲▼ PgUp/PgDn · End`. Our viewport is load-bearing for the Ink-based fixed-region redraw. Divergence accepted.
+
+**D-028 — Interrupt state** · **medium** · scenario 19 · fix: `rows.ts` (assistant closed+interrupted) + `app.tsx` (interrupt result rendering)
+- Native: `● The History of Computing:` (bold/italic, the interrupted partial text) + `└ Interrupted · What should Claude do instead?` sub-line.
+- Ours: the interrupted text just stops; no "Interrupted" indicator or follow-up prompt.
 
 ---
 
-## Deep views — likely descoped for M3.5 (not in plan Tasks 6–15) · **see Decision 4**
+## Deep views — DESCOPED for M3.5 (Decision 4) — revisit in a future rung
 
 **D-023 — `/cost`** · scenario 20 — Native: full session cost/usage breakdown (cost, durations, code changes, per-model usage, 5h/week limits, "what's contributing"). Ours: status-line tokens only; `/cost` not implemented.
 
@@ -165,7 +170,6 @@ implement at all.
 01→D-001,D-002,D-009 · 02→D-003,D-010 · 03→D-011 · 04→D-007,D-012 · 05/06/08→D-004,D-005,D-006,D-007 ·
 07→D-005,D-016 · 09→D-017 · 10→D-008,D-013,D-014 · 11→D-010,D-015 · 12→D-022 · 13→(error = color-only,
 [[desk-rendering]] note; covered by D-004/D-005) · 14→D-008,D-009 · 15→D-019 · 16→D-018 · 17→D-008 ·
-18→D-004,D-005,D-006,D-007 · 19→(interrupt state — native `⌐ Interrupted · What should Claude do instead?`;
-candidate add) · 20→D-009,D-023 · 21→D-021 · 22→D-024 · 23→D-020 · 24→D-025 · 25→D-026.
+18→D-004,D-005,D-006,D-007 · 19→D-028 · 20→D-009,D-023 · 21→D-021 · 22→D-024 · 23→D-020 · 24→D-025 · 25→D-026.
 
-_Status: drafted by the builder from all 25 references + replay frames; **pending planner review** (esp. the 4 decisions above) before Builder Run 2 populates plan Tasks 6–15._
+_Status: **PLANNER-REVIEWED 2026-06-06.** All 4 decisions resolved; D-028 added (interrupt state); D-022 won't-fix; D-023–D-027 descoped. Ready for Builder Run 2 (Tasks 6–15)._
