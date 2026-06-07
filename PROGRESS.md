@@ -5,6 +5,16 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-07
 
+### Co-Live Terminal — build-vs-adopt sanity check (owner-requested): keep Core/Hub, descope M3.5 parity
+
+- **Question (owner):** "we've spent a lot of time building a custom Claude TUI from scratch — is there an OSS project that does this we could wire the bridge into instead?" Scoped via `AskUserQuestion`: stock Even app is a **hard constraint** (Hub protocol shim stays custom), the **desk TUI is the thing being questioned**, owner **genuinely open to pivoting**, wants **migration feasibility**.
+- **Method:** 11-agent `Workflow` (2 codebase readers + seams extractor + 5 web researchers across OSS agent-TUIs / headless engines / mirror-real-Claude inversion / phone co-live clients / Claude-Code-OSS+TUI-libs, then a 3-perspective skeptic/defender/integrator judging pass). ~805K subagent tokens.
+- **Verdict (3 judges converged):** **No off-the-shelf foundation replaces the stack** — nothing does headless Claude + single-writer co-live + structured events + ring-routed approvals + Even wire together. **The Core is NOT "Claude passed through"** (it's SDK + a bespoke 14-event normalizer + permission broker + single-writer FIFO; ~80% original, nothing speaks our vocab). **The reinvention is the desk's M3.5 pixel-parity chase** — ~1,150 LOC (~39% of the 2,983-line desk) repaints native Claude for no functional gain, and "looks exactly like native" is never free (Claude Code's renderer is closed/ARR; our event union is bespoke).
+- **The hoped-for inversion (desk = real Claude Code, glasses mirror off it) is BLOCKED at 3 walls:** (1) no API to inject a glasses-initiated prompt into a running interactive `claude` (open issues #24947/#27441/#53049); (2) the `.jsonl` carries no permission_request / no streaming deltas / no status; (3) SDK-resume = two-writers collision. Even Anthropic's own Remote Control routes only to its own clients over a closed relay.
+- **Closest prior art:** Happy (slopus/happy, MIT, ~21.7k★) — architectural twin but E2E-encrypted over its own relay → **harvest its MIT permission-handler/SDK-wrap patterns, don't host it.** Validation: `sam-siavoshian/claude-code-g2` (MIT) is a near-identical independent build (it punts permissions via `--skip-permissions` + ships its own WebView — we solved the harder version).
+- **Recommendation:** keep Core/Hub/Remote custom; **descope M3.5 pixel-parity** (Option A: freeze desk as good-enough glasses-companion view, effort ≈0; Option B: only if Ink perf bites, swap render substrate to OpenTUI behind the unchanged 14-event contract via SEAM 6, zero Core/Hub change). Do NOT adopt OpenCode/Crush as the desk or pursue the inversion.
+- **⚠️ Verify (past knowledge cutoff):** the Even official-SDK launch (`@evenrealities/even_hub_sdk`, ~Apr 2026) + claude-code-g2 details — both agent-reported, strategically load-bearing. **Captured:** `knowledge/terminal-mode/build-vs-adopt.md` (landscape + seams + candidate verdicts). **No code changed; no decision committed — awaits owner.**
+
 ### Co-Live Terminal M3.5 — Aesthetic pass: Phase B MERGED + 4 UAT defects fixed
 
 - **Phase B merged to `main`** (after planner review: 510 tests, tsc 0, 8/10 visual parity). Hardware UAT (`m3.5-uat-runbook.md`, scenarios F1–F8) then surfaced **6 new defects**, appended to `catalog.md` as **D-029…D-034**.

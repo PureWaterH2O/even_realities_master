@@ -33,6 +33,7 @@ Status key: ⬜ not started · 🟨 partial · 🟩 solid coverage
 ## Cross-cutting
 
 - Limitations & open questions: [`limitations.md`](limitations.md)
+- **Build-vs-adopt landscape (2026-06-07):** 🧪/🟡 [`terminal-mode/build-vs-adopt.md`](terminal-mode/build-vs-adopt.md) — owner-requested sanity check (11-agent workflow). No OSS foundation replaces the stack (headless Claude + single-writer co-live + structured events + ring approvals + Even wire); the Core is irreducible glue, **the M3.5 pixel-parity chase is the reinvention** → descope. The inversion (desk = real Claude, glasses mirror) is blocked at 3 walls. Closest twin = Happy (harvest, don't host). Migration seam = SEAM 6 (swap desk renderer behind the 14-event contract; zero Core/Hub change).
 
 ## How to add knowledge
 
