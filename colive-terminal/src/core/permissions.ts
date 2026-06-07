@@ -109,6 +109,12 @@ interface Pending<T> {
    * Only set for permission awaits; questions resolve their own updatedInput.
    */
   input?: Record<string, unknown>
+  /**
+   * The parsed question text — set only for question awaits. {@link
+   * PermissionBroker.resolveQuestion} needs it to build the SDK's
+   * `answers` map (question text → answer string).
+   */
+  question?: string
   resolve: (value: T) => void
   timer: ReturnType<typeof setTimeout>
   /** Detach the abort listener (if any) when settled. */
@@ -203,8 +209,13 @@ export class PermissionBroker {
     clearTimeout(pending.timer)
     this.emitResult(pending.toolName, 'answered')
     // An answered question feeds the chosen option back to the model as the
-    // tool result; the SDK consumes it via updatedInput.
-    pending.resolve({ behavior: 'allow', updatedInput: { answer } })
+    // tool result; the SDK consumes it via updatedInput. The SDK's
+    // AskUserQuestionOutput shape is `answers` — a MAP of question text → answer
+    // string — NOT a bare `answer`. A bare `answer` is an unrecognized shape: the
+    // tool errors and the model falls back to asking in plain text (D-036).
+    const answers: Record<string, string> = {}
+    if (pending.question) answers[pending.question] = answer
+    pending.resolve({ behavior: 'allow', updatedInput: { answers } })
   }
 
   /**
@@ -309,13 +320,14 @@ export class PermissionBroker {
       const cleanup = () => opts.signal.removeEventListener('abort', onAbort)
       opts.signal.addEventListener('abort', onAbort, { once: true })
 
+      const { question, options } = parseQuestion(input)
       this.pendingQuestions.set(toolUseId, {
         toolName: ASK_USER_QUESTION_TOOL,
+        question,
         resolve,
         timer,
         cleanup,
       })
-      const { question, options } = parseQuestion(input)
       this.emit({ type: 'user_question', question, toolUseId, options })
     })
   }

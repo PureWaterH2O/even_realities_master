@@ -311,6 +311,28 @@ describe('PermissionBroker.canUseTool — AskUserQuestion', () => {
     expect(result.behavior).toBe('allow')
   })
 
+  it('resolves with updatedInput.answers as a map keyed by the question text (SDK shape)', async () => {
+    // D-036: the SDK's AskUserQuestionOutput expects `answers` — a MAP of
+    // question text → answer string — not a bare `answer` field. A bare `answer`
+    // is an unrecognized shape: the tool errors and the model falls back to
+    // asking in plain text.
+    const { emit } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const input = {
+      questions: [
+        { question: 'Which framework?', options: [{ label: 'React' }, { label: 'Vue' }] },
+      ],
+    }
+    const decision = broker.canUseTool('AskUserQuestion', input, makeOpts({ toolUseID: 'q-map' }))
+
+    broker.resolveQuestion('q-map', 'React')
+
+    await expect(decision).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: { answers: { 'Which framework?': 'React' } },
+    })
+  })
+
   it('emits a terminal permission_result (decision "answered") on resolveQuestion', async () => {
     const { emit, events } = makeEmit()
     const broker = new PermissionBroker({ emit, permissionMode: 'default' })

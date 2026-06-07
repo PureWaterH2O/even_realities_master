@@ -516,7 +516,10 @@ describe('SessionManager — respondPermission / respondQuestion routing', () =>
     await runP
     for (let i = 0; i < 10; i++) await Promise.resolve()
 
-    expect((wrapped as any).__decision).toEqual({ behavior: 'allow', updatedInput: { answer: 'A' } })
+    // D-036: the SDK's AskUserQuestionOutput is an `answers` MAP keyed by the
+    // question text (not a bare `answer`). The broker builds it from the parsed
+    // question; the wire answer the client POSTs ('A') is unchanged.
+    expect((wrapped as any).__decision).toEqual({ behavior: 'allow', updatedInput: { answers: { pick: 'A' } } })
   })
 
   it('respondPermission / respondQuestion on an unknown session are no-ops', () => {
