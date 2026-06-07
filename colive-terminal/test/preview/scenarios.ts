@@ -207,6 +207,18 @@ export const streaming: CoLiveEvent[] = [
   { type: 'text_delta', text: '1\n2\n3\n4\n5\n6\n7\n8\n9\n10' },
 ]
 
+/**
+ * 03b — Streaming CLOSED: the same line-per-line response after the turn completes.
+ * D-030 regression guard — once closed, markdown rendering must keep one number per
+ * line (breaks:true) instead of collapsing them into a single paragraph.
+ */
+export const streamingClosed: CoLiveEvent[] = [
+  { type: 'user_prompt', text: 'Count from 1 to 10' },
+  { type: 'status', state: 'busy' },
+  { type: 'text_delta', text: '1\n2\n3\n4\n5\n6\n7\n8\n9\n10' },
+  ...endTurn('1\n2\n3\n4\n5\n6\n7\n8\n9\n10'),
+]
+
 /** 05 — Tool Read: a completed Read tool call. */
 export const toolRead: CoLiveEvent[] = [
   { type: 'user_prompt', text: 'Read the file CLAUDE.md' },

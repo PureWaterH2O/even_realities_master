@@ -8,7 +8,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { capture, flattenAll, emit, snap, key, KEYS, type Frame } from './replay'
 import {
-  idle, simpleQA, streaming, thinking, toolRead, toolBash, diffEdit,
+  idle, simpleQA, streaming, streamingClosed, thinking, toolRead, toolBash, diffEdit,
   cockpit, permission, inProgress, markdownDoc, tall, errorDiag,
   statusBusy, question, backgroundCmd, subagent, costSummary,
 } from './scenarios'
@@ -43,11 +43,20 @@ describe('aesthetic preview', () => {
     expect(frames[0]!.plain).toContain('Claude Code') // startup banner present
   })
 
-  it('02-simple-qa: one turn', async () => {
-    const full = flattenAll(simpleQA)
-    dump('02-simple-qa', [full])
-    expect(full.plain).toContain('Say hello')
-    expect(full.plain).toContain('Hello!')
+  it('02-simple-qa: one turn (content top, input pinned bottom)', async () => {
+    // D-029: render through the REAL App so the bottom-pinned chrome is visible.
+    const frames = await capture([...simpleQA.map(emit), snap('qa')])
+    dump('02-simple-qa', frames)
+    const plain = frames[0]!.plain
+    expect(plain).toContain('Say hello')
+    expect(plain).toContain('Hello!')
+    expect(plain).toContain('─') // separator rule above the bottom-pinned chrome
+    // The content sits ABOVE the status line / input prompt (bottom-pinned).
+    const lines = plain.split('\n')
+    const helloRow = lines.findIndex((l) => l.includes('Hello!'))
+    const sepRow = lines.findIndex((l) => /─{10,}/.test(l))
+    expect(helloRow).toBeGreaterThanOrEqual(0)
+    expect(sepRow).toBeGreaterThan(helloRow)
   })
 
   it('03-streaming: mid-stream (no result yet)', async () => {
@@ -55,6 +64,15 @@ describe('aesthetic preview', () => {
     dump('03-streaming', [full])
     expect(full.plain).toContain('Count from 1 to 20')
     expect(full.plain).toContain('10')
+  })
+
+  it('03-streaming-closed: one number per line preserved after turn close (D-030)', async () => {
+    const frames = await capture([...streamingClosed.map(emit), snap('closed')])
+    dump('03-streaming-closed', frames)
+    const plain = frames[0]!.plain
+    // breaks:true keeps each number on its own row — NOT collapsed into a paragraph.
+    expect(plain).not.toContain('1 2 3 4 5')
+    expect(plain).toContain('2\n3\n4\n5\n6\n7\n8\n9\n10')
   })
 
   it('04-thinking: collapsed thinking block', async () => {

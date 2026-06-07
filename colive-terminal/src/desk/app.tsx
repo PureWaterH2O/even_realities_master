@@ -243,9 +243,17 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // D-008: an in-turn activity line (`✱ Working… (Ns · ↑ N tokens)`) shows while a
   // turn is active; reserve a row for it so it never pushes output past the viewport.
   const busyActive = STATUS_LABEL[status.state] !== 'idle' && !pending
-  // 4 = scroll indicator + status line + "← for agents" hint (D-009) + headroom.
-  const reserved = 4 + inputRowCount + menuRowCount + (busyActive ? 1 : 0)
-  const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
+  // D-029: the layout is now a fixed-height outer Box (= terminal rows) split into a
+  // flexGrow top section (transcript + scroll + pending + spinner) and a bottom-pinned
+  // chrome section (separator + status + hint + menu + input). The transcript window
+  // must still be clipped to fit the top region, so reserve every NON-transcript row.
+  // pendingRows is reserved too — a tall permission prompt lives in the top section and
+  // would otherwise push the pinned input off a fixed-height screen.
+  const termRows = stdout?.rows ?? 24
+  const pendingRows = pending ? pendingRowCount(pending, B.toText(buf), width) : 0
+  // 5 = separator (D-029) + scroll indicator + status line + "← for agents" hint (D-009) + headroom.
+  const reserved = 5 + inputRowCount + menuRowCount + (busyActive ? 1 : 0) + pendingRows
+  const height = Math.max(4, termRows - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
   // or reset by /clear). A ref keeps the latest value available to async
@@ -707,68 +715,77 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   if (status.inputTokens !== undefined) spinnerMeta.push(`↑ ${status.inputTokens} tokens`)
   const spinnerText = `${spinnerVerb}…${spinnerMeta.length ? ` (${spinnerMeta.join(' · ')})` : ''}`
 
+  // D-029/D-031: a fixed-height outer Box (= terminal rows) holds two sections.
+  // The TOP section (flexGrow=1) carries the transcript + scroll indicator + pending
+  // prompt + spinner and absorbs all slack, so when content is short the empty space
+  // sits ABOVE the input instead of below it. The BOTTOM section is pinned to the foot
+  // of the screen (separator + status + hint + menu + input), matching native.
   return (
-    <Box flexDirection="column">
-      {transcript.blocks.length === 0 && !pending && !menuOpen ? (
-        <Banner model={currentModel} mode={currentMode} cwd={fileCwd} />
-      ) : null}
-      <Box flexDirection="column">
-        {win.visible.map((row, i) => (
-          <Text key={win.offset + i} wrap="truncate-end">{row}</Text>
-        ))}
-      </Box>
-      {rows.length > height ? (
-        <Box>
-          <Text dimColor>
-            rows {win.offset + 1}–{Math.min(win.offset + height, win.total)} of {win.total} {win.pinned ? '(pinned ▼)' : '▲▼ PgUp/PgDn · End'}
-          </Text>
-        </Box>
-      ) : null}
-
-      {pending ? (
-        <PendingPrompt
-          pending={pending}
-          input={B.toText(buf)}
-          width={width}
-          selectedIndex={Math.min(permissionIndex, pending.event.options.length - 1)}
-        />
-      ) : null}
-
-      {busyActive ? (
-        <Box>
-          <Text color="yellow">✱ </Text>
-          <Text dimColor>{spinnerText}</Text>
-        </Box>
-      ) : null}
-
-      <Box flexDirection="column">
-        <Text dimColor>{statusLine}</Text>
-        <Text dimColor>← for agents</Text>
-      </Box>
-
-      {menuOpen ? (
+    <Box flexDirection="column" height={termRows}>
+      <Box flexDirection="column" flexGrow={1}>
+        {transcript.blocks.length === 0 && !pending && !menuOpen ? (
+          <Banner model={currentModel} mode={currentMode} cwd={fileCwd} />
+        ) : null}
         <Box flexDirection="column">
-          {pickerPanel
-            ? pickerPanel.map((r, i) => <Text key={`pk-${i}`}>{r}</Text>)
-            : slashMenu
-            ? slashMenu.map((item, i) => (
-                <Text key={item.name} inverse={i === clampedMenuIndex}>
-                  {`/${item.name}  `}<Text dimColor>{item.desc}</Text>
-                </Text>
-              ))
-            : atMenu!.map((path, i) => (
-                <Text key={path} inverse={i === clampedMenuIndex}>{`@${path}`}</Text>
-              ))}
-        </Box>
-      ) : null}
-
-      {pending && pending.kind === 'question' ? null : (
-        <Box flexDirection="column">
-          {renderInputRows(buf, { width }).map((r, i) => (
-            <Text key={`in-${i}`}>{r}</Text>
+          {win.visible.map((row, i) => (
+            <Text key={win.offset + i} wrap="truncate-end">{row}</Text>
           ))}
         </Box>
-      )}
+        {rows.length > height ? (
+          <Box>
+            <Text dimColor>
+              rows {win.offset + 1}–{Math.min(win.offset + height, win.total)} of {win.total} {win.pinned ? '(pinned ▼)' : '▲▼ PgUp/PgDn · End'}
+            </Text>
+          </Box>
+        ) : null}
+
+        {pending ? (
+          <PendingPrompt
+            pending={pending}
+            input={B.toText(buf)}
+            width={width}
+            selectedIndex={Math.min(permissionIndex, pending.event.options.length - 1)}
+          />
+        ) : null}
+
+        {busyActive ? (
+          <Box>
+            <Text color="yellow">✱ </Text>
+            <Text dimColor>{spinnerText}</Text>
+          </Box>
+        ) : null}
+      </Box>
+
+      <Box flexDirection="column" flexShrink={0}>
+        {/* D-029: dim full-width rule separating the transcript from the input chrome. */}
+        <Text dimColor>{'─'.repeat(Math.max(1, width))}</Text>
+        <Text dimColor>{statusLine}</Text>
+        <Text dimColor>← for agents</Text>
+
+        {menuOpen ? (
+          <Box flexDirection="column">
+            {pickerPanel
+              ? pickerPanel.map((r, i) => <Text key={`pk-${i}`}>{r}</Text>)
+              : slashMenu
+              ? slashMenu.map((item, i) => (
+                  <Text key={item.name} inverse={i === clampedMenuIndex}>
+                    {`/${item.name}  `}<Text dimColor>{item.desc}</Text>
+                  </Text>
+                ))
+              : atMenu!.map((path, i) => (
+                  <Text key={path} inverse={i === clampedMenuIndex}>{`@${path}`}</Text>
+                ))}
+          </Box>
+        ) : null}
+
+        {pending && pending.kind === 'question' ? null : (
+          <Box flexDirection="column">
+            {renderInputRows(buf, { width }).map((r, i) => (
+              <Text key={`in-${i}`}>{r}</Text>
+            ))}
+          </Box>
+        )}
+      </Box>
     </Box>
   )
 }
@@ -812,9 +829,33 @@ function buildPickerPanel(
 }
 
 /**
+ * D-029: count the rows {@link PendingPrompt} will occupy at `width`, mirroring its
+ * structure so the layout can RESERVE that height in the top section (the pending
+ * prompt would otherwise push the bottom-pinned input off a fixed-height screen).
+ * Over-counting is safe — it only trims the transcript window a little further.
+ */
+function pendingRowCount(pending: Pending, input: string, width: number): number {
+  const wrapped = (s: string): number => Math.max(1, wrapAnsi(s, width).length)
+  if (pending.kind === 'permission') {
+    const e = pending.event
+    // rule + header + blank + [detail] + [description] + blank + "proceed?" + options + blank + footer
+    let n = 1 + wrapped(`${e.toolName} command`) + 1
+    if (e.detail) n += wrapped(`  ${e.detail}`)
+    if (e.description) n += wrapped(`  ${e.description}`)
+    n += 1 + 1 + e.options.length + 1 + 1
+    return n
+  }
+  const e = pending.event
+  // rule + badge + blank + question + options + "Type something" + rule + "Chat about this" + [input echo] + footer
+  let n = 1 + 1 + 1 + wrapped(e.question) + e.options.length + 1 + 1 + 1 + 1
+  if (input) n += 1
+  return n
+}
+
+/**
  * Render the inline permission / question prompt, native Claude style (D-017,
  * D-018): no rounded box, a leading rule, a header, the body, numbered options
- * (option 1 pre-highlighted, matching native's default), and a key-hint footer.
+ * (the highlighted option marked with "›"), and a key-hint footer.
  */
 function PendingPrompt({ pending, input, width, selectedIndex }: { pending: Pending; input: string; width: number; selectedIndex: number }): React.ReactElement {
   const rule = '─'.repeat(Math.max(1, width))
