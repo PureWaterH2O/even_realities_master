@@ -173,3 +173,20 @@ implement at all.
 18→D-004,D-005,D-006,D-007 · 19→D-028 · 20→D-009,D-023 · 21→D-021 · 22→D-024 · 23→D-020 · 24→D-025 · 25→D-026.
 
 _Status: **PLANNER-REVIEWED 2026-06-06.** All 4 decisions resolved; D-028 added (interrupt state); D-022 won't-fix; D-023–D-027 descoped. Ready for Builder Run 2 (Tasks 6–15)._
+
+---
+
+## Builder Run 2 resolution (2026-06-06) — branch `m3.5-aesthetic-phase-b`, not pushed
+
+All **22 active entries implemented** (D-001…D-020, D-028), one commit per task group + a post-review refinement. `tsc` 0 · `vitest` **510 passed** · 25 frames regenerated. A 10-agent adversarial verification scored **8/10 match, T8+T12 partial (minor), 0 gaming concerns**.
+
+- ✅ **D-001..D-003, D-007..D-015, D-016, D-017..D-020, D-028** — faithful matches vs the references.
+- 🔧 **D-004 refined:** native draws the green `●` + bold name ONLY for action/agent tools (`● Write`, `● Agent`); read-only tools (Read/Bash/Grep/…) are **dot-less + dim + indented to col 2** (pixel-checked vs 05/06/07/18 — the catalog's "● for all tools" was over-general). `red ●` on action-tool error.
+- ⏭️ **Accepted divergences (data/scope-limited, documented):**
+  - **D-005 (Bash):** show the command (`Bash(ls -la)`), not native's semantic `Listed 1 directory` (non-derivable from the event).
+  - **D-006 (Agent):** the `└ Done (N tool uses · tokens · Ns)` sub-line is omitted — we don't have those metrics in the tool event. (The catalog's stated D-006 example, Write's `└ Wrote N lines`, IS implemented.)
+  - **D-009:** no `ctx %` / `5h` / `7d` (no rate-limit data); show model + total tokens.
+  - **D-016:** Write sub-line path is the absolute `file_path`, not native's cwd-relative `../../../` (cleaner).
+  - **D-018:** generic `□ Question` chip — the `user_question` event carries no category (native's `□ Language`).
+- 🟦 **Descoped (per owner):** D-021 (/effort), D-022 (scrollback won't-fix), D-023–D-027 (deep dashboards).
+- **Next:** 👤 owner review + hardware UAT (Tasks 16–17 not executed); branch local-only, merge/push await sign-off.
