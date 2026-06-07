@@ -24,7 +24,12 @@ const NESTED_GAP = new RegExp('(\\n[ \\t]*−[^\\n]*)\\n(?:[ \\t]|\\x1b\\[[0-9;]
  * configure once per width (cheap) and parse synchronously.
  */
 export function renderMarkdown(md: string, width: number): string {
-  const m = new Marked()
+  // breaks:true (D-030) treats a single newline as a hard <br> instead of
+  // collapsing it into a space. A line-per-line response (e.g. counting 1..100,
+  // one number per line) must keep its line structure once the turn closes and
+  // markdown-rendering kicks in. Ordinary prose paragraphs (no embedded
+  // newlines) still reflow to `width` — breaks only affects explicit newlines.
+  const m = new Marked({ breaks: true })
   // 🧪 VERIFIED (marked 12.0.2 + marked-terminal 7.3.0): `showSectionPrefix: false`
   // is REQUIRED — it defaults true, which PREPENDS the literal "# " to headings
   // (so UAT A4 "not raw #" fails without it). reflowText wraps to `width`.

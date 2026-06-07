@@ -19,4 +19,18 @@ describe('renderMarkdown', () => {
     const out = renderMarkdown('# Title', 80)
     expect(out).not.toBe(stripAnsi(out))
   })
+  it('preserves single newlines as hard breaks (D-030: line-per-line counting)', () => {
+    // Native keeps a line-by-line response (e.g. counting) one item per line after
+    // the turn closes. Default markdown reflow collapses single \n into spaces.
+    const out = stripAnsi(renderMarkdown('1\n2\n3\n4\n5', 80))
+    expect(out).not.toContain('1 2 3 4 5')
+    const lines = out.split('\n').map((l) => l.trim()).filter((l) => l.length > 0)
+    expect(lines).toEqual(['1', '2', '3', '4', '5'])
+  })
+  it('still collapses paragraph word-wrap (breaks:true only affects explicit newlines)', () => {
+    // A normal prose paragraph (no embedded newlines) must still reflow to width —
+    // breaks:true must not turn ordinary wrapping into one-word-per-line.
+    const out = stripAnsi(renderMarkdown('the quick brown fox jumps', 80))
+    expect(out).toContain('the quick brown fox jumps')
+  })
 })
