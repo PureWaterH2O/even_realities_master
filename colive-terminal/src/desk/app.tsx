@@ -730,14 +730,17 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   if (status.inputTokens !== undefined) spinnerMeta.push(`↑ ${status.inputTokens} tokens`)
   const spinnerText = `${spinnerVerb}…${spinnerMeta.length ? ` (${spinnerMeta.join(' · ')})` : ''}`
 
-  // D-029/D-031: a fixed-height outer Box (= terminal rows) holds two sections.
-  // The TOP section (flexGrow=1) carries the transcript + scroll indicator + pending
-  // prompt + spinner and absorbs all slack, so when content is short the empty space
-  // sits ABOVE the input instead of below it. The BOTTOM section is pinned to the foot
-  // of the screen (separator + status + hint + menu + input), matching native.
+  // D-029/D-031 + wasted-space fix: a fixed-height outer Box (= terminal rows)
+  // stacks the transcript, the pinned todos panel, the input chrome, then a
+  // flexGrow SPACER. The spacer absorbs all slack at the BOTTOM, so content +
+  // input sit together at the TOP and the empty space falls below the input —
+  // matching native's inline rendering (the input follows the content; short
+  // content leaves the gap at the foot of the screen, not in the middle). When
+  // content overflows, the transcript window clips to `height`, the spacer
+  // collapses to ~0, and the input ends up at the bottom as before.
   return (
     <Box flexDirection="column" height={termRows}>
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" flexShrink={0}>
         {transcript.blocks.length === 0 && !pending && !menuOpen ? (
           <Banner model={currentModel} mode={currentMode} cwd={fileCwd} />
         ) : null}
@@ -772,8 +775,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       </Box>
 
       {/* D-035: pinned todos/tasks panel — a fixed widget between the scrollable
-          transcript (above, flexGrow=1) and the bottom chrome (below). Always
-          visible; the flex slack collects in the transcript section above it. */}
+          transcript (above) and the bottom chrome (below). Always visible; the
+          flex slack collects in the bottom spacer, below the input chrome. */}
       {todosRows.length > 0 ? (
         <Box flexDirection="column" flexShrink={0}>
           {todosRows.map((r, i) => (
@@ -812,6 +815,11 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
           </Box>
         )}
       </Box>
+
+      {/* Wasted-space fix: a flexGrow spacer that pushes everything above it to
+          the TOP. When content is short, this absorbs the slack at the bottom
+          (below the input), matching native; when content overflows it collapses. */}
+      <Box flexGrow={1} flexShrink={1} />
     </Box>
   )
 }
