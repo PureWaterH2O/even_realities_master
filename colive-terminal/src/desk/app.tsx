@@ -818,14 +818,14 @@ function PendingPrompt({ pending, input, width }: { pending: Pending; input: str
   return (
     <Box flexDirection="column">
       <Text dimColor>{rule}</Text>
-      <Text backgroundColor="cyan" color="black">{' □ Question '}</Text>
+      <Text backgroundColor="#c4b5fd" color="black">{' □ Question '}</Text>
       <Text> </Text>
       <Text bold>{e.question}</Text>
       {e.options.map((opt, i) => (
         <Text key={opt + String(i)}>
-          {i === 0 ? <Text color="cyan">{'› '}</Text> : '  '}
+          {i === 0 ? <Text color="#a78bfa">{'› '}</Text> : '  '}
           {`${i + 1}. `}
-          {i === 0 ? <Text color="cyan">{opt}</Text> : opt}
+          {i === 0 ? <Text color="#a78bfa">{opt}</Text> : opt}
         </Text>
       ))}
       <Text>{`  ${extras + 1}. Type something`}</Text>

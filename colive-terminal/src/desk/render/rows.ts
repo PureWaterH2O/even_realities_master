@@ -42,6 +42,14 @@ const TOOL_ARG_KEYS: Record<string, string[]> = {
 }
 const ARG_FALLBACK = ['file_path', 'command', 'pattern', 'path', 'url', 'query']
 
+/**
+ * Tools native marks with a green "●" + bold name (action / sub-agent work).
+ * Every OTHER tool (Read, Bash, Grep, Glob, LS, WebFetch, …) is read-only and
+ * renders dot-less + dim, indented to column 2. (D-004, pixel-checked vs native
+ * 05/06/07/18; the catalog's "● for all tools" was an over-generalization.)
+ */
+const DOTTED_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task'])
+
 /** Pull the key argument from a tool's input, collapsed to one line + capped. */
 function toolArg(name: string, input: unknown): string {
   if (input === null || typeof input !== 'object') return ''
@@ -101,28 +109,31 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
     }
 
     case 'tool': {
-      // Native-style header: a filled "●" status dot (green ok / red error, D-004)
-      // + a natural-language summary (D-005). The Core summary is generic ("Bash
-      // completed"), so we synthesise the native form: Read collapses to a count
-      // ("Read 1 file"); everything else keeps Name(keyArg) (Bash → command,
+      // Native-style header + a natural-language summary (D-005): Read collapses to
+      // a count ("Read 1 file"); everything else keeps Name(keyArg) (Bash → command,
       // Write/Edit → path, Agent → description).
+      //
+      // D-004 (pixel-checked vs 05/06/07/18, refining the catalog's "● for all"):
+      // native draws a filled green "●" + bold name ONLY for action/agent tools
+      // (Write, Edit, Agent, …); read-only tools (Read, Bash, Grep, …) render a
+      // dim, dot-LESS, 2-space-indented summary. Text sits at column 2 either way.
       const isErr = /\bfailed\b/i.test(block.summary ?? '')
       const arg = block.detail ? toolArg(block.name, block.detail.input) : ''
-      const dot = isErr ? red('●') : green('●')
-      // Read collapses to a count ("Read 1 file"); every other tool keeps a bold
-      // Name(arg) (Agent shows "Agent(description)", per native). On error the
-      // name is tinted red instead of bold.
-      let head: string
-      if (block.name === 'Read') {
-        head = isErr ? red('Read 1 file') : 'Read 1 file'
-      } else {
-        const name = isErr ? red(block.name) : bold(block.name)
-        head = arg ? `${name}(${arg})` : name
-      }
+      const label = block.name === 'Read' ? 'Read 1 file' : arg ? `${block.name}(${arg})` : block.name
       // D-006: a "(ctrl+o to expand)" affordance on collapsed tools; dropped under
       // Ctrl-O verbose, where the full detail is already shown.
       const hint = block.detail && !verbose ? dim(' (ctrl+o to expand)') : ''
-      const rows = toRows(`${dot} ${head}${hint}`, width)
+      let head: string
+      if (DOTTED_TOOLS.has(block.name)) {
+        // action/agent tool: green ● + BOLD name (arg stays regular weight)
+        const dot = isErr ? red('●') : green('●')
+        const name = isErr ? red(block.name) : bold(block.name)
+        head = `${dot} ${arg ? `${name}(${arg})` : name}${hint}`
+      } else {
+        // read-only tool: no dot, dim summary, indented to column 2 (native 05/06)
+        head = `  ${(isErr ? red : gray)(label)}${hint}`
+      }
+      const rows = toRows(head, width)
       // D-006: a "└" result sub-line for tools with a one-line outcome (Write →
       // "Wrote N lines to <path>"). The numbered body / diff follows below.
       const resultLine = block.detail ? toolResultLine(block.name, block.detail.input) : undefined
@@ -182,7 +193,8 @@ function toolResultLine(name: string, input: unknown): string | undefined {
   const path = typeof i.file_path === 'string' ? i.file_path : ''
   const content = typeof i.content === 'string' ? i.content : ''
   const n = content === '' ? 0 : content.replace(/\n$/, '').split('\n').length
-  return `Wrote ${n} line${n === 1 ? '' : 's'} to ${path}`
+  // Native always says "lines" (even for 1) — match its literal text for parity.
+  return `Wrote ${n} lines to ${path}`
 }
 
 /** Render one labelled detail field (input/output) as indented, capped rows. */

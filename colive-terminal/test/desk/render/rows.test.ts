@@ -34,14 +34,21 @@ describe('renderBlockRows', () => {
     expect(renderBlockRows(edit, opts).map(stripAnsi).join('\n')).toContain('Edit(/a/b.ts)')
   })
 
-  it('tool head uses a filled ● dot (green ok / red error) and a "(ctrl+o to expand)" hint', () => {
-    const ok: Block = { kind: 'tool', toolId: 't1', name: 'Read', summary: 'Read completed', detail: { input: { file_path: '/a' }, output: 'x' } }
-    const okRows = renderBlockRows(ok, opts)
-    expect(okRows.map(stripAnsi).join('\n')).toContain('● Read 1 file')
-    expect(okRows.map(stripAnsi).join('\n')).toContain('(ctrl+o to expand)')
-    expect(okRows.join('\n')).toContain('[32m') // green dot on success
-    const err: Block = { kind: 'tool', toolId: 't2', name: 'Read', summary: 'Read failed', detail: { input: { file_path: '/a' }, output: { error: 'ENOENT' } } }
-    expect(renderBlockRows(err, opts).join('\n')).toContain('[31m') // red on error
+  it('action tools get a green ● dot + bold name; read-only tools render dot-less + dim (D-004)', () => {
+    // action tool (Write): green ● + bold name + "(ctrl+o to expand)" hint
+    const write: Block = { kind: 'tool', toolId: 'w', name: 'Write', summary: 'Write completed', detail: { input: { file_path: '/a', content: 'x' }, output: 'ok' } }
+    const wRows = renderBlockRows(write, opts)
+    expect(wRows.map(stripAnsi).join('\n')).toContain('● Write(/a)')
+    expect(wRows.map(stripAnsi).join('\n')).toContain('(ctrl+o to expand)')
+    expect(wRows.join('\n')).toContain('[32m') // green dot on success
+    // read-only tool (Read): NO dot, indented to column 2
+    const read: Block = { kind: 'tool', toolId: 'r', name: 'Read', summary: 'Read completed', detail: { input: { file_path: '/a' }, output: 'x' } }
+    const rRows = renderBlockRows(read, opts).map(stripAnsi).join('\n')
+    expect(rRows).toContain('  Read 1 file')
+    expect(rRows).not.toContain('● Read') // read-only tools carry no status dot
+    // error tints red (action tool: red dot)
+    const err: Block = { kind: 'tool', toolId: 'e', name: 'Edit', summary: 'Edit failed', detail: { input: { file_path: '/a', old_string: 'a', new_string: 'b' }, output: { error: 'x' } } }
+    expect(renderBlockRows(err, opts).join('\n')).toContain('[31m')
   })
 
   it('Agent tool head shows its description; Write shows a "└ Wrote N lines" sub-line', () => {
