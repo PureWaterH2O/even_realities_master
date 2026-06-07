@@ -191,6 +191,23 @@ implement at all.
 
 ---
 
+## UAT round-2 findings + resolutions (2026-06-07) — branch `main`, committed, NOT pushed
+
+**D-036 — `AskUserQuestion` answer sent in the wrong format (BLOCKER)** · **major/functional** · ✅ FIXED `02c659e`
+- Symptom: selecting an option on the question picker errored ("picker hit an error") and the model re-asked in plain text.
+- Root cause: the broker resolved with `updatedInput:{answer}`, but the Agent SDK's `AskUserQuestionOutput` expects `updatedInput.answers` — a **map keyed by the question TEXT** (`{answers:{[q]:a}, response?}`). Bare `answer` = unrecognized shape → tool error.
+- Fix: `permissions.ts` now stores the parsed question text on the pending entry (`askQuestion`) and builds the `answers` map in `resolveQuestion`. Broker test + sessionManager routing test updated. Knowledge: `terminal-mode/overview.md` (4th broker wire-fact).
+
+**D-035 — Todo panel not pinned** · **medium/layout** · ✅ FIXED `4d89118`
+- Symptom: the todos/tasks panel scrolled away with the transcript; native keeps it as a persistent widget near the foot of the transcript area.
+- Fix: `app.tsx` extracts the single `todos` block, renders it as a fixed `flexShrink={0}` section between the scrollable viewport and the bottom chrome, EXCLUDES it from the transcript rows (double-render guard), and reserves its height in the viewport calc. Regression test scrolls to the top and asserts the panel stays visible. Knowledge: `terminal-mode/desk-rendering.md`.
+
+**Wasted-space — gap between content and bottom chrome** (= catalog D-031) · **minor/layout** · ✅ FIXED `e79f2c5`
+- Verified against native refs: native renders **inline** (input follows content → empty space at the FOOT for short content). Ours bottom-pinned the chrome (D-029/D-031), so short content left the gap in the **middle**. **Owner chose to match native.**
+- Fix: `app.tsx` top-anchors transcript + todos + chrome and adds a trailing `<Box flexGrow={1}/>` spacer that absorbs slack at the bottom (collapses when content overflows → input back at the foot). Supersedes the D-029/D-031 flexGrow-top layout. Preview tests assert the chrome sits adjacent to short content.
+
+---
+
 ## Scenario → entry coverage
 
 01→D-001,D-002,D-009 · 02→D-003,D-010 · 03→D-011 · 04→D-007,D-012 · 05/06/08→D-004,D-005,D-006,D-007 ·

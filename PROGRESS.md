@@ -5,6 +5,13 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-07
 
+### Co-Live Terminal — M3.5 UAT round-2 fixes (D-035, D-036, wasted-space)
+
+- **D-036 (functional):** `AskUserQuestion` answers were sent to the SDK as `{answer}`; the Agent SDK's `AskUserQuestionOutput` wants `{answers: {[questionText]: answer}}` — a **map keyed by the question text**. A bare `answer` is an unrecognized shape → the tool errors → the model falls back to plain-text questions (the "picker hit an error" symptom). Broker now stores the parsed question text on the pending entry and builds the map in `resolveQuestion` (client wire-format unchanged). `02c659e`. Captured in `knowledge/terminal-mode/overview.md` (4th broker wire-fact).
+- **D-035 (layout):** the todos/tasks panel was a scrolling transcript block; now pinned as a fixed section between the viewport and the bottom chrome — excluded from transcript rows (was a double-render risk), height reserved in the viewport calc. `4d89118`.
+- **Wasted-space (layout):** short content left a gap in the **middle** (bottom-pinned chrome from D-029/D-031). The native references show native renders **inline** — the input follows the content, gap belongs at the **foot**. Owner chose to match native → top-anchored content+chrome + a trailing `flexGrow` spacer. Supersedes the D-029/D-031 flexGrow-top layout. `e79f2c5`. Both layout facts updated in `knowledge/terminal-mode/desk-rendering.md`.
+- **Verify:** `tsc` 0 · `vitest` **523** (+4 new) · self-tested all three layouts (idle / short Q&A / tall+todos) via the preview harness. Each fix committed separately; **NOT pushed**; awaits hardware UAT (per "done = UAT"). Catalog: `projects/colive-terminal/aesthetic/catalog.md` (D-035/D-036/wasted-space resolutions).
+
 ### Co-Live Terminal — build-vs-adopt sanity check (owner-requested): keep Core/Hub, descope M3.5 parity
 
 - **Question (owner):** "we've spent a lot of time building a custom Claude TUI from scratch — is there an OSS project that does this we could wire the bridge into instead?" Scoped via `AskUserQuestion`: stock Even app is a **hard constraint** (Hub protocol shim stays custom), the **desk TUI is the thing being questioned**, owner **genuinely open to pivoting**, wants **migration feasibility**.

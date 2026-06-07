@@ -41,24 +41,40 @@ catalog (`projects/colive-terminal/aesthetic/catalog.md`), not here.
   must be driven through the real `App` via the preview harness's `capture()`.
   _Self-verified 2026-06-06 while building the M3.5 aesthetic preview suite._
 
-- 🧪 **Bottom-pinning the input = fixed-height outer `<Box>` + a `flexGrow` top
-  section + alt-screen.** The native look (transcript at top, input/status welded to
-  the foot of the screen, empty space ABOVE the input when content is short) is a
-  two-section column: outer `<Box flexDirection="column" height={termRows}>` (where
-  `termRows = stdout?.rows ?? 24`) wrapping a `flexGrow={1}` TOP section (transcript
-  window + scroll indicator + pending prompt + spinner — absorbs all slack at
-  `flex-start`, so the gap lands below the content) and a `flexShrink={0}` BOTTOM
-  section (dim full-width `─` rule + status + hint + menu + input). Two gotchas:
-  (a) ink/yoga does **not** vertically clip Text — the transcript must still be
-  windowed to a computed `height` and EVERY non-transcript row reserved, INCLUDING
-  the pending prompt's height (a tall permission panel lives in the top section and
-  would otherwise shove the pinned input off a fixed-height screen — reserve it via a
-  `pendingRowCount()` mirror of the prompt's structure); (b) filling the screen
-  exactly (`height === rows`) is only safe because `src/index.ts` enters the
-  alt-screen (`\x1b[?1049h`) — the alt buffer doesn't scroll, so the last row+newline
-  can't drift scrollback. _Self-verified 2026-06-07 (M3.5 D-029/D-031 fix): preview
-  frames `01-idle`/`02-simple-qa`/`09-permission` show banner/content top, gap, chrome
-  pinned at the foot; `a7c57a2`._
+- 🧪 **Layout = fixed-height outer `<Box>`, everything TOP-anchored, slack pushed to a
+  trailing `flexGrow` spacer + alt-screen.** Native renders INLINE — the input follows
+  the content, so short content leaves the empty space at the FOOT of the screen (below
+  the input), NOT in the middle. The layout is a column: outer
+  `<Box flexDirection="column" height={termRows}>` (`termRows = stdout?.rows ?? 24`)
+  stacking, in order: a `flexShrink={0}` transcript section (windowed transcript +
+  scroll indicator + pending prompt + spinner), the pinned todos panel (`flexShrink={0}`,
+  see next fact), a `flexShrink={0}` BOTTOM chrome (dim full-width `─` rule + status +
+  hint + menu + input), and finally a trailing `<Box flexGrow={1} flexShrink={1} />`
+  SPACER that absorbs all slack at the bottom. When content overflows, the transcript
+  window clips to `height`, the spacer collapses to ~0, and the input ends up at the
+  foot as before. Three gotchas: (a) ink/yoga does **not** vertically clip Text — the
+  transcript must still be windowed to a computed `height` and EVERY non-transcript row
+  reserved, INCLUDING the pending prompt's height (a `pendingRowCount()` mirror of the
+  prompt's structure) AND the pinned todos panel's flattened height; (b) filling the
+  screen exactly is only safe because `src/index.ts` enters the alt-screen
+  (`\x1b[?1049h`) — the alt buffer doesn't scroll, so the last row+newline can't drift
+  scrollback; (c) ❌ **the earlier D-029/D-031 version (`a7c57a2`) used a `flexGrow={1}`
+  TOP section, so slack landed ABOVE the input — a big gap in the MIDDLE for short
+  content. That MISREAD native (native top-anchors); superseded by the spacer-at-bottom
+  version (`e79f2c5`), which matches the `01-idle.png` reference.** _Self-verified
+  2026-06-07 (wasted-space fix): preview frames `01-idle`/`02-simple-qa` show
+  content+chrome at the top, gap at the foot._
+
+- 🧪 **The todos/tasks panel is PINNED outside the scrollable transcript.** The reducer
+  (`blocks.ts setTodos`) keeps exactly ONE `todos` block; `app.tsx` pulls it out of
+  `transcript.blocks`, EXCLUDES it from the windowed transcript rows (else it
+  double-renders — once scrolling, once pinned), renders it as its own `flexShrink={0}`
+  section between the transcript and the bottom chrome, and reserves its flattened height
+  in the viewport `height` calc. So it stays visible while tool output scrolls past
+  (native keeps it as a persistent widget). Test it by scrolling the transcript to the
+  top and asserting the panel is still present (a transcript-block todos would scroll
+  off). _Self-verified 2026-06-07 (M3.5 D-035 fix): `4d89118`;
+  `test/preview/d035-todos-pinned.preview.test.tsx`._
 
 - 🧪 **`marked` newline collapse is fixed by `new Marked({ breaks: true })` — and it
   does NOT break prose wrapping.** The desk renders an assistant turn as raw text
@@ -81,3 +97,7 @@ catalog (`projects/colive-terminal/aesthetic/catalog.md`), not here.
 - 2026-06-06: created during M3.5 Builder Run 1 (comparison-infra build).
 - 2026-06-07: +2 facts from M3.5 UAT fixes — bottom-pin layout pattern (D-029/D-031)
   and `marked` `breaks:true` newline preservation (D-030).
+- 2026-06-07: M3.5 UAT round-2 — layout fact UPDATED bottom-pin →❌ top-anchor +
+  bottom-spacer (wasted-space fix supersedes D-029/D-031's flexGrow-top; native
+  top-anchors, gap belongs at the foot, `e79f2c5`); +1 fact: todos panel pinned
+  outside the viewport (D-035, `4d89118`).
