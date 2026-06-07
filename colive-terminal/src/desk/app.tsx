@@ -251,8 +251,20 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // would otherwise push the pinned input off a fixed-height screen.
   const termRows = stdout?.rows ?? 24
   const pendingRows = pending ? pendingRowCount(pending, B.toText(buf), width) : 0
+  // D-035: the todos/tasks panel is PINNED — it renders as a fixed section just
+  // above the bottom chrome, OUTSIDE the scrollable transcript, so it stays
+  // visible while tool output scrolls past (native keeps it as a persistent
+  // widget). There is at most one todos block (the reducer's setTodos keeps a
+  // single one), so pull it out here, render it separately below, and EXCLUDE it
+  // from the transcript rows (or it would render twice). Its height is reserved
+  // like the other non-transcript chrome so it never pushes the input off-screen.
+  const todosBlock = transcript.blocks.find((b) => b.kind === 'todos')
+  const todosRows = useMemo(
+    () => (todosBlock ? flattenRows([todosBlock], { width, verbose }) : []),
+    [todosBlock, width, verbose],
+  )
   // 5 = separator (D-029) + scroll indicator + status line + "← for agents" hint (D-009) + headroom.
-  const reserved = 5 + inputRowCount + menuRowCount + (busyActive ? 1 : 0) + pendingRows
+  const reserved = 5 + inputRowCount + menuRowCount + (busyActive ? 1 : 0) + pendingRows + todosRows.length
   const height = Math.max(4, termRows - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
@@ -492,8 +504,11 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // on each keystroke / 10s running_stats tick. transcript.blocks only changes
   // on a transcript event (not on input edits), so the memo skips the expensive
   // work while typing.
+  // D-035: the todos block is rendered as a PINNED panel below (see todosRows),
+  // so exclude it here — otherwise it would scroll with the transcript AND
+  // double-render in the pinned panel.
   const rows = useMemo(
-    () => flattenRows(transcript.blocks, { width, verbose }),
+    () => flattenRows(transcript.blocks.filter((b) => b.kind !== 'todos'), { width, verbose }),
     [transcript.blocks, width, verbose],
   )
   // follow bottom while streaming; hold position when scrolled up
@@ -755,6 +770,17 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
           </Box>
         ) : null}
       </Box>
+
+      {/* D-035: pinned todos/tasks panel — a fixed widget between the scrollable
+          transcript (above, flexGrow=1) and the bottom chrome (below). Always
+          visible; the flex slack collects in the transcript section above it. */}
+      {todosRows.length > 0 ? (
+        <Box flexDirection="column" flexShrink={0}>
+          {todosRows.map((r, i) => (
+            <Text key={`todo-${i}`} wrap="truncate-end">{r}</Text>
+          ))}
+        </Box>
+      ) : null}
 
       <Box flexDirection="column" flexShrink={0}>
         {/* D-029: dim full-width rule separating the transcript from the input chrome. */}
