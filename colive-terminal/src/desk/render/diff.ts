@@ -1,6 +1,6 @@
 // src/desk/render/diff.ts
 import { diffLines } from 'diff'
-import { green, red, gray } from './ansi'
+import { green, red, gray, dim } from './ansi'
 
 export interface DiffInput {
   oldStr: string
@@ -50,6 +50,22 @@ export function extractEditDiff(toolName: string, input: unknown): DiffInput[] |
     default:
       return undefined
   }
+}
+
+/**
+ * Render a Write tool's body as native does (D-016): the file content as
+ * dim-numbered lines (`    1 hello from m3.5`), NOT a green-plus diff. Returns []
+ * when there's no string content. The header + "└ Wrote N lines to <path>"
+ * sub-line are rendered by rows.ts; this is just the numbered body beneath them.
+ */
+export function renderWriteContent(input: unknown): string[] {
+  if (input === null || typeof input !== 'object') return []
+  const content = (input as Record<string, unknown>).content
+  if (typeof content !== 'string' || content === '') return []
+  const lines = content.split('\n')
+  if (lines[lines.length - 1] === '') lines.pop()
+  const gutterW = String(Math.max(1, lines.length)).length
+  return lines.map((ln, i) => `${dim('    ' + String(i + 1).padStart(gutterW))} ${ln}`)
 }
 
 /**

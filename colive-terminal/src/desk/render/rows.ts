@@ -3,7 +3,7 @@ import type { Block, TodoItem } from './blocks'
 import { green, red, gray, dim, italic, bold, bgGray, strike, orange } from './ansi'
 import { wrapAnsi } from './wrap'
 import { renderMarkdown } from './markdown'
-import { extractEditDiff, renderDiff } from './diff'
+import { extractEditDiff, renderDiff, renderWriteContent } from './diff'
 
 export interface RenderOpts {
   width: number
@@ -123,13 +123,18 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
       // "Wrote N lines to <path>"). The numbered body / diff follows below.
       const resultLine = block.detail ? toolResultLine(block.name, block.detail.input) : undefined
       if (resultLine) rows.push(...toRows(dim(`  └ ${resultLine}`), width))
-      // inline diff for edit-family tools (always, not just verbose); a no-op
+      // D-016: Write renders its content as native-style dim-numbered lines;
+      // edit-family tools render a +/- diff (always, not just verbose). A no-op
       // diff renders nothing (skip the empty string so no phantom blank row).
-      const diffs = block.detail ? extractEditDiff(block.name, block.detail.input) : undefined
-      if (diffs) {
-        for (const d of diffs) {
-          const rendered = renderDiff(d, width)
-          if (rendered !== '') rows.push(...toRows(rendered, width))
+      if (block.name === 'Write' && block.detail) {
+        for (const ln of renderWriteContent(block.detail.input)) rows.push(...toRows(ln, width))
+      } else {
+        const diffs = block.detail ? extractEditDiff(block.name, block.detail.input) : undefined
+        if (diffs) {
+          for (const d of diffs) {
+            const rendered = renderDiff(d, width)
+            if (rendered !== '') rows.push(...toRows(rendered, width))
+          }
         }
       }
       // verbose: full input/output for any tool (Ctrl-O), pretty-printed + capped
