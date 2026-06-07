@@ -71,15 +71,17 @@ describe('renderBlockRows', () => {
     expect(closed).not.toContain('\nb')
   })
 
-  it('todos block renders distinct glyphs per status (✔ / ▶ / ☐)', () => {
+  it('todos block renders native glyphs per status (✔ / ■ / □) with no "Todos" header', () => {
     const rows = renderBlockRows({ kind: 'todos', items: [
       { content: 'Adone', status: 'completed' },
       { content: 'Bnow', status: 'in_progress' },
       { content: 'Csoon', status: 'pending' },
     ] }, opts).map(stripAnsi).join('\n')
-    expect(rows).toMatch(/✔\s+Adone/)  // completed
-    expect(rows).toMatch(/▶\s+Bnow/)   // in-progress, highlighted
-    expect(rows).toMatch(/☐\s+Csoon/)  // pending
+    expect(rows).toMatch(/✔\s+Adone/)  // completed (green check + strikethrough)
+    expect(rows).toMatch(/■\s+Bnow/)   // in-progress (orange square + bold)
+    expect(rows).toMatch(/□\s+Csoon/)  // pending
+    expect(rows).not.toContain('Todos') // header removed (D-014)
+    expect(rows).toContain('└')        // native tree connector on the first item
   })
 
   it('assistant renders raw while open, markdown once closed', () => {

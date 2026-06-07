@@ -1,6 +1,6 @@
 // src/desk/render/rows.ts
 import type { Block, TodoItem } from './blocks'
-import { green, red, gray, yellow, dim, italic, bold, bgGray } from './ansi'
+import { green, red, gray, dim, italic, bold, bgGray, strike, orange } from './ansi'
 import { wrapAnsi } from './wrap'
 import { renderMarkdown } from './markdown'
 import { extractEditDiff, renderDiff } from './diff'
@@ -15,13 +15,13 @@ export interface RenderOpts {
 const toRows = (s: string, width: number): string[] =>
   s.split('\n').flatMap((line) => wrapAnsi(line, width))
 
-/** Per-status glyph + line styling for the todos panel (mirrors native's look:
- *  a green check for done, a highlighted arrow for the active item, a dim box
- *  for what's queued). Each entry colors the glyph and the whole line. */
+/** Per-status glyph + line styling for the todos panel, matching native (D-013):
+ *  a green ✔ + struck-through gray text for done, an orange ■ + bold for the active
+ *  item, a hollow □ + plain text for what's queued. */
 const TODO_STYLE: Record<TodoItem['status'], { glyph: string; line: (s: string) => string }> = {
-  completed: { glyph: green('✔'), line: gray },
-  in_progress: { glyph: yellow('▶'), line: bold },
-  pending: { glyph: dim('☐'), line: dim },
+  completed: { glyph: green('✔'), line: (s) => gray(strike(s)) },
+  in_progress: { glyph: orange('■'), line: bold },
+  pending: { glyph: '□', line: (s) => s },
 }
 
 /** The most relevant input key to surface per tool, native-style: Name(arg). */
@@ -85,13 +85,15 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
     }
 
     case 'thinking': {
+      // D-012: keep our collapsible stub (better UX than native's total hide) but
+      // restyle it native-side — dim italic, no emoji, "· thinking … ctrl+o to expand".
       if (!block.closed || verbose) {
-        const header = dim(italic('💭 thinking'))
+        const header = dim(italic('· thinking'))
         const body = block.text.split('\n').map((l) => dim(italic(l)))
         return [header, ...body].flatMap((line) => wrapAnsi(line, width))
       }
       const n = block.text.split('\n').length
-      return toRows(dim(`💭 thinking (${n} line${n === 1 ? '' : 's'}) — Ctrl-O`), width)
+      return toRows(dim(italic(`· thinking (${n} line${n === 1 ? '' : 's'}) — ctrl+o to expand`)), width)
     }
 
     case 'tool': {
@@ -140,13 +142,14 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
     }
 
     case 'todos': {
-      const header = bold('Todos')
-      const items = block.items.map((t) => {
+      // D-014: no "Todos" header; render the list with a native "└" tree connector
+      // on the first item (it hangs off the activity line above), the rest aligned.
+      const items = block.items.map((t, i) => {
         const { glyph, line } = TODO_STYLE[t.status]
-        // glyph keeps its own color; the rest of the line gets the status style.
-        return `  ${glyph} ${line(t.content)}`
+        const prefix = i === 0 ? '  └ ' : '    '
+        return `${prefix}${glyph} ${line(t.content)}`
       })
-      return [header, ...items].flatMap((line) => wrapAnsi(line, width))
+      return items.flatMap((line) => wrapAnsi(line, width))
     }
 
     case 'footer':

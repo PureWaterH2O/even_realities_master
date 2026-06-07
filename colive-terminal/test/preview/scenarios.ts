@@ -129,7 +129,7 @@ export const markdownDoc: CoLiveEvent[] = [
 ]
 
 /** Mid-stream snapshot: thinking still open, one task in-progress, one pending —
- *  so the live palette (open thinking, yellow ▶ active, dim ☐ pending) is visible,
+ *  so the live palette (open thinking, orange ■ active, □ pending) is visible,
  *  not just the all-completed end state. */
 export const inProgress: CoLiveEvent[] = [
   { type: 'user_prompt', text: 'Refactor the parser and add tests.' },

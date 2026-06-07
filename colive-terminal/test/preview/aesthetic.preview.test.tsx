@@ -103,8 +103,8 @@ describe('aesthetic preview', () => {
     const full = flattenAll(inProgress)
     dump('10-todos', [full])
     expect(full.plain).toMatch(/✔/)
-    expect(full.plain).toMatch(/▶/)
-    expect(full.plain).toMatch(/☐/)
+    expect(full.plain).toMatch(/■/)
+    expect(full.plain).toMatch(/□/)
   })
 
   it('11-markdown: rendered markdown elements', async () => {
