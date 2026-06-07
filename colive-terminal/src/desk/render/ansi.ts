@@ -6,6 +6,7 @@ const sgr = (open: number, close: number) => (s: string) => `\x1b[${open}m${s}\x
 export const green = sgr(32, 39)
 export const red = sgr(31, 39)
 export const cyan = sgr(36, 39)
+export const blue = sgr(34, 39)
 export const yellow = sgr(33, 39)
 export const gray = sgr(90, 39)
 export const dim = sgr(2, 22)

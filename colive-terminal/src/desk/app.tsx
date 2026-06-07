@@ -42,6 +42,9 @@ import { filterSlash, atContext } from './input/menu'
 import { fuzzyFilter, defaultListFiles } from './input/files'
 import { slashMenuItems } from './slash'
 import { menuForCommand, actionForCommand, modelDisplayName } from './controls'
+import type { ControlChoice } from './controls'
+import { blue, bold as ansiBold, dim as ansiDim, cyan as ansiCyan, orange as ansiOrange } from './render/ansi'
+import { wrapAnsi } from './render/wrap'
 import { MOUSE_ON, MOUSE_OFF } from './mouse-mode'
 import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
@@ -221,7 +224,14 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // total output exactly fills the terminal, the trailing newline scrolls the host and ink's
   // cursor math drifts (leaking lines into scrollback). Keeping output strictly shorter than
   // the terminal keeps the viewport a clean fixed region (UAT A1).
-  const menuRowCount = menuOpen ? menuLength : 0
+  // Pickers (/model, /mode) render a full native-style panel (title/blurb/rows/
+  // footer), not just a value list — build it once so we both render it and
+  // reserve its exact height. The slash/@ menus stay a simple `menuLength` list.
+  const pickerAction = pickerChoices ? actionForCommand(B.toText(buf).trim()) : null
+  const pickerPanel = pickerChoices && pickerAction
+    ? buildPickerPanel(pickerChoices, pickerAction, pickerAction === 'setModel' ? currentModel : currentMode, clampedMenuIndex, width)
+    : null
+  const menuRowCount = pickerPanel ? pickerPanel.length : menuOpen ? menuLength : 0
   const inputRowCount = pending && pending.kind === 'question' ? 0 : renderInputRows(buf, { width }).length
   // D-008: an in-turn activity line (`✱ Working… (Ns · ↑ N tokens)`) shows while a
   // turn is active; reserve a row for it so it never pushes output past the viewport.
@@ -672,7 +682,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
   return (
     <Box flexDirection="column">
-      {transcript.blocks.length === 0 && !pending ? (
+      {transcript.blocks.length === 0 && !pending && !menuOpen ? (
         <Banner model={currentModel} mode={currentMode} cwd={fileCwd} />
       ) : null}
       <Box flexDirection="column">
@@ -704,12 +714,8 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
       {menuOpen ? (
         <Box flexDirection="column">
-          {pickerChoices
-            ? pickerChoices.map((c, i) => (
-                <Text key={c.value} inverse={i === clampedMenuIndex}>
-                  {`${c.name}  `}<Text dimColor>{c.desc}</Text>
-                </Text>
-              ))
+          {pickerPanel
+            ? pickerPanel.map((r, i) => <Text key={`pk-${i}`}>{r}</Text>)
             : slashMenu
             ? slashMenu.map((item, i) => (
                 <Text key={item.name} inverse={i === clampedMenuIndex}>
@@ -731,6 +737,44 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       )}
     </Box>
   )
+}
+
+/**
+ * Build the model/mode picker panel as native does (D-020): a leading blue rule,
+ * a bold title + dim blurb, numbered rows (current value ✓, nav-selected row in
+ * cyan with a "›" marker + the per-row description), the effort sub-line (model
+ * only), and a key-hint footer. Returned as ANSI rows so the App can both render
+ * them and reserve the exact viewport height. Blank rows are a single space so
+ * ink gives them a line.
+ */
+function buildPickerPanel(
+  choices: ControlChoice[],
+  action: 'setModel' | 'setMode',
+  currentValue: string,
+  selected: number,
+  width: number,
+): string[] {
+  const isModel = action === 'setModel'
+  const out: string[] = [blue('─'.repeat(Math.max(1, width))), ansiBold(isModel ? 'Select model' : 'Select mode')]
+  const blurb = isModel
+    ? 'Switch between Claude models. Your pick becomes the default for new sessions.'
+    : 'Switch the permission mode for this session.'
+  for (const l of wrapAnsi(blurb, width)) out.push(ansiDim(l))
+  out.push(' ')
+  choices.forEach((c, i) => {
+    const left = `${i + 1}. ${c.name}${c.value === currentValue ? ' ✓' : ''}`.padEnd(26)
+    const head = i === selected ? ansiCyan(`› ${left}`) : `  ${left}`
+    out.push(`${head}${ansiDim(c.desc)}`)
+  })
+  out.push(' ')
+  if (isModel) {
+    out.push(`${ansiOrange('●')} High effort (default) ${ansiDim('←/→ to adjust')}`)
+    out.push(' ')
+  }
+  out.push(ansiDim(isModel
+    ? 'Enter to set as default · s to use this session only · Esc to cancel'
+    : 'Enter to select · Esc to cancel'))
+  return out
 }
 
 /**

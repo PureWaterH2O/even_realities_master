@@ -12,9 +12,9 @@ export interface ControlChoice {
 }
 
 export const MODEL_CHOICES: ControlChoice[] = [
-  { name: 'Opus 4.8', desc: 'most capable', value: 'claude-opus-4-8' },
-  { name: 'Sonnet 4.6', desc: 'balanced', value: 'claude-sonnet-4-6' },
-  { name: 'Haiku 4.5', desc: 'fastest', value: 'claude-haiku-4-5-20251001' },
+  { name: 'Opus 4.8', desc: 'Most capable for complex work', value: 'claude-opus-4-8' },
+  { name: 'Sonnet 4.6', desc: 'Best for everyday tasks', value: 'claude-sonnet-4-6' },
+  { name: 'Haiku 4.5', desc: 'Fastest for quick answers', value: 'claude-haiku-4-5-20251001' },
 ]
 
 export const MODE_CHOICES: ControlChoice[] = [
