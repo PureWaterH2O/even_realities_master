@@ -95,8 +95,10 @@ describe('aesthetic preview', () => {
   it('09-permission: inline permission prompt', async () => {
     const frames = await capture([...permission.map(emit), snap('permission')])
     dump('09-permission', frames)
-    expect(frames[0]!.plain).toContain('permission')
-    expect(frames[0]!.plain).toContain('Allow')
+    expect(frames[0]!.plain).toContain('Bash command')          // native blue header
+    expect(frames[0]!.plain).toContain('Do you want to proceed?')
+    expect(frames[0]!.plain).toContain('rm /tmp/m35-test.txt')  // the command
+    expect(frames[0]!.plain).toContain('1. Yes')                // native option wording
   })
 
   it('10-todos: task panel with mixed states', async () => {

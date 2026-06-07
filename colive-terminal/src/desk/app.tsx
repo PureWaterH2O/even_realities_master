@@ -688,7 +688,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         </Box>
       ) : null}
 
-      {pending ? <PendingPrompt pending={pending} input={B.toText(buf)} /> : null}
+      {pending ? <PendingPrompt pending={pending} input={B.toText(buf)} width={width} /> : null}
 
       {busyActive ? (
         <Box>
@@ -733,38 +733,56 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   )
 }
 
-/** Render the inline permission / question prompt. */
-function PendingPrompt({ pending, input }: { pending: Pending; input: string }): React.ReactElement {
+/**
+ * Render the inline permission / question prompt, native Claude style (D-017,
+ * D-018): no rounded box, a leading rule, a header, the body, numbered options
+ * (option 1 pre-highlighted, matching native's default), and a key-hint footer.
+ */
+function PendingPrompt({ pending, input, width }: { pending: Pending; input: string; width: number }): React.ReactElement {
+  const rule = '─'.repeat(Math.max(1, width))
   if (pending.kind === 'permission') {
     const e = pending.event
     return (
-      <Box flexDirection="column" borderStyle="round" paddingX={1}>
-        <Text>
-          <Text color="yellow">permission</Text> {e.toolName}
-          {e.detail ? `: ${e.detail}` : ''}
-        </Text>
-        {e.description ? <Text dimColor>{e.description}</Text> : null}
+      <Box flexDirection="column">
+        <Text color="blue" dimColor>{rule}</Text>
+        <Text color="blue" bold>{`${e.toolName} command`}</Text>
+        <Text> </Text>
+        {e.detail ? <Text>{`  ${e.detail}`}</Text> : null}
+        {e.description ? <Text dimColor>{`  ${e.description}`}</Text> : null}
+        <Text> </Text>
+        <Text>Do you want to proceed?</Text>
         {e.options.map((opt, i) => (
           <Text key={opt.key + String(i)}>
-            {`  [${i + 1}] ${opt.text}`}
+            {i === 0 ? <Text color="blue">{'› '}</Text> : '  '}
+            {`${i + 1}. `}
+            {i === 0 ? <Text color="blue">{opt.text}</Text> : opt.text}
           </Text>
         ))}
+        <Text> </Text>
+        <Text dimColor>Esc to cancel · Tab to amend · ctrl+e to explain</Text>
       </Box>
     )
   }
   const e = pending.event
+  const extras = e.options.length
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={1}>
-      <Text>
-        <Text color="yellow">question</Text> {e.question}
-      </Text>
+    <Box flexDirection="column">
+      <Text dimColor>{rule}</Text>
+      <Text backgroundColor="cyan" color="black">{' □ Question '}</Text>
+      <Text> </Text>
+      <Text bold>{e.question}</Text>
       {e.options.map((opt, i) => (
-        <Text key={opt + String(i)}>{`  [${i + 1}] ${opt}`}</Text>
+        <Text key={opt + String(i)}>
+          {i === 0 ? <Text color="cyan">{'› '}</Text> : '  '}
+          {`${i + 1}. `}
+          {i === 0 ? <Text color="cyan">{opt}</Text> : opt}
+        </Text>
       ))}
-      <Box>
-        <Text>{'answer> '}</Text>
-        <Text>{input}</Text>
-      </Box>
+      <Text>{`  ${extras + 1}. Type something`}</Text>
+      <Text dimColor>{rule}</Text>
+      <Text>{`  ${extras + 2}. Chat about this`}</Text>
+      {input ? <Text dimColor>{`  › ${input}`}</Text> : null}
+      <Text dimColor>Enter to select · ↑/↓ to navigate · Esc to cancel</Text>
     </Box>
   )
 }

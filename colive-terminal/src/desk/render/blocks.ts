@@ -19,6 +19,13 @@ export interface TodoItem {
 const PANEL_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'])
 
 /**
+ * AskUserQuestion renders as the inline question PROMPT (a user_question event),
+ * not as a tool one-liner — native shows no tool header before the question panel.
+ * Suppress its tool_start/tool_end so the desk matches (D-018).
+ */
+const SUPPRESSED_TOOLS = new Set(['AskUserQuestion'])
+
+/**
  * Playful verbs native Claude cycles through for the turn-completion footer
  * (`✱ Worked for 9s`). Picked deterministically by elapsed seconds so a given
  * turn's footer is stable across re-renders (no Math.random — sandbox-safe). The
@@ -262,12 +269,13 @@ function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
     }
 
     case 'tool_start': {
-      if (PANEL_TOOLS.has(event.name)) return state // todos/tasks panel is built on tool_end
+      if (PANEL_TOOLS.has(event.name) || SUPPRESSED_TOOLS.has(event.name)) return state // todos panel / question prompt handle these
       // close the open assistant/thinking first so a pre-tool answer segment renders markdown
       return { ...state, blocks: [...closeOpen(state), { kind: 'tool', toolId: event.toolId, name: event.name }], openAssistant: -1, openThinking: -1 }
     }
 
     case 'tool_end': {
+      if (SUPPRESSED_TOOLS.has(event.name)) return state // AskUserQuestion → inline question prompt
       if (PANEL_TOOLS.has(event.name)) {
         const had = blocks.some((b) => b.kind === 'todos')
         let items = currentTodos(blocks)
