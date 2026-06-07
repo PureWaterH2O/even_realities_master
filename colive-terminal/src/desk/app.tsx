@@ -41,7 +41,7 @@ import type { MouseMode } from './slash'
 import { filterSlash, atContext } from './input/menu'
 import { fuzzyFilter, defaultListFiles } from './input/files'
 import { slashMenuItems } from './slash'
-import { menuForCommand, actionForCommand } from './controls'
+import { menuForCommand, actionForCommand, modelDisplayName } from './controls'
 import { MOUSE_ON, MOUSE_OFF } from './mouse-mode'
 import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
@@ -652,6 +652,9 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
   return (
     <Box flexDirection="column">
+      {transcript.blocks.length === 0 && !pending ? (
+        <Banner model={currentModel} mode={currentMode} cwd={fileCwd} />
+      ) : null}
       <Box flexDirection="column">
         {win.visible.map((row, i) => (
           <Text key={win.offset + i} wrap="truncate-end">{row}</Text>
@@ -737,6 +740,46 @@ function PendingPrompt({ pending, input }: { pending: Pending; input: string }):
         <Text>{'answer> '}</Text>
         <Text>{input}</Text>
       </Box>
+    </Box>
+  )
+}
+
+/** Desk version shown in the startup banner (kept in lockstep with package.json, like hub SERVER_VERSION). */
+const CLIENT_VERSION = '0.1.0'
+
+/** Collapse the home-dir prefix to "~" the way native Claude shows the cwd. */
+function shortCwd(p: string): string {
+  const home = process.env.HOME
+  return home && (p === home || p.startsWith(home + '/')) ? '~' + p.slice(home.length) : p
+}
+
+/**
+ * Startup banner (D-001) — rendered while the transcript is empty so the idle
+ * screen reads like native Claude Code: a small robot, the product line + version,
+ * the active model + permission mode, the working directory, and a feature tip.
+ */
+function Banner({ model, mode, cwd }: { model: string; mode: string; cwd: string }): React.ReactElement {
+  const robot = ['▛▀▀▜', '▌●●▐', '▙▄▄▟']
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={2}>
+          {robot.map((r, i) => (
+            <Text key={`bot-${i}`} color="#d7875f">{r}</Text>
+          ))}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text bold>Claude Code</Text>{` v${CLIENT_VERSION}`}</Text>
+          <Text dimColor>{model ? `${modelDisplayName(model)} · ${mode} mode` : `${mode} mode`}</Text>
+          <Text dimColor>{shortCwd(cwd)}</Text>
+        </Box>
+      </Box>
+      <Text> </Text>
+      <Text>
+        {'Feature of the week: '}
+        <Text color="cyan">/loop</Text>
+        {' — run a prompt or slash command on a recurring interval'}
+      </Text>
     </Box>
   )
 }

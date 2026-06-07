@@ -417,7 +417,7 @@ describe('desk App', () => {
     expect(lastFrame()).toContain('/help')
     expect(lastFrame()).not.toContain('/clear')
     await write(stdin, '\t')                   // Tab completes the highlighted item
-    expect(lastFrame()).toContain('> /help')
+    expect(lastFrame()).toContain('› /help')
     cleanup()
   })
 
@@ -441,7 +441,7 @@ describe('desk App', () => {
     await write(stdin, '/')        // menu opens, highlight on the first item (clear)
     await write(stdin, '\x1b[B')   // ↓ -> highlight the second item (compact)
     await write(stdin, '\t')       // Tab completes the HIGHLIGHTED item
-    expect(lastFrame()).toContain('> /compact')
+    expect(lastFrame()).toContain('› /compact')
     cleanup()
   })
 
@@ -682,7 +682,7 @@ describe('desk App', () => {
     await write(stdin, '\n')       // Ctrl-J -> new buffer line
     await write(stdin, 'line two')
     const frame = stripAnsi(lastFrame() ?? '')
-    expect(frame).toContain('> line one') // first line keeps the prompt
+    expect(frame).toContain('› line one') // first line keeps the prompt
     expect(frame).toContain('  line two') // continuation line is indented (buffer renderer, not a string)
     cleanup()
   })
@@ -1212,11 +1212,14 @@ describe('runtime control pickers (/model, /mode)', () => {
     const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
     await flush()
     await write(stdin, '/model')
-    expect(lastFrame()).toContain('Opus 4.8')        // picker open
+    // Assert on a NON-active model: the picker lists every choice, but the idle
+    // banner only ever shows the *active* model (Opus 4.8) — so "Sonnet 4.6"
+    // appears iff the picker is open, making it a clean open/closed discriminator.
+    expect(lastFrame()).toContain('Sonnet 4.6')      // picker open
     await write(stdin, '\x1b')                        // Esc
     await flush(60)                                   // past ink's ESC debounce
     expect(fake.interrupts).toHaveLength(0)           // did NOT interrupt the session
-    expect(lastFrame()).not.toContain('Opus 4.8')     // picker dismissed
+    expect(lastFrame()).not.toContain('Sonnet 4.6')   // picker dismissed
     cleanup()
   })
 

@@ -46,7 +46,7 @@ describe('M3.2A composer preview', () => {
     ])
     dump(frames)
     const f = frames[0]!.plain
-    expect(f).toContain('> Summarize the repo architecture') // first line keeps the "> " prompt
+    expect(f).toContain('› Summarize the repo architecture') // first line keeps the "› " prompt
     expect(f).toContain('  and list the top three risks.')   // continuation line is indented
   })
 
@@ -57,7 +57,7 @@ describe('M3.2A composer preview', () => {
       snap('m32a-a2-cursor'),
     ])
     dump(frames)
-    expect(frames[0]!.plain).toContain('> helloworld')
+    expect(frames[0]!.plain).toContain('› helloworld')
     expect(frames[0]!.ansi).toContain('[7m') // inverse cursor cell sits mid-line, not only at the end
   })
 
@@ -68,7 +68,7 @@ describe('M3.2A composer preview', () => {
     ])
     dump(frames)
     const f = frames[0]!.plain
-    expect(f).toContain('> function add(a, b) {')
+    expect(f).toContain('› function add(a, b) {')
     expect(f).toContain('return a + b')
     expect(f).toContain('}')
   })
@@ -99,8 +99,8 @@ describe('M3.2A composer preview', () => {
       snap('m32a-a3-history-2'),
     ])
     dump(frames)
-    expect(frames.find((f) => f.label === 'm32a-a3-history-1')!.plain).toContain('> say two')
-    expect(frames.find((f) => f.label === 'm32a-a3-history-2')!.plain).toContain('> say one')
+    expect(frames.find((f) => f.label === 'm32a-a3-history-1')!.plain).toContain('› say two')
+    expect(frames.find((f) => f.label === 'm32a-a3-history-2')!.plain).toContain('› say one')
   })
 
   it('layout: a multi-line composer below a live transcript (dynamic viewport reservation)', async () => {
@@ -113,7 +113,7 @@ describe('M3.2A composer preview', () => {
     dump(frames)
     const f = frames[0]!.plain
     expect(f).toContain('render a haiku about terminals') // transcript above
-    expect(f).toContain('> draft line one')               // composer below, line 1
+    expect(f).toContain('› draft line one')               // composer below, line 1
     expect(f).toContain('  draft line two')               // composer below, line 2
   })
 })

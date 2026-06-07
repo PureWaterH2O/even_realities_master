@@ -39,7 +39,8 @@ describe('aesthetic preview', () => {
   it('01-idle: app chrome with no events', async () => {
     const frames = await capture([snap('idle')])
     dump('01-idle', frames)
-    expect(frames[0]!.plain).toContain('>')
+    expect(frames[0]!.plain).toContain('›') // native prompt glyph (U+203A)
+    expect(frames[0]!.plain).toContain('Claude Code') // startup banner present
   })
 
   it('02-simple-qa: one turn', async () => {
