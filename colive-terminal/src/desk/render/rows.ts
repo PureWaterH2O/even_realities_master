@@ -73,11 +73,16 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
       return out
     }
 
-    case 'assistant':
-      // stream raw while open; markdown-render once closed (avoids half-parsed flicker)
-      return block.closed
-        ? toRows(renderMarkdown(block.text, width), width)
-        : toRows(`${green('claude')}  ${block.text}`, width)
+    case 'assistant': {
+      // Native marks every assistant message with a leading green "●" on its first
+      // line (D-010/D-011); continuation lines flow at the left margin. Stream raw
+      // while open; markdown-render once closed (avoids half-parsed flicker).
+      const rendered = block.closed ? renderMarkdown(block.text, width) : block.text
+      const rows = toRows(rendered, width)
+      if (rows.length === 0) return [`${green('●')} `]
+      rows[0] = `${green('●')} ${rows[0]}`
+      return rows
+    }
 
     case 'thinking': {
       if (!block.closed || verbose) {
