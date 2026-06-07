@@ -152,6 +152,21 @@ describe('reduceBlocks', () => {
     expect(s.blocks.filter((b) => b.kind === 'user')).toEqual([{ kind: 'user', text: 'from glasses' }])
   })
 
+  it('interrupt marks the open assistant block interrupted + closed (D-028)', () => {
+    let s = run([{ type: 'text_delta', text: 'The History of Computing:' }])
+    s = reduceBlocks(s, { type: 'interrupt' })
+    const a = s.blocks.find((b) => b.kind === 'assistant') as { closed: boolean; interrupted?: boolean }
+    expect(a.closed).toBe(true)
+    expect(a.interrupted).toBe(true)
+    expect(s.openAssistant).toBe(-1)
+  })
+
+  it('interrupt with no answer text yet appends a standalone interrupted marker', () => {
+    const s = reduceBlocks(initialBlockState(), { type: 'interrupt' })
+    const a = s.blocks.find((b) => b.kind === 'assistant') as { interrupted?: boolean } | undefined
+    expect(a?.interrupted).toBe(true)
+  })
+
   it('clear empties the blocks; reset seeds from transcript entries', () => {
     const seeded = reduceBlocks(initialBlockState(), {
       type: 'reset',

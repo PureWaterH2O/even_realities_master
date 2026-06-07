@@ -126,6 +126,9 @@ export async function capture(steps: Step[], sessionId = 's-preview', config?: A
       } else if (step.kind === 'key') {
         act(() => inst.stdin.write(step.bytes))
         await settle()
+        // ink debounces a LONE Esc (it waits to see if an escape SEQUENCE follows
+        // before reporting `escape`); let that timer fire so the keybinding runs.
+        if (step.bytes === '\x1b') await act(async () => { await new Promise((r) => setTimeout(r, 60)) })
       } else {
         const ansi = inst.lastFrame() ?? ''
         frames.push({ label: step.label, ansi, plain: stripAnsi(ansi) })

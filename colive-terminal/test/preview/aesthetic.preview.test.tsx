@@ -176,6 +176,9 @@ describe('aesthetic preview', () => {
       snap('post-interrupt'),
     ])
     dump('19-interrupt', frames)
+    // D-028: the interrupted turn shows the native follow-up sub-line.
+    const post = frames.find((f) => f.label === 'post-interrupt')!.plain
+    expect(post).toContain('└ Interrupted · What should Claude do instead?')
   })
 
   it('20-cost-summary: token/cost display', async () => {

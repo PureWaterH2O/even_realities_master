@@ -36,7 +36,7 @@ const TURN_VERBS = ['Brewed', 'Cogitated', 'Crunched', 'Baked', 'Worked', 'Churn
 /** One logical unit of the transcript. Each kind renders to ANSI rows (rows.ts). */
 export type Block =
   | { kind: 'user'; text: string }
-  | { kind: 'assistant'; text: string; closed: boolean }
+  | { kind: 'assistant'; text: string; closed: boolean; interrupted?: boolean }
   | { kind: 'tool'; toolId: string; name: string; summary?: string; detail?: { input: unknown; output: unknown } }
   | { kind: 'thinking'; text: string; closed: boolean }
   | { kind: 'todos'; items: TodoItem[] }
@@ -71,6 +71,7 @@ export type BlockAction =
   | { type: 'clear' }
   | { type: 'event'; event: CoLiveEvent }
   | { type: 'localUser'; text: string }
+  | { type: 'interrupt' }
   | { type: 'note'; text: string }
 
 const rec = (v: unknown): Record<string, unknown> =>
@@ -189,6 +190,18 @@ export function reduceBlocks(state: BlockState, action: BlockAction): BlockState
       }
     case 'event':
       return applyEvent(state, action.event)
+    case 'interrupt': {
+      // D-028: mark the in-flight answer as interrupted (rows.ts adds the native
+      // "└ Interrupted · What should Claude do instead?" sub-line). If no answer
+      // text streamed yet, append a standalone interrupted marker.
+      const next = closeOpen(state)
+      if (state.openAssistant >= 0 && next[state.openAssistant]?.kind === 'assistant') {
+        const a = next[state.openAssistant] as Extract<Block, { kind: 'assistant' }>
+        next[state.openAssistant] = { ...a, interrupted: true }
+        return { ...state, blocks: next, openAssistant: -1, openThinking: -1 }
+      }
+      return { ...state, blocks: [...next, { kind: 'assistant', text: '', closed: true, interrupted: true }], openAssistant: -1, openThinking: -1 }
+    }
     default:
       return state
   }

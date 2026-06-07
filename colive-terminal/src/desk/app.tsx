@@ -542,6 +542,12 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       if (slashMenu) { setBuf(B.empty()); return }      // slash menu: clear the lone "/" token (unchanged)
       const sid = sessionIdRef.current
       if (sid !== undefined) void client.interrupt(sid).catch(() => {})
+      // D-028: if a turn is actually in flight, mark the answer interrupted (adds
+      // the native "└ Interrupted …" sub-line) and stop the activity spinner.
+      if (sid !== undefined && STATUS_LABEL[status.state] !== 'idle') {
+        dispatch({ type: 'interrupt' })
+        setStatus((s) => ({ ...s, state: 'idle' }))
+      }
       return
     }
 

@@ -84,6 +84,12 @@ describe('renderBlockRows', () => {
     expect(rows).toContain('└')        // native tree connector on the first item
   })
 
+  it('interrupted assistant block renders the native follow-up sub-line (D-028)', () => {
+    const rows = renderBlockRows({ kind: 'assistant', text: 'The History of Computing:', closed: true, interrupted: true }, opts).map(stripAnsi).join('\n')
+    expect(rows).toContain('● The History of Computing:')
+    expect(rows).toContain('└ Interrupted · What should Claude do instead?')
+  })
+
   it('assistant renders raw while open, markdown once closed', () => {
     const open = renderBlockRows({ kind: 'assistant', text: '# Title', closed: false }, opts).map(stripAnsi).join('\n')
     expect(open).toContain('# Title') // raw passthrough while streaming (no flicker)

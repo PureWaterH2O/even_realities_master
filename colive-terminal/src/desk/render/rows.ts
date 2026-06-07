@@ -79,8 +79,12 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
       // while open; markdown-render once closed (avoids half-parsed flicker).
       const rendered = block.closed ? renderMarkdown(block.text, width) : block.text
       const rows = toRows(rendered, width)
-      if (rows.length === 0) return [`${green('●')} `]
+      if (rows.length === 0) rows.push('')
       rows[0] = `${green('●')} ${rows[0]}`
+      // D-028: an interrupted turn gets the native follow-up sub-line.
+      if (block.interrupted) {
+        rows.push(...toRows(dim('  └ Interrupted · What should Claude do instead?'), width))
+      }
       return rows
     }
 
