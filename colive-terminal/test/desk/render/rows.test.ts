@@ -27,9 +27,33 @@ describe('renderBlockRows', () => {
     expect(head).not.toContain('Bash completed') // drop the generic Core summary
   })
 
-  it('tool head extracts file_path for read/edit-family tools', () => {
+  it('tool head: Read collapses to a count (native "Read 1 file"); edit-family keeps the path', () => {
     const read: Block = { kind: 'tool', toolId: 't1', name: 'Read', summary: 'Read completed', detail: { input: { file_path: '/a/b.ts' }, output: 'x' } }
-    expect(renderBlockRows(read, opts).map(stripAnsi).join('\n')).toContain('Read(/a/b.ts)')
+    expect(renderBlockRows(read, opts).map(stripAnsi).join('\n')).toContain('Read 1 file')
+    const edit: Block = { kind: 'tool', toolId: 't2', name: 'Edit', summary: 'Edit completed', detail: { input: { file_path: '/a/b.ts', old_string: 'x', new_string: 'y' }, output: 'ok' } }
+    expect(renderBlockRows(edit, opts).map(stripAnsi).join('\n')).toContain('Edit(/a/b.ts)')
+  })
+
+  it('tool head uses a filled ● dot (green ok / red error) and a "(ctrl+o to expand)" hint', () => {
+    const ok: Block = { kind: 'tool', toolId: 't1', name: 'Read', summary: 'Read completed', detail: { input: { file_path: '/a' }, output: 'x' } }
+    const okRows = renderBlockRows(ok, opts)
+    expect(okRows.map(stripAnsi).join('\n')).toContain('● Read 1 file')
+    expect(okRows.map(stripAnsi).join('\n')).toContain('(ctrl+o to expand)')
+    expect(okRows.join('\n')).toContain('[32m') // green dot on success
+    const err: Block = { kind: 'tool', toolId: 't2', name: 'Read', summary: 'Read failed', detail: { input: { file_path: '/a' }, output: { error: 'ENOENT' } } }
+    expect(renderBlockRows(err, opts).join('\n')).toContain('[31m') // red on error
+  })
+
+  it('Agent tool head shows its description; Write shows a "└ Wrote N lines" sub-line', () => {
+    const agent: Block = { kind: 'tool', toolId: 'a1', name: 'Agent', summary: 'Agent completed', detail: { input: { description: 'Answer arithmetic question', prompt: 'what is 2+2' }, output: { result: '4' } } }
+    expect(renderBlockRows(agent, opts).map(stripAnsi).join('\n')).toContain('Agent(Answer arithmetic question)')
+    const write: Block = { kind: 'tool', toolId: 'w1', name: 'Write', summary: 'Write completed', detail: { input: { file_path: '/tmp/x.txt', content: 'a\nb\nc' }, output: 'ok' } }
+    expect(renderBlockRows(write, opts).map(stripAnsi).join('\n')).toContain('└ Wrote 3 lines to /tmp/x.txt')
+  })
+
+  it('footer block renders the native turn-completion line "✱ <verb> for Ns"', () => {
+    const rows = renderBlockRows({ kind: 'footer', verb: 'Worked', seconds: 9 }, opts).map(stripAnsi).join('\n')
+    expect(rows).toBe('✱ Worked for 9s')
   })
 
   it('edit-family tool renders an inline diff regardless of verbose', () => {

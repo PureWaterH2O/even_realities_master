@@ -190,8 +190,9 @@ describe('desk App', () => {
     })
     await flush()
     const frame = stripAnsi(lastFrame() ?? '')
-    // Native-style header: Name(keyArg), not the generic Core summary.
-    expect(frame).toContain('Read(foo.ts)')
+    // Native-style header: Read collapses to a count ("Read 1 file"), not the
+    // generic Core summary.
+    expect(frame).toContain('Read 1 file')
     expect(frame).not.toContain('Read completed')
   })
 

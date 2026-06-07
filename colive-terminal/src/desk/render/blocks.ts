@@ -18,6 +18,14 @@ export interface TodoItem {
  */
 const PANEL_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'])
 
+/**
+ * Playful verbs native Claude cycles through for the turn-completion footer
+ * (`✱ Worked for 9s`). Picked deterministically by elapsed seconds so a given
+ * turn's footer is stable across re-renders (no Math.random — sandbox-safe). The
+ * observed native set: Brewed, Cogitated, Crunched, Baked, Worked, Churned.
+ */
+const TURN_VERBS = ['Brewed', 'Cogitated', 'Crunched', 'Baked', 'Worked', 'Churned'] as const
+
 /** One logical unit of the transcript. Each kind renders to ANSI rows (rows.ts). */
 export type Block =
   | { kind: 'user'; text: string }
@@ -25,6 +33,7 @@ export type Block =
   | { kind: 'tool'; toolId: string; name: string; summary?: string; detail?: { input: unknown; output: unknown } }
   | { kind: 'thinking'; text: string; closed: boolean }
   | { kind: 'todos'; items: TodoItem[] }
+  | { kind: 'footer'; verb: string; seconds: number }
   | { kind: 'note'; text: string }
 
 export interface BlockState {
@@ -280,10 +289,14 @@ function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
       return { ...state, blocks: next, openAssistant: -1, openThinking: -1 }
     }
 
-    case 'result':
+    case 'result': {
       // close the open assistant + thinking so the finished answer renders markdown
-      // (rows.ts gates markdown on `closed`) and thinking collapses to its stub.
-      return { ...state, blocks: closeOpen(state), openAssistant: -1, openThinking: -1 }
+      // (rows.ts gates markdown on `closed`) and thinking collapses to its stub,
+      // then append the native-style turn-completion footer (`✱ Worked for Ns`).
+      const seconds = Math.max(1, Math.round(event.durationMs / 1000))
+      const footer: Block = { kind: 'footer', verb: TURN_VERBS[seconds % TURN_VERBS.length]!, seconds }
+      return { ...state, blocks: [...closeOpen(state), footer], openAssistant: -1, openThinking: -1 }
+    }
 
     case 'notification':
       return { ...state, blocks: [...blocks, { kind: 'note', text: `${event.title}: ${event.message}` }], openAssistant: -1, openThinking: -1 }

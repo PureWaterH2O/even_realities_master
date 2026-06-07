@@ -117,6 +117,9 @@ const STATUS_LABEL: Record<StatusState, string> = {
   idle: 'idle',
 }
 
+/** Present-continuous verbs for the in-turn activity spinner (`✱ Working…`, D-008). */
+const SPINNER_VERBS = ['Working', 'Brewing', 'Crunching', 'Baking', 'Churning', 'Cogitating'] as const
+
 interface StatusInfo {
   state: StatusState
   inputTokens?: number
@@ -220,7 +223,10 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // the terminal keeps the viewport a clean fixed region (UAT A1).
   const menuRowCount = menuOpen ? menuLength : 0
   const inputRowCount = pending && pending.kind === 'question' ? 0 : renderInputRows(buf, { width }).length
-  const reserved = 3 + inputRowCount + menuRowCount // 3 = indicator + status + headroom
+  // D-008: an in-turn activity line (`✱ Working… (Ns · ↑ N tokens)`) shows while a
+  // turn is active; reserve a row for it so it never pushes output past the viewport.
+  const busyActive = STATUS_LABEL[status.state] !== 'idle' && !pending
+  const reserved = 3 + inputRowCount + menuRowCount + (busyActive ? 1 : 0) // 3 = indicator + status + headroom
   const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
@@ -650,6 +656,15 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       : ''
   const sid = sessionIdRef.current
 
+  // D-008: in-turn activity line — "✱ <verb>… (Ns · ↑ N tokens)". Seconds + input
+  // tokens come from running_stats; the verb is deterministic in the elapsed time.
+  const spinnerSeconds = status.durationMs !== undefined ? Math.max(1, Math.round(status.durationMs / 1000)) : undefined
+  const spinnerVerb = SPINNER_VERBS[(spinnerSeconds ?? 0) % SPINNER_VERBS.length]
+  const spinnerMeta: string[] = []
+  if (spinnerSeconds !== undefined) spinnerMeta.push(`${spinnerSeconds}s`)
+  if (status.inputTokens !== undefined) spinnerMeta.push(`↑ ${status.inputTokens} tokens`)
+  const spinnerText = `${spinnerVerb}…${spinnerMeta.length ? ` (${spinnerMeta.join(' · ')})` : ''}`
+
   return (
     <Box flexDirection="column">
       {transcript.blocks.length === 0 && !pending ? (
@@ -669,6 +684,13 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       ) : null}
 
       {pending ? <PendingPrompt pending={pending} input={B.toText(buf)} /> : null}
+
+      {busyActive ? (
+        <Box>
+          <Text color="yellow">✱ </Text>
+          <Text dimColor>{spinnerText}</Text>
+        </Box>
+      ) : null}
 
       <Box>
         <Text dimColor>

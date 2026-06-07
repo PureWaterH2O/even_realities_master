@@ -66,8 +66,8 @@ describe('aesthetic preview', () => {
   it('05-tool-read: Read tool header', async () => {
     const full = flattenAll(toolRead)
     dump('05-tool-read', [full])
-    expect(full.plain).toContain('Read')
-    expect(full.plain).toContain('CLAUDE.md')
+    expect(full.plain).toContain('Read 1 file') // native NL summary (filename moves behind ctrl+o)
+    expect(full.plain).toContain('ctrl+o to expand')
   })
 
   it('06-tool-bash: Bash tool with output', async () => {
@@ -128,11 +128,11 @@ describe('aesthetic preview', () => {
   it('13-error: failed tool rendering', async () => {
     const full = flattenAll(errorDiag)
     dump('13-error', [full])
-    expect(full.plain).toContain('Read')
-    // The error state is color-only in rows.ts (the dot/name are painted red,
-    // computed from the summary), and stripAnsi drops color — so "failed" never
-    // appears in plain text. Assert on the rendered file path, which survives.
-    expect(full.plain).toContain('/tmp/no-such-file-12345.txt')
+    // Native renders a failed Read the same as a success ("Read 1 file"); the
+    // error is conveyed color-only (red dot/name) + in the assistant text, and
+    // stripAnsi drops color — so assert on the NL summary that survives.
+    expect(full.plain).toContain('Read 1 file')
+    expect(full.ansi).toContain('[31m') // error tinted red
   })
 
   it('14-status-line: busy state with running stats', async () => {

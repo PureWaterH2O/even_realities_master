@@ -37,6 +37,8 @@ const TOOL_ARG_KEYS: Record<string, string[]> = {
   LS: ['path'],
   WebFetch: ['url'],
   WebSearch: ['query'],
+  Agent: ['description', 'prompt'],
+  Task: ['description', 'prompt'],
 }
 const ARG_FALLBACK = ['file_path', 'command', 'pattern', 'path', 'url', 'query']
 
@@ -88,15 +90,32 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
     }
 
     case 'tool': {
-      // Native-style header: a status dot + Name(keyArg). The Core summary is
-      // generic ("Bash completed"), so we surface the actual argument instead
-      // and only fall back to the bare name when no arg is extractable.
+      // Native-style header: a filled "●" status dot (green ok / red error, D-004)
+      // + a natural-language summary (D-005). The Core summary is generic ("Bash
+      // completed"), so we synthesise the native form: Read collapses to a count
+      // ("Read 1 file"); everything else keeps Name(keyArg) (Bash → command,
+      // Write/Edit → path, Agent → description).
       const isErr = /\bfailed\b/i.test(block.summary ?? '')
       const arg = block.detail ? toolArg(block.name, block.detail.input) : ''
-      const dot = isErr ? red('⏺') : green('⏺')
-      const name = isErr ? red(block.name) : block.name
-      const head = arg ? `${dot} ${name}(${dim(arg)})` : `${dot} ${name}`
-      const rows = toRows(head, width)
+      const dot = isErr ? red('●') : green('●')
+      // Read collapses to a count ("Read 1 file"); every other tool keeps a bold
+      // Name(arg) (Agent shows "Agent(description)", per native). On error the
+      // name is tinted red instead of bold.
+      let head: string
+      if (block.name === 'Read') {
+        head = isErr ? red('Read 1 file') : 'Read 1 file'
+      } else {
+        const name = isErr ? red(block.name) : bold(block.name)
+        head = arg ? `${name}(${arg})` : name
+      }
+      // D-006: a "(ctrl+o to expand)" affordance on collapsed tools; dropped under
+      // Ctrl-O verbose, where the full detail is already shown.
+      const hint = block.detail && !verbose ? dim(' (ctrl+o to expand)') : ''
+      const rows = toRows(`${dot} ${head}${hint}`, width)
+      // D-006: a "└" result sub-line for tools with a one-line outcome (Write →
+      // "Wrote N lines to <path>"). The numbered body / diff follows below.
+      const resultLine = block.detail ? toolResultLine(block.name, block.detail.input) : undefined
+      if (resultLine) rows.push(...toRows(dim(`  └ ${resultLine}`), width))
       // inline diff for edit-family tools (always, not just verbose); a no-op
       // diff renders nothing (skip the empty string so no phantom blank row).
       const diffs = block.detail ? extractEditDiff(block.name, block.detail.input) : undefined
@@ -125,10 +144,28 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
       return [header, ...items].flatMap((line) => wrapAnsi(line, width))
     }
 
+    case 'footer':
+      // D-007: native turn-completion footer — a dim "✱ <verb> for Ns".
+      return toRows(dim(`✱ ${block.verb} for ${block.seconds}s`), width)
+
     case 'note':
     default:
       return toRows(dim((block as { text: string }).text), width)
   }
+}
+
+/**
+ * D-006: a one-line "⌐" result summary shown under a tool header. Native renders
+ * one for tools with a concrete outcome — currently Write (`Wrote N lines to
+ * <path>`). Returns undefined for tools whose outcome lives behind Ctrl-O.
+ */
+function toolResultLine(name: string, input: unknown): string | undefined {
+  if (name !== 'Write' || input === null || typeof input !== 'object') return undefined
+  const i = input as Record<string, unknown>
+  const path = typeof i.file_path === 'string' ? i.file_path : ''
+  const content = typeof i.content === 'string' ? i.content : ''
+  const n = content === '' ? 0 : content.replace(/\n$/, '').split('\n').length
+  return `Wrote ${n} line${n === 1 ? '' : 's'} to ${path}`
 }
 
 /** Render one labelled detail field (input/output) as indented, capped rows. */
