@@ -165,6 +165,22 @@ implement at all.
 
 ---
 
+## UAT findings (2026-06-07) — new entries from hardware testing
+
+**D-029 — Input prompt not pinned to bottom** · **major** · scenarios F1,F2,F3,F4 · fix: `app.tsx` (Ink layout)
+- Native: the `›` prompt + status line are **pinned to the very bottom** of the terminal, with a separator line above. The transcript fills the space above, pushing content up. When content is short, the middle is empty — but the input is always at the foot of the screen.
+- Ours: everything stacks top-down (transcript → status → prompt). When content is short, there's a big gap **below** the prompt. The input floats in the middle of the screen instead of anchoring at the bottom.
+- **This is the single biggest remaining layout difference.** It affects every scenario.
+
+**D-030 — Markdown collapses newlines on turn close** · **medium** · scenario F3 · fix: `rows.ts` (`case 'assistant'` closed branch) / `markdown.ts`
+- Native: a line-by-line response (e.g. counting 1–100, one per line) **preserves** the line breaks after the turn completes. Each number stays on its own line.
+- Ours: while streaming, line breaks are preserved (raw text shown). Once the turn closes (result received), `renderMarkdown()` collapses the text into a single paragraph — numbers wrap into `1 2 3 4 5 6 7 8 9 10 11 12...100` on a few lines. The streaming→closed transition destroys the line structure.
+
+**D-031 — Wasted vertical space when transcript is short** · **medium** · scenarios F1,F4 · related to D-029
+- When the transcript doesn't fill the terminal height, there's a large empty gap between the content and the bottom edge. Native fills this naturally because the input is bottom-pinned and the transcript grows downward from the top. This is a symptom of D-029.
+
+---
+
 ## Scenario → entry coverage
 
 01→D-001,D-002,D-009 · 02→D-003,D-010 · 03→D-011 · 04→D-007,D-012 · 05/06/08→D-004,D-005,D-006,D-007 ·
