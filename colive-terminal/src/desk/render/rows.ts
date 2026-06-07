@@ -1,9 +1,9 @@
 // src/desk/render/rows.ts
 import type { Block, TodoItem } from './blocks'
-import { cyan, green, red, gray, yellow, dim, italic, bold } from './ansi'
+import { green, red, gray, dim, italic, bold, bgGray, strike, orange } from './ansi'
 import { wrapAnsi } from './wrap'
 import { renderMarkdown } from './markdown'
-import { extractEditDiff, renderDiff } from './diff'
+import { extractEditDiff, renderDiff, renderWriteContent } from './diff'
 
 export interface RenderOpts {
   width: number
@@ -15,13 +15,13 @@ export interface RenderOpts {
 const toRows = (s: string, width: number): string[] =>
   s.split('\n').flatMap((line) => wrapAnsi(line, width))
 
-/** Per-status glyph + line styling for the todos panel (mirrors native's look:
- *  a green check for done, a highlighted arrow for the active item, a dim box
- *  for what's queued). Each entry colors the glyph and the whole line. */
+/** Per-status glyph + line styling for the todos panel, matching native (D-013):
+ *  a green ✔ + struck-through gray text for done, an orange ■ + bold for the active
+ *  item, a hollow □ + plain text for what's queued. */
 const TODO_STYLE: Record<TodoItem['status'], { glyph: string; line: (s: string) => string }> = {
-  completed: { glyph: green('✔'), line: gray },
-  in_progress: { glyph: yellow('▶'), line: bold },
-  pending: { glyph: dim('☐'), line: dim },
+  completed: { glyph: green('✔'), line: (s) => gray(strike(s)) },
+  in_progress: { glyph: orange('■'), line: bold },
+  pending: { glyph: '□', line: (s) => s },
 }
 
 /** The most relevant input key to surface per tool, native-style: Name(arg). */
@@ -37,8 +37,18 @@ const TOOL_ARG_KEYS: Record<string, string[]> = {
   LS: ['path'],
   WebFetch: ['url'],
   WebSearch: ['query'],
+  Agent: ['description', 'prompt'],
+  Task: ['description', 'prompt'],
 }
 const ARG_FALLBACK = ['file_path', 'command', 'pattern', 'path', 'url', 'query']
+
+/**
+ * Tools native marks with a green "●" + bold name (action / sub-agent work).
+ * Every OTHER tool (Read, Bash, Grep, Glob, LS, WebFetch, …) is read-only and
+ * renders dot-less + dim, indented to column 2. (D-004, pixel-checked vs native
+ * 05/06/07/18; the catalog's "● for all tools" was an over-generalization.)
+ */
+const DOTTED_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Agent', 'Task'])
 
 /** Pull the key argument from a tool's input, collapsed to one line + capped. */
 function toolArg(name: string, input: unknown): string {
@@ -57,42 +67,89 @@ function toolArg(name: string, input: unknown): string {
 export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
   const { width, verbose } = opts
   switch (block.kind) {
-    case 'user':
-      return toRows(`${cyan('you')}  ${block.text}`, width)
+    case 'user': {
+      // Native: a full-width dark bar, "› text" in bold, spanning the terminal
+      // width (D-003). Pad each visual row to `width` so the dark background runs
+      // edge-to-edge; continuation lines align under the text (2-space indent).
+      const out: string[] = []
+      block.text.split('\n').forEach((ln, i) => {
+        const prefix = i === 0 ? '› ' : '  '
+        for (const seg of wrapAnsi(prefix + ln, width)) {
+          out.push(bgGray(bold(seg.padEnd(width))))
+        }
+      })
+      return out
+    }
 
-    case 'assistant':
-      // stream raw while open; markdown-render once closed (avoids half-parsed flicker)
-      return block.closed
-        ? toRows(renderMarkdown(block.text, width), width)
-        : toRows(`${green('claude')}  ${block.text}`, width)
+    case 'assistant': {
+      // Native marks every assistant message with a leading green "●" on its first
+      // line (D-010/D-011); continuation lines flow at the left margin. Stream raw
+      // while open; markdown-render once closed (avoids half-parsed flicker).
+      const rendered = block.closed ? renderMarkdown(block.text, width) : block.text
+      const rows = toRows(rendered, width)
+      if (rows.length === 0) rows.push('')
+      rows[0] = `${green('●')} ${rows[0]}`
+      // D-028: an interrupted turn gets the native follow-up sub-line.
+      if (block.interrupted) {
+        rows.push(...toRows(dim('  └ Interrupted · What should Claude do instead?'), width))
+      }
+      return rows
+    }
 
     case 'thinking': {
+      // D-012: keep our collapsible stub (better UX than native's total hide) but
+      // restyle it native-side — dim italic, no emoji, "· thinking … ctrl+o to expand".
       if (!block.closed || verbose) {
-        const header = dim(italic('💭 thinking'))
+        const header = dim(italic('· thinking'))
         const body = block.text.split('\n').map((l) => dim(italic(l)))
         return [header, ...body].flatMap((line) => wrapAnsi(line, width))
       }
       const n = block.text.split('\n').length
-      return toRows(dim(`💭 thinking (${n} line${n === 1 ? '' : 's'}) — Ctrl-O`), width)
+      return toRows(dim(italic(`· thinking (${n} line${n === 1 ? '' : 's'}) — ctrl+o to expand`)), width)
     }
 
     case 'tool': {
-      // Native-style header: a status dot + Name(keyArg). The Core summary is
-      // generic ("Bash completed"), so we surface the actual argument instead
-      // and only fall back to the bare name when no arg is extractable.
+      // Native-style header + a natural-language summary (D-005): Read collapses to
+      // a count ("Read 1 file"); everything else keeps Name(keyArg) (Bash → command,
+      // Write/Edit → path, Agent → description).
+      //
+      // D-004 (pixel-checked vs 05/06/07/18, refining the catalog's "● for all"):
+      // native draws a filled green "●" + bold name ONLY for action/agent tools
+      // (Write, Edit, Agent, …); read-only tools (Read, Bash, Grep, …) render a
+      // dim, dot-LESS, 2-space-indented summary. Text sits at column 2 either way.
       const isErr = /\bfailed\b/i.test(block.summary ?? '')
       const arg = block.detail ? toolArg(block.name, block.detail.input) : ''
-      const dot = isErr ? red('⏺') : green('⏺')
-      const name = isErr ? red(block.name) : block.name
-      const head = arg ? `${dot} ${name}(${dim(arg)})` : `${dot} ${name}`
+      const label = block.name === 'Read' ? 'Read 1 file' : arg ? `${block.name}(${arg})` : block.name
+      // D-006: a "(ctrl+o to expand)" affordance on collapsed tools; dropped under
+      // Ctrl-O verbose, where the full detail is already shown.
+      const hint = block.detail && !verbose ? dim(' (ctrl+o to expand)') : ''
+      let head: string
+      if (DOTTED_TOOLS.has(block.name)) {
+        // action/agent tool: green ● + BOLD name (arg stays regular weight)
+        const dot = isErr ? red('●') : green('●')
+        const name = isErr ? red(block.name) : bold(block.name)
+        head = `${dot} ${arg ? `${name}(${arg})` : name}${hint}`
+      } else {
+        // read-only tool: no dot, dim summary, indented to column 2 (native 05/06)
+        head = `  ${(isErr ? red : gray)(label)}${hint}`
+      }
       const rows = toRows(head, width)
-      // inline diff for edit-family tools (always, not just verbose); a no-op
+      // D-006: a "└" result sub-line for tools with a one-line outcome (Write →
+      // "Wrote N lines to <path>"). The numbered body / diff follows below.
+      const resultLine = block.detail ? toolResultLine(block.name, block.detail.input) : undefined
+      if (resultLine) rows.push(...toRows(dim(`  └ ${resultLine}`), width))
+      // D-016: Write renders its content as native-style dim-numbered lines;
+      // edit-family tools render a +/- diff (always, not just verbose). A no-op
       // diff renders nothing (skip the empty string so no phantom blank row).
-      const diffs = block.detail ? extractEditDiff(block.name, block.detail.input) : undefined
-      if (diffs) {
-        for (const d of diffs) {
-          const rendered = renderDiff(d, width)
-          if (rendered !== '') rows.push(...toRows(rendered, width))
+      if (block.name === 'Write' && block.detail) {
+        for (const ln of renderWriteContent(block.detail.input)) rows.push(...toRows(ln, width))
+      } else {
+        const diffs = block.detail ? extractEditDiff(block.name, block.detail.input) : undefined
+        if (diffs) {
+          for (const d of diffs) {
+            const rendered = renderDiff(d, width)
+            if (rendered !== '') rows.push(...toRows(rendered, width))
+          }
         }
       }
       // verbose: full input/output for any tool (Ctrl-O), pretty-printed + capped
@@ -105,19 +162,39 @@ export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
     }
 
     case 'todos': {
-      const header = bold('Todos')
-      const items = block.items.map((t) => {
+      // D-014: no "Todos" header; render the list with a native "└" tree connector
+      // on the first item (it hangs off the activity line above), the rest aligned.
+      const items = block.items.map((t, i) => {
         const { glyph, line } = TODO_STYLE[t.status]
-        // glyph keeps its own color; the rest of the line gets the status style.
-        return `  ${glyph} ${line(t.content)}`
+        const prefix = i === 0 ? '  └ ' : '    '
+        return `${prefix}${glyph} ${line(t.content)}`
       })
-      return [header, ...items].flatMap((line) => wrapAnsi(line, width))
+      return items.flatMap((line) => wrapAnsi(line, width))
     }
+
+    case 'footer':
+      // D-007: native turn-completion footer — a dim "✱ <verb> for Ns".
+      return toRows(dim(`✱ ${block.verb} for ${block.seconds}s`), width)
 
     case 'note':
     default:
       return toRows(dim((block as { text: string }).text), width)
   }
+}
+
+/**
+ * D-006: a one-line "⌐" result summary shown under a tool header. Native renders
+ * one for tools with a concrete outcome — currently Write (`Wrote N lines to
+ * <path>`). Returns undefined for tools whose outcome lives behind Ctrl-O.
+ */
+function toolResultLine(name: string, input: unknown): string | undefined {
+  if (name !== 'Write' || input === null || typeof input !== 'object') return undefined
+  const i = input as Record<string, unknown>
+  const path = typeof i.file_path === 'string' ? i.file_path : ''
+  const content = typeof i.content === 'string' ? i.content : ''
+  const n = content === '' ? 0 : content.replace(/\n$/, '').split('\n').length
+  // Native always says "lines" (even for 1) — match its literal text for parity.
+  return `Wrote ${n} lines to ${path}`
 }
 
 /** Render one labelled detail field (input/output) as indented, capped rows. */

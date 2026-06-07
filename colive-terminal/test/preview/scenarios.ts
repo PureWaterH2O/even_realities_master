@@ -129,7 +129,7 @@ export const markdownDoc: CoLiveEvent[] = [
 ]
 
 /** Mid-stream snapshot: thinking still open, one task in-progress, one pending —
- *  so the live palette (open thinking, yellow ▶ active, dim ☐ pending) is visible,
+ *  so the live palette (open thinking, orange ■ active, □ pending) is visible,
  *  not just the all-completed end state. */
 export const inProgress: CoLiveEvent[] = [
   { type: 'user_prompt', text: 'Refactor the parser and add tests.' },
@@ -234,15 +234,17 @@ export const permission: CoLiveEvent[] = [
   { type: 'text_delta', text: "I'll delete that file for you." },
   toolStart('Bash', 'b1'),
   {
+    // Matches the real broker (src/core/permissions.ts): detail = the command
+    // string (DETAIL_KEYS cascade), description = the human summary, options =
+    // PERMISSION_OPTIONS (Yes/No).
     type: 'permission_request',
     toolName: 'Bash',
     toolUseId: 'b1',
-    description: 'rm /tmp/m35-test.txt',
-    detail: 'Delete file /tmp/m35-test.txt',
+    description: 'Delete the test file',
+    detail: 'rm /tmp/m35-test.txt',
     options: [
-      { key: 'allow', text: 'Allow' },
-      { key: 'deny', text: 'Deny' },
-      { key: 'allow_always', text: 'Allow always' },
+      { key: 'allow', text: 'Yes' },
+      { key: 'deny', text: 'No' },
     ],
     suggestions: [],
   } as CoLiveEvent,

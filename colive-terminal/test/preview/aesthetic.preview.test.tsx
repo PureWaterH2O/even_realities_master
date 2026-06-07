@@ -39,7 +39,8 @@ describe('aesthetic preview', () => {
   it('01-idle: app chrome with no events', async () => {
     const frames = await capture([snap('idle')])
     dump('01-idle', frames)
-    expect(frames[0]!.plain).toContain('>')
+    expect(frames[0]!.plain).toContain('›') // native prompt glyph (U+203A)
+    expect(frames[0]!.plain).toContain('Claude Code') // startup banner present
   })
 
   it('02-simple-qa: one turn', async () => {
@@ -65,8 +66,8 @@ describe('aesthetic preview', () => {
   it('05-tool-read: Read tool header', async () => {
     const full = flattenAll(toolRead)
     dump('05-tool-read', [full])
-    expect(full.plain).toContain('Read')
-    expect(full.plain).toContain('CLAUDE.md')
+    expect(full.plain).toContain('Read 1 file') // native NL summary (filename moves behind ctrl+o)
+    expect(full.plain).toContain('ctrl+o to expand')
   })
 
   it('06-tool-bash: Bash tool with output', async () => {
@@ -94,16 +95,18 @@ describe('aesthetic preview', () => {
   it('09-permission: inline permission prompt', async () => {
     const frames = await capture([...permission.map(emit), snap('permission')])
     dump('09-permission', frames)
-    expect(frames[0]!.plain).toContain('permission')
-    expect(frames[0]!.plain).toContain('Allow')
+    expect(frames[0]!.plain).toContain('Bash command')          // native blue header
+    expect(frames[0]!.plain).toContain('Do you want to proceed?')
+    expect(frames[0]!.plain).toContain('rm /tmp/m35-test.txt')  // the command
+    expect(frames[0]!.plain).toContain('1. Yes')                // native option wording
   })
 
   it('10-todos: task panel with mixed states', async () => {
     const full = flattenAll(inProgress)
     dump('10-todos', [full])
     expect(full.plain).toMatch(/✔/)
-    expect(full.plain).toMatch(/▶/)
-    expect(full.plain).toMatch(/☐/)
+    expect(full.plain).toMatch(/■/)
+    expect(full.plain).toMatch(/□/)
   })
 
   it('11-markdown: rendered markdown elements', async () => {
@@ -127,11 +130,11 @@ describe('aesthetic preview', () => {
   it('13-error: failed tool rendering', async () => {
     const full = flattenAll(errorDiag)
     dump('13-error', [full])
-    expect(full.plain).toContain('Read')
-    // The error state is color-only in rows.ts (the dot/name are painted red,
-    // computed from the summary), and stripAnsi drops color — so "failed" never
-    // appears in plain text. Assert on the rendered file path, which survives.
-    expect(full.plain).toContain('/tmp/no-such-file-12345.txt')
+    // Native renders a failed Read the same as a success ("Read 1 file"); the
+    // error is conveyed color-only (red dot/name) + in the assistant text, and
+    // stripAnsi drops color — so assert on the NL summary that survives.
+    expect(full.plain).toContain('Read 1 file')
+    expect(full.ansi).toContain('[31m') // error tinted red
   })
 
   it('14-status-line: busy state with running stats', async () => {
@@ -173,12 +176,16 @@ describe('aesthetic preview', () => {
       snap('post-interrupt'),
     ])
     dump('19-interrupt', frames)
+    // D-028: the interrupted turn shows the native follow-up sub-line.
+    const post = frames.find((f) => f.label === 'post-interrupt')!.plain
+    expect(post).toContain('└ Interrupted · What should Claude do instead?')
   })
 
   it('20-cost-summary: token/cost display', async () => {
     const frames = await capture([...costSummary.map(emit), snap('cost')])
     dump('20-cost-summary', frames)
-    expect(frames[0]!.plain).toContain('12480')
+    // D-009 status line shows the total token count (12480 in + 2106 out = 14586).
+    expect(frames[0]!.plain).toContain('tokens: 14586')
   })
 
   it('21-effort-picker: /effort UI', async () => {

@@ -53,7 +53,7 @@ describe('desk preview', () => {
     // Assert against the FULL transcript (the window clips the top off-screen).
     expect(full.plain).toContain('Task complete')
     expect(full.plain).not.toContain('## Task complete') // markdown rendered, not raw
-    expect(full.plain).toContain('Todos')
+    expect(full.plain).not.toContain('Todos') // header removed (D-014)
     expect(full.plain).toMatch(/✔/) // a completed todo glyph
     // The diff for the Edit tool shows the new line.
     expect(full.plain).toContain('hello from m3.1')
@@ -65,13 +65,13 @@ describe('desk preview', () => {
     expect(fullVerbose.plain).toContain('Create the file')
   })
 
-  it('in-progress: open thinking + mixed todo states (▶ active / ☐ pending)', async () => {
+  it('in-progress: open thinking + mixed todo states (■ active / □ pending)', async () => {
     const full = flattenAll(inProgress)
     dump('inprogress', [full])
     expect(full.plain).toMatch(/✔/) // completed task
-    expect(full.plain).toMatch(/▶/) // in-progress task
-    expect(full.plain).toMatch(/☐/) // pending task
-    expect(full.plain).toContain('💭 thinking') // open thinking shows its text
+    expect(full.plain).toMatch(/■/) // in-progress task
+    expect(full.plain).toMatch(/□/) // pending task
+    expect(full.plain).toContain('· thinking') // open thinking shows its text
     expect(full.plain).toContain('add a test') // ...not collapsed to a stub
   })
 

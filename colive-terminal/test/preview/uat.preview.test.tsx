@@ -60,18 +60,18 @@ describe('UAT walk (A1–A6)', () => {
     const full = flattenAll(markdownDoc)
     dump('a4-markdown', [full])
     expect(full.plain).not.toContain('## Heading two')
-    expect(full.plain).toContain('• First bullet')
+    expect(full.plain).toContain('− First bullet') // native dash bullet (D-015)
   })
 
-  it('A5 todos: live mixed states (✔ / ▶ / ☐)', () => {
+  it('A5 todos: live mixed states (✔ / ■ / □)', () => {
     const full = flattenAll(inProgress)
     dump('a5-todos', [full])
     expect(full.plain).toMatch(/✔/)
-    expect(full.plain).toMatch(/▶/)
-    expect(full.plain).toMatch(/☐/)
+    expect(full.plain).toMatch(/■/)
+    expect(full.plain).toMatch(/□/)
   })
 
-  it('A6 thinking: streaming open → collapsed stub → Ctrl-O expanded', async () => {
+  it('A6 thinking: streaming open → collapsed stub → ctrl+o expanded', async () => {
     const frames = await capture([
       // up to (but not including) the answer: thinking is still open + streaming
       ...thinking.slice(0, 4).map(emit),
@@ -84,7 +84,7 @@ describe('UAT walk (A1–A6)', () => {
     ])
     dump('a6-thinking', frames)
     expect(frames.find((f) => f.label === 'open')!.plain).toContain('trisects')
-    expect(frames.find((f) => f.label === 'collapsed')!.plain).toMatch(/💭 thinking \(\d+ line/)
+    expect(frames.find((f) => f.label === 'collapsed')!.plain).toMatch(/· thinking \(\d+ line/)
     expect(frames.find((f) => f.label === 'expanded')!.plain).toContain('trisects')
   })
 })

@@ -12,9 +12,9 @@ export interface ControlChoice {
 }
 
 export const MODEL_CHOICES: ControlChoice[] = [
-  { name: 'Opus 4.8', desc: 'most capable', value: 'claude-opus-4-8' },
-  { name: 'Sonnet 4.6', desc: 'balanced', value: 'claude-sonnet-4-6' },
-  { name: 'Haiku 4.5', desc: 'fastest', value: 'claude-haiku-4-5-20251001' },
+  { name: 'Opus 4.8', desc: 'Most capable for complex work', value: 'claude-opus-4-8' },
+  { name: 'Sonnet 4.6', desc: 'Best for everyday tasks', value: 'claude-sonnet-4-6' },
+  { name: 'Haiku 4.5', desc: 'Fastest for quick answers', value: 'claude-haiku-4-5-20251001' },
 ]
 
 export const MODE_CHOICES: ControlChoice[] = [
@@ -22,6 +22,24 @@ export const MODE_CHOICES: ControlChoice[] = [
   { name: 'Accept-edits', desc: 'auto-accept file edits', value: 'acceptEdits' },
   { name: 'Plan', desc: 'plan only — no edits/commands', value: 'plan' },
 ]
+
+/**
+ * Long, native-style display name for a model id — e.g. `claude-opus-4-8` →
+ * `Opus 4.8 (1M context)`. Used by the startup banner (D-001) and the status
+ * line (D-009) so both read like native Claude Code instead of the raw id.
+ * Unknown ids fall back to a de-slugged short form (`claude-foo-bar` → `Foo bar`).
+ */
+const MODEL_DISPLAY: Record<string, string> = {
+  'claude-opus-4-8': 'Opus 4.8 (1M context)',
+  'claude-sonnet-4-6': 'Sonnet 4.6',
+  'claude-haiku-4-5-20251001': 'Haiku 4.5',
+}
+export function modelDisplayName(id: string): string {
+  if (!id) return ''
+  if (MODEL_DISPLAY[id]) return MODEL_DISPLAY[id]!
+  const short = id.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+  return short.charAt(0).toUpperCase() + short.slice(1).replace(/-/g, ' ')
+}
 
 /** Which control a picker command drives. */
 export function actionForCommand(text: string): 'setModel' | 'setMode' | null {

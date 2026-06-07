@@ -18,13 +18,29 @@ export interface TodoItem {
  */
 const PANEL_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList'])
 
+/**
+ * AskUserQuestion renders as the inline question PROMPT (a user_question event),
+ * not as a tool one-liner — native shows no tool header before the question panel.
+ * Suppress its tool_start/tool_end so the desk matches (D-018).
+ */
+const SUPPRESSED_TOOLS = new Set(['AskUserQuestion'])
+
+/**
+ * Playful verbs native Claude cycles through for the turn-completion footer
+ * (`✱ Worked for 9s`). Picked deterministically by elapsed seconds so a given
+ * turn's footer is stable across re-renders (no Math.random — sandbox-safe). The
+ * observed native set: Brewed, Cogitated, Crunched, Baked, Worked, Churned.
+ */
+const TURN_VERBS = ['Brewed', 'Cogitated', 'Crunched', 'Baked', 'Worked', 'Churned'] as const
+
 /** One logical unit of the transcript. Each kind renders to ANSI rows (rows.ts). */
 export type Block =
   | { kind: 'user'; text: string }
-  | { kind: 'assistant'; text: string; closed: boolean }
+  | { kind: 'assistant'; text: string; closed: boolean; interrupted?: boolean }
   | { kind: 'tool'; toolId: string; name: string; summary?: string; detail?: { input: unknown; output: unknown } }
   | { kind: 'thinking'; text: string; closed: boolean }
   | { kind: 'todos'; items: TodoItem[] }
+  | { kind: 'footer'; verb: string; seconds: number }
   | { kind: 'note'; text: string }
 
 export interface BlockState {
@@ -55,6 +71,7 @@ export type BlockAction =
   | { type: 'clear' }
   | { type: 'event'; event: CoLiveEvent }
   | { type: 'localUser'; text: string }
+  | { type: 'interrupt' }
   | { type: 'note'; text: string }
 
 const rec = (v: unknown): Record<string, unknown> =>
@@ -173,6 +190,18 @@ export function reduceBlocks(state: BlockState, action: BlockAction): BlockState
       }
     case 'event':
       return applyEvent(state, action.event)
+    case 'interrupt': {
+      // D-028: mark the in-flight answer as interrupted (rows.ts adds the native
+      // "└ Interrupted · What should Claude do instead?" sub-line). If no answer
+      // text streamed yet, append a standalone interrupted marker.
+      const next = closeOpen(state)
+      if (state.openAssistant >= 0 && next[state.openAssistant]?.kind === 'assistant') {
+        const a = next[state.openAssistant] as Extract<Block, { kind: 'assistant' }>
+        next[state.openAssistant] = { ...a, interrupted: true }
+        return { ...state, blocks: next, openAssistant: -1, openThinking: -1 }
+      }
+      return { ...state, blocks: [...next, { kind: 'assistant', text: '', closed: true, interrupted: true }], openAssistant: -1, openThinking: -1 }
+    }
     default:
       return state
   }
@@ -253,12 +282,13 @@ function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
     }
 
     case 'tool_start': {
-      if (PANEL_TOOLS.has(event.name)) return state // todos/tasks panel is built on tool_end
+      if (PANEL_TOOLS.has(event.name) || SUPPRESSED_TOOLS.has(event.name)) return state // todos panel / question prompt handle these
       // close the open assistant/thinking first so a pre-tool answer segment renders markdown
       return { ...state, blocks: [...closeOpen(state), { kind: 'tool', toolId: event.toolId, name: event.name }], openAssistant: -1, openThinking: -1 }
     }
 
     case 'tool_end': {
+      if (SUPPRESSED_TOOLS.has(event.name)) return state // AskUserQuestion → inline question prompt
       if (PANEL_TOOLS.has(event.name)) {
         const had = blocks.some((b) => b.kind === 'todos')
         let items = currentTodos(blocks)
@@ -280,10 +310,14 @@ function applyEvent(state: BlockState, event: CoLiveEvent): BlockState {
       return { ...state, blocks: next, openAssistant: -1, openThinking: -1 }
     }
 
-    case 'result':
+    case 'result': {
       // close the open assistant + thinking so the finished answer renders markdown
-      // (rows.ts gates markdown on `closed`) and thinking collapses to its stub.
-      return { ...state, blocks: closeOpen(state), openAssistant: -1, openThinking: -1 }
+      // (rows.ts gates markdown on `closed`) and thinking collapses to its stub,
+      // then append the native-style turn-completion footer (`✱ Worked for Ns`).
+      const seconds = Math.max(1, Math.round(event.durationMs / 1000))
+      const footer: Block = { kind: 'footer', verb: TURN_VERBS[seconds % TURN_VERBS.length]!, seconds }
+      return { ...state, blocks: [...closeOpen(state), footer], openAssistant: -1, openThinking: -1 }
+    }
 
     case 'notification':
       return { ...state, blocks: [...blocks, { kind: 'note', text: `${event.title}: ${event.message}` }], openAssistant: -1, openThinking: -1 }

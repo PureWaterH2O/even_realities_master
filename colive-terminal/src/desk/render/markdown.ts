@@ -16,7 +16,7 @@ interface CodeToken {
  * Built from a string (so the ESC introducer is plain-ASCII `\x1b`, not a literal
  * control char in a regex literal). Applied repeatedly until stable.
  */
-const NESTED_GAP = new RegExp('(\\n[ \\t]*•[^\\n]*)\\n(?:[ \\t]|\\x1b\\[[0-9;]*m)*\\n([ \\t]*•)', 'g')
+const NESTED_GAP = new RegExp('(\\n[ \\t]*−[^\\n]*)\\n(?:[ \\t]|\\x1b\\[[0-9;]*m)*\\n([ \\t]*−)', 'g')
 
 /**
  * Render Markdown to an ANSI string sized to `width`. marked-terminal handles
@@ -65,11 +65,11 @@ export function renderMarkdown(md: string, width: number): string {
     },
   } as Parameters<typeof m.use>[0])
   let out = m.parse(md, { async: false }) as string
-  // marked-terminal hardcodes "* " as the unordered bullet; swap to a cleaner
-  // middot. The marker sits literally after the indent (no ANSI between), so an
-  // anchored per-line match is safe — highlighted code/table rows have ANSI or
-  // box chars right after the indent and won't match.
-  out = out.replace(/^(\s*)\* /gm, '$1• ')
+  // marked-terminal hardcodes "* " as the unordered bullet; swap to native's "− "
+  // (U+2212, D-015). The marker sits literally after the indent (no ANSI between),
+  // so an anchored per-line match is safe — highlighted code/table rows have ANSI
+  // or box chars right after the indent and won't match.
+  out = out.replace(/^(\s*)\* /gm, '$1− ')
   let prev: string
   do {
     prev = out

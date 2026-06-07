@@ -27,9 +27,40 @@ describe('renderBlockRows', () => {
     expect(head).not.toContain('Bash completed') // drop the generic Core summary
   })
 
-  it('tool head extracts file_path for read/edit-family tools', () => {
+  it('tool head: Read collapses to a count (native "Read 1 file"); edit-family keeps the path', () => {
     const read: Block = { kind: 'tool', toolId: 't1', name: 'Read', summary: 'Read completed', detail: { input: { file_path: '/a/b.ts' }, output: 'x' } }
-    expect(renderBlockRows(read, opts).map(stripAnsi).join('\n')).toContain('Read(/a/b.ts)')
+    expect(renderBlockRows(read, opts).map(stripAnsi).join('\n')).toContain('Read 1 file')
+    const edit: Block = { kind: 'tool', toolId: 't2', name: 'Edit', summary: 'Edit completed', detail: { input: { file_path: '/a/b.ts', old_string: 'x', new_string: 'y' }, output: 'ok' } }
+    expect(renderBlockRows(edit, opts).map(stripAnsi).join('\n')).toContain('Edit(/a/b.ts)')
+  })
+
+  it('action tools get a green ● dot + bold name; read-only tools render dot-less + dim (D-004)', () => {
+    // action tool (Write): green ● + bold name + "(ctrl+o to expand)" hint
+    const write: Block = { kind: 'tool', toolId: 'w', name: 'Write', summary: 'Write completed', detail: { input: { file_path: '/a', content: 'x' }, output: 'ok' } }
+    const wRows = renderBlockRows(write, opts)
+    expect(wRows.map(stripAnsi).join('\n')).toContain('● Write(/a)')
+    expect(wRows.map(stripAnsi).join('\n')).toContain('(ctrl+o to expand)')
+    expect(wRows.join('\n')).toContain('[32m') // green dot on success
+    // read-only tool (Read): NO dot, indented to column 2
+    const read: Block = { kind: 'tool', toolId: 'r', name: 'Read', summary: 'Read completed', detail: { input: { file_path: '/a' }, output: 'x' } }
+    const rRows = renderBlockRows(read, opts).map(stripAnsi).join('\n')
+    expect(rRows).toContain('  Read 1 file')
+    expect(rRows).not.toContain('● Read') // read-only tools carry no status dot
+    // error tints red (action tool: red dot)
+    const err: Block = { kind: 'tool', toolId: 'e', name: 'Edit', summary: 'Edit failed', detail: { input: { file_path: '/a', old_string: 'a', new_string: 'b' }, output: { error: 'x' } } }
+    expect(renderBlockRows(err, opts).join('\n')).toContain('[31m')
+  })
+
+  it('Agent tool head shows its description; Write shows a "└ Wrote N lines" sub-line', () => {
+    const agent: Block = { kind: 'tool', toolId: 'a1', name: 'Agent', summary: 'Agent completed', detail: { input: { description: 'Answer arithmetic question', prompt: 'what is 2+2' }, output: { result: '4' } } }
+    expect(renderBlockRows(agent, opts).map(stripAnsi).join('\n')).toContain('Agent(Answer arithmetic question)')
+    const write: Block = { kind: 'tool', toolId: 'w1', name: 'Write', summary: 'Write completed', detail: { input: { file_path: '/tmp/x.txt', content: 'a\nb\nc' }, output: 'ok' } }
+    expect(renderBlockRows(write, opts).map(stripAnsi).join('\n')).toContain('└ Wrote 3 lines to /tmp/x.txt')
+  })
+
+  it('footer block renders the native turn-completion line "✱ <verb> for Ns"', () => {
+    const rows = renderBlockRows({ kind: 'footer', verb: 'Worked', seconds: 9 }, opts).map(stripAnsi).join('\n')
+    expect(rows).toBe('✱ Worked for 9s')
   })
 
   it('edit-family tool renders an inline diff regardless of verbose', () => {
@@ -47,15 +78,23 @@ describe('renderBlockRows', () => {
     expect(closed).not.toContain('\nb')
   })
 
-  it('todos block renders distinct glyphs per status (✔ / ▶ / ☐)', () => {
+  it('todos block renders native glyphs per status (✔ / ■ / □) with no "Todos" header', () => {
     const rows = renderBlockRows({ kind: 'todos', items: [
       { content: 'Adone', status: 'completed' },
       { content: 'Bnow', status: 'in_progress' },
       { content: 'Csoon', status: 'pending' },
     ] }, opts).map(stripAnsi).join('\n')
-    expect(rows).toMatch(/✔\s+Adone/)  // completed
-    expect(rows).toMatch(/▶\s+Bnow/)   // in-progress, highlighted
-    expect(rows).toMatch(/☐\s+Csoon/)  // pending
+    expect(rows).toMatch(/✔\s+Adone/)  // completed (green check + strikethrough)
+    expect(rows).toMatch(/■\s+Bnow/)   // in-progress (orange square + bold)
+    expect(rows).toMatch(/□\s+Csoon/)  // pending
+    expect(rows).not.toContain('Todos') // header removed (D-014)
+    expect(rows).toContain('└')        // native tree connector on the first item
+  })
+
+  it('interrupted assistant block renders the native follow-up sub-line (D-028)', () => {
+    const rows = renderBlockRows({ kind: 'assistant', text: 'The History of Computing:', closed: true, interrupted: true }, opts).map(stripAnsi).join('\n')
+    expect(rows).toContain('● The History of Computing:')
+    expect(rows).toContain('└ Interrupted · What should Claude do instead?')
   })
 
   it('assistant renders raw while open, markdown once closed', () => {

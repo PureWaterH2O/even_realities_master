@@ -1,8 +1,8 @@
 /**
  * Render an EditBuffer to terminal rows with a visible cursor.
  *
- * - The first line is prefixed with "> "; continuation lines with "  " so the
- *   text columns align (matches the prior single-line "> " prompt).
+ * - The first line is prefixed with "› " (U+203A, native Claude's prompt glyph);
+ *   continuation lines with "  " so the text columns align.
  * - The cursor is drawn as an inverse-video cell on the character under it; at
  *   end-of-line it is an inverse space appended after the text.
  * - One visual row per logical line. (Soft-wrapping long single lines is
@@ -17,7 +17,7 @@ export interface InputRowOpts {
 
 export function renderInputRows(buf: EditBuffer, _opts: InputRowOpts): string[] {
   return buf.lines.map((line, row) => {
-    const prefix = row === 0 ? '> ' : '  '
+    const prefix = row === 0 ? '› ' : '  '
     if (row !== buf.row) return prefix + line
     const col = buf.col
     const under = col < line.length ? line[col]! : ' '

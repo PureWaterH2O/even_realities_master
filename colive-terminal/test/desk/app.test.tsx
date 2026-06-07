@@ -190,8 +190,9 @@ describe('desk App', () => {
     })
     await flush()
     const frame = stripAnsi(lastFrame() ?? '')
-    // Native-style header: Name(keyArg), not the generic Core summary.
-    expect(frame).toContain('Read(foo.ts)')
+    // Native-style header: Read collapses to a count ("Read 1 file"), not the
+    // generic Core summary.
+    expect(frame).toContain('Read 1 file')
     expect(frame).not.toContain('Read completed')
   })
 
@@ -202,10 +203,12 @@ describe('desk App', () => {
     fake.emit({ type: 'status', state: 'think_start' })
     fake.emit({ type: 'running_stats', durationMs: 5000, inputTokens: 100, outputTokens: 42 })
     await flush()
-    const frame = lastFrame() ?? ''
-    // The status label and a token count should both be visible somewhere.
-    expect(frame.toLowerCase()).toContain('think')
-    expect(frame).toMatch(/142|100|42/)
+    const frame = stripAnsi(lastFrame() ?? '')
+    // D-009: native pipe status line (model + total tokens) + the activity spinner
+    // conveys the in-turn state (the bracketed [thinking] label is gone).
+    expect(frame).toContain('Opus 4.8 (1M context)')
+    expect(frame).toContain('✱')                   // in-turn activity spinner
+    expect(frame).toMatch(/142|100|42/)            // a token count (total 142, or ↑ 100)
   })
 
   it('renders an inline permission prompt with option labels and posts the chosen key', async () => {
@@ -417,7 +420,7 @@ describe('desk App', () => {
     expect(lastFrame()).toContain('/help')
     expect(lastFrame()).not.toContain('/clear')
     await write(stdin, '\t')                   // Tab completes the highlighted item
-    expect(lastFrame()).toContain('> /help')
+    expect(lastFrame()).toContain('› /help')
     cleanup()
   })
 
@@ -441,7 +444,7 @@ describe('desk App', () => {
     await write(stdin, '/')        // menu opens, highlight on the first item (clear)
     await write(stdin, '\x1b[B')   // ↓ -> highlight the second item (compact)
     await write(stdin, '\t')       // Tab completes the HIGHLIGHTED item
-    expect(lastFrame()).toContain('> /compact')
+    expect(lastFrame()).toContain('› /compact')
     cleanup()
   })
 
@@ -682,7 +685,7 @@ describe('desk App', () => {
     await write(stdin, '\n')       // Ctrl-J -> new buffer line
     await write(stdin, 'line two')
     const frame = stripAnsi(lastFrame() ?? '')
-    expect(frame).toContain('> line one') // first line keeps the prompt
+    expect(frame).toContain('› line one') // first line keeps the prompt
     expect(frame).toContain('  line two') // continuation line is indented (buffer renderer, not a string)
     cleanup()
   })
@@ -1212,24 +1215,28 @@ describe('runtime control pickers (/model, /mode)', () => {
     const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
     await flush()
     await write(stdin, '/model')
-    expect(lastFrame()).toContain('Opus 4.8')        // picker open
+    // Assert on a NON-active model: the picker lists every choice, but the idle
+    // banner only ever shows the *active* model (Opus 4.8) — so "Sonnet 4.6"
+    // appears iff the picker is open, making it a clean open/closed discriminator.
+    expect(lastFrame()).toContain('Sonnet 4.6')      // picker open
     await write(stdin, '\x1b')                        // Esc
     await flush(60)                                   // past ink's ESC debounce
     expect(fake.interrupts).toHaveLength(0)           // did NOT interrupt the session
-    expect(lastFrame()).not.toContain('Opus 4.8')     // picker dismissed
+    expect(lastFrame()).not.toContain('Sonnet 4.6')   // picker dismissed
     cleanup()
   })
 
-  it('/clear resets the status-line mode back to default', async () => {
+  it('/clear resets the permission mode back to default', async () => {
     const fake = makeFakeHub()
     const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
     await flush()
     await write(stdin, '/mode'); await write(stdin, '\x1b[B'); await write(stdin, '\x1b[B'); await write(stdin, '\r') // pick Plan
-    expect(stripAnsi(lastFrame()!)).toContain('· plan')
+    expect(stripAnsi(lastFrame()!)).toContain('| plan') // non-default mode shown as a status-line segment (D-009)
     await write(stdin, '/clear'); await write(stdin, '\r')   // new session
     await flush()
-    expect(stripAnsi(lastFrame()!)).toContain('· default')
-    expect(stripAnsi(lastFrame()!)).not.toContain('· plan')
+    // After /clear the transcript is empty, so the banner shows the (reset) mode.
+    expect(stripAnsi(lastFrame()!)).toContain('default mode')
+    expect(stripAnsi(lastFrame()!)).not.toContain('plan')
     cleanup()
   })
 })

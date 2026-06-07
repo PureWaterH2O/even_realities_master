@@ -41,7 +41,10 @@ import type { MouseMode } from './slash'
 import { filterSlash, atContext } from './input/menu'
 import { fuzzyFilter, defaultListFiles } from './input/files'
 import { slashMenuItems } from './slash'
-import { menuForCommand, actionForCommand } from './controls'
+import { menuForCommand, actionForCommand, modelDisplayName } from './controls'
+import type { ControlChoice } from './controls'
+import { blue, bold as ansiBold, dim as ansiDim, cyan as ansiCyan, orange as ansiOrange } from './render/ansi'
+import { wrapAnsi } from './render/wrap'
 import { MOUSE_ON, MOUSE_OFF } from './mouse-mode'
 import { reduceBlocks, initialBlockState } from './render/blocks'
 import { flattenRows } from './render/rows'
@@ -116,6 +119,9 @@ const STATUS_LABEL: Record<StatusState, string> = {
   text_end: 'idle',
   idle: 'idle',
 }
+
+/** Present-continuous verbs for the in-turn activity spinner (`✱ Working…`, D-008). */
+const SPINNER_VERBS = ['Working', 'Brewing', 'Crunching', 'Baking', 'Churning', 'Cogitating'] as const
 
 interface StatusInfo {
   state: StatusState
@@ -218,9 +224,20 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // total output exactly fills the terminal, the trailing newline scrolls the host and ink's
   // cursor math drifts (leaking lines into scrollback). Keeping output strictly shorter than
   // the terminal keeps the viewport a clean fixed region (UAT A1).
-  const menuRowCount = menuOpen ? menuLength : 0
+  // Pickers (/model, /mode) render a full native-style panel (title/blurb/rows/
+  // footer), not just a value list — build it once so we both render it and
+  // reserve its exact height. The slash/@ menus stay a simple `menuLength` list.
+  const pickerAction = pickerChoices ? actionForCommand(B.toText(buf).trim()) : null
+  const pickerPanel = pickerChoices && pickerAction
+    ? buildPickerPanel(pickerChoices, pickerAction, pickerAction === 'setModel' ? currentModel : currentMode, clampedMenuIndex, width)
+    : null
+  const menuRowCount = pickerPanel ? pickerPanel.length : menuOpen ? menuLength : 0
   const inputRowCount = pending && pending.kind === 'question' ? 0 : renderInputRows(buf, { width }).length
-  const reserved = 3 + inputRowCount + menuRowCount // 3 = indicator + status + headroom
+  // D-008: an in-turn activity line (`✱ Working… (Ns · ↑ N tokens)`) shows while a
+  // turn is active; reserve a row for it so it never pushes output past the viewport.
+  const busyActive = STATUS_LABEL[status.state] !== 'idle' && !pending
+  // 4 = scroll indicator + status line + "← for agents" hint (D-009) + headroom.
+  const reserved = 4 + inputRowCount + menuRowCount + (busyActive ? 1 : 0)
   const height = Math.max(4, (stdout?.rows ?? 24) - reserved)
 
   // The session id can change at runtime (resolved by the Hub on a new session,
@@ -525,6 +542,12 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       if (slashMenu) { setBuf(B.empty()); return }      // slash menu: clear the lone "/" token (unchanged)
       const sid = sessionIdRef.current
       if (sid !== undefined) void client.interrupt(sid).catch(() => {})
+      // D-028: if a turn is actually in flight, mark the answer interrupted (adds
+      // the native "└ Interrupted …" sub-line) and stop the activity spinner.
+      if (sid !== undefined && STATUS_LABEL[status.state] !== 'idle') {
+        dispatch({ type: 'interrupt' })
+        setStatus((s) => ({ ...s, state: 'idle' }))
+      }
       return
     }
 
@@ -643,15 +666,31 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
 
   /* ------------------------- render ------------------------- */
 
-  const statusLabel = STATUS_LABEL[status.state]
-  const tokenStr =
-    status.inputTokens !== undefined || status.outputTokens !== undefined
-      ? ` · ${(status.inputTokens ?? 0) + (status.outputTokens ?? 0)} tokens (${status.inputTokens ?? 0} in / ${status.outputTokens ?? 0} out)`
-      : ''
-  const sid = sessionIdRef.current
+  // D-009: native pipe-separated status line — "Opus 4.8 (1M context) | tokens: N".
+  // We lack native's ctx%/5h/7d rate-limit data, so we show what we have (model +
+  // total tokens). The permission mode is surfaced only when it's NOT the default
+  // (plan / accept-edits matter and the banner — which shows mode — scrolls away
+  // after the first turn). The select-mode affordance is preserved as a suffix.
+  const statusSegments = [currentModel ? modelDisplayName(currentModel) : 'Claude']
+  if (currentMode !== 'default') statusSegments.push(currentMode)
+  statusSegments.push(`tokens: ${(status.inputTokens ?? 0) + (status.outputTokens ?? 0)}`)
+  let statusLine = statusSegments.join(' | ')
+  if (mouseMode === 'select') statusLine += ' · select-mode (wheel off · ⇧/⌥-drag to copy)'
+
+  // D-008: in-turn activity line — "✱ <verb>… (Ns · ↑ N tokens)". Seconds + input
+  // tokens come from running_stats; the verb is deterministic in the elapsed time.
+  const spinnerSeconds = status.durationMs !== undefined ? Math.max(1, Math.round(status.durationMs / 1000)) : undefined
+  const spinnerVerb = SPINNER_VERBS[(spinnerSeconds ?? 0) % SPINNER_VERBS.length]
+  const spinnerMeta: string[] = []
+  if (spinnerSeconds !== undefined) spinnerMeta.push(`${spinnerSeconds}s`)
+  if (status.inputTokens !== undefined) spinnerMeta.push(`↑ ${status.inputTokens} tokens`)
+  const spinnerText = `${spinnerVerb}…${spinnerMeta.length ? ` (${spinnerMeta.join(' · ')})` : ''}`
 
   return (
     <Box flexDirection="column">
+      {transcript.blocks.length === 0 && !pending && !menuOpen ? (
+        <Banner model={currentModel} mode={currentMode} cwd={fileCwd} />
+      ) : null}
       <Box flexDirection="column">
         {win.visible.map((row, i) => (
           <Text key={win.offset + i} wrap="truncate-end">{row}</Text>
@@ -665,23 +704,24 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         </Box>
       ) : null}
 
-      {pending ? <PendingPrompt pending={pending} input={B.toText(buf)} /> : null}
+      {pending ? <PendingPrompt pending={pending} input={B.toText(buf)} width={width} /> : null}
 
-      <Box>
-        <Text dimColor>
-          [{statusLabel}{currentModel ? ` · ${shortModel(currentModel)}` : ''}{` · ${currentMode}`}{tokenStr}] {sid ? `session ${sid}` : 'new session'}
-          {mouseMode === 'select' ? ' · select-mode (wheel off · ⇧/⌥-drag to copy)' : ''}
-        </Text>
+      {busyActive ? (
+        <Box>
+          <Text color="yellow">✱ </Text>
+          <Text dimColor>{spinnerText}</Text>
+        </Box>
+      ) : null}
+
+      <Box flexDirection="column">
+        <Text dimColor>{statusLine}</Text>
+        <Text dimColor>← for agents</Text>
       </Box>
 
       {menuOpen ? (
         <Box flexDirection="column">
-          {pickerChoices
-            ? pickerChoices.map((c, i) => (
-                <Text key={c.value} inverse={i === clampedMenuIndex}>
-                  {`${c.name}  `}<Text dimColor>{c.desc}</Text>
-                </Text>
-              ))
+          {pickerPanel
+            ? pickerPanel.map((r, i) => <Text key={`pk-${i}`}>{r}</Text>)
             : slashMenu
             ? slashMenu.map((item, i) => (
                 <Text key={item.name} inverse={i === clampedMenuIndex}>
@@ -705,45 +745,137 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   )
 }
 
-/** Render the inline permission / question prompt. */
-function PendingPrompt({ pending, input }: { pending: Pending; input: string }): React.ReactElement {
+/**
+ * Build the model/mode picker panel as native does (D-020): a leading blue rule,
+ * a bold title + dim blurb, numbered rows (current value ✓, nav-selected row in
+ * cyan with a "›" marker + the per-row description), the effort sub-line (model
+ * only), and a key-hint footer. Returned as ANSI rows so the App can both render
+ * them and reserve the exact viewport height. Blank rows are a single space so
+ * ink gives them a line.
+ */
+function buildPickerPanel(
+  choices: ControlChoice[],
+  action: 'setModel' | 'setMode',
+  currentValue: string,
+  selected: number,
+  width: number,
+): string[] {
+  const isModel = action === 'setModel'
+  const out: string[] = [blue('─'.repeat(Math.max(1, width))), ansiBold(isModel ? 'Select model' : 'Select mode')]
+  const blurb = isModel
+    ? 'Switch between Claude models. Your pick becomes the default for new sessions.'
+    : 'Switch the permission mode for this session.'
+  for (const l of wrapAnsi(blurb, width)) out.push(ansiDim(l))
+  out.push(' ')
+  choices.forEach((c, i) => {
+    const left = `${i + 1}. ${c.name}${c.value === currentValue ? ' ✓' : ''}`.padEnd(26)
+    const head = i === selected ? ansiCyan(`› ${left}`) : `  ${left}`
+    out.push(`${head}${ansiDim(c.desc)}`)
+  })
+  out.push(' ')
+  if (isModel) {
+    out.push(`${ansiOrange('●')} High effort (default) ${ansiDim('←/→ to adjust')}`)
+    out.push(' ')
+  }
+  out.push(ansiDim(isModel
+    ? 'Enter to set as default · s to use this session only · Esc to cancel'
+    : 'Enter to select · Esc to cancel'))
+  return out
+}
+
+/**
+ * Render the inline permission / question prompt, native Claude style (D-017,
+ * D-018): no rounded box, a leading rule, a header, the body, numbered options
+ * (option 1 pre-highlighted, matching native's default), and a key-hint footer.
+ */
+function PendingPrompt({ pending, input, width }: { pending: Pending; input: string; width: number }): React.ReactElement {
+  const rule = '─'.repeat(Math.max(1, width))
   if (pending.kind === 'permission') {
     const e = pending.event
     return (
-      <Box flexDirection="column" borderStyle="round" paddingX={1}>
-        <Text>
-          <Text color="yellow">permission</Text> {e.toolName}
-          {e.detail ? `: ${e.detail}` : ''}
-        </Text>
-        {e.description ? <Text dimColor>{e.description}</Text> : null}
+      <Box flexDirection="column">
+        <Text color="blue" dimColor>{rule}</Text>
+        <Text color="blue" bold>{`${e.toolName} command`}</Text>
+        <Text> </Text>
+        {e.detail ? <Text>{`  ${e.detail}`}</Text> : null}
+        {e.description ? <Text dimColor>{`  ${e.description}`}</Text> : null}
+        <Text> </Text>
+        <Text>Do you want to proceed?</Text>
         {e.options.map((opt, i) => (
           <Text key={opt.key + String(i)}>
-            {`  [${i + 1}] ${opt.text}`}
+            {i === 0 ? <Text color="blue">{'› '}</Text> : '  '}
+            {`${i + 1}. `}
+            {i === 0 ? <Text color="blue">{opt.text}</Text> : opt.text}
           </Text>
         ))}
+        <Text> </Text>
+        <Text dimColor>Esc to cancel · Tab to amend · ctrl+e to explain</Text>
       </Box>
     )
   }
   const e = pending.event
+  const extras = e.options.length
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={1}>
-      <Text>
-        <Text color="yellow">question</Text> {e.question}
-      </Text>
+    <Box flexDirection="column">
+      <Text dimColor>{rule}</Text>
+      <Text backgroundColor="#c4b5fd" color="black">{' □ Question '}</Text>
+      <Text> </Text>
+      <Text bold>{e.question}</Text>
       {e.options.map((opt, i) => (
-        <Text key={opt + String(i)}>{`  [${i + 1}] ${opt}`}</Text>
+        <Text key={opt + String(i)}>
+          {i === 0 ? <Text color="#a78bfa">{'› '}</Text> : '  '}
+          {`${i + 1}. `}
+          {i === 0 ? <Text color="#a78bfa">{opt}</Text> : opt}
+        </Text>
       ))}
-      <Box>
-        <Text>{'answer> '}</Text>
-        <Text>{input}</Text>
-      </Box>
+      <Text>{`  ${extras + 1}. Type something`}</Text>
+      <Text dimColor>{rule}</Text>
+      <Text>{`  ${extras + 2}. Chat about this`}</Text>
+      {input ? <Text dimColor>{`  › ${input}`}</Text> : null}
+      <Text dimColor>Enter to select · ↑/↓ to navigate · Esc to cancel</Text>
     </Box>
   )
 }
 
-/** Short status-line label for a model id: claude-opus-4-8 -> opus-4-8; strips a trailing -YYYYMMDD. */
-const shortModel = (id: string): string =>
-  id.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+/** Desk version shown in the startup banner (kept in lockstep with package.json, like hub SERVER_VERSION). */
+const CLIENT_VERSION = '0.1.0'
+
+/** Collapse the home-dir prefix to "~" the way native Claude shows the cwd. */
+function shortCwd(p: string): string {
+  const home = process.env.HOME
+  return home && (p === home || p.startsWith(home + '/')) ? '~' + p.slice(home.length) : p
+}
+
+/**
+ * Startup banner (D-001) — rendered while the transcript is empty so the idle
+ * screen reads like native Claude Code: a small robot, the product line + version,
+ * the active model + permission mode, the working directory, and a feature tip.
+ */
+function Banner({ model, mode, cwd }: { model: string; mode: string; cwd: string }): React.ReactElement {
+  const robot = ['▛▀▀▜', '▌●●▐', '▙▄▄▟']
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Box flexDirection="row">
+        <Box flexDirection="column" marginRight={2}>
+          {robot.map((r, i) => (
+            <Text key={`bot-${i}`} color="#d7875f">{r}</Text>
+          ))}
+        </Box>
+        <Box flexDirection="column">
+          <Text><Text bold>Claude Code</Text>{` v${CLIENT_VERSION}`}</Text>
+          <Text dimColor>{model ? `${modelDisplayName(model)} · ${mode} mode` : `${mode} mode`}</Text>
+          <Text dimColor>{shortCwd(cwd)}</Text>
+        </Box>
+      </Box>
+      <Text> </Text>
+      <Text>
+        {'Feature of the week: '}
+        <Text color="cyan">/loop</Text>
+        {' — run a prompt or slash command on a recurring interval'}
+      </Text>
+    </Box>
+  )
+}
 
 /** Drop a single trailing "\" from the buffer's current line (backslash-continuation). */
 function trimTrailingBackslash(b: EditBuffer): EditBuffer {
