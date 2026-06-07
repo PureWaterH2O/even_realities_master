@@ -1,6 +1,6 @@
 // src/desk/render/rows.ts
 import type { Block, TodoItem } from './blocks'
-import { cyan, green, red, gray, yellow, dim, italic, bold } from './ansi'
+import { green, red, gray, yellow, dim, italic, bold, bgGray } from './ansi'
 import { wrapAnsi } from './wrap'
 import { renderMarkdown } from './markdown'
 import { extractEditDiff, renderDiff } from './diff'
@@ -57,8 +57,19 @@ function toolArg(name: string, input: unknown): string {
 export function renderBlockRows(block: Block, opts: RenderOpts): string[] {
   const { width, verbose } = opts
   switch (block.kind) {
-    case 'user':
-      return toRows(`${cyan('you')}  ${block.text}`, width)
+    case 'user': {
+      // Native: a full-width dark bar, "› text" in bold, spanning the terminal
+      // width (D-003). Pad each visual row to `width` so the dark background runs
+      // edge-to-edge; continuation lines align under the text (2-space indent).
+      const out: string[] = []
+      block.text.split('\n').forEach((ln, i) => {
+        const prefix = i === 0 ? '› ' : '  '
+        for (const seg of wrapAnsi(prefix + ln, width)) {
+          out.push(bgGray(bold(seg.padEnd(width))))
+        }
+      })
+      return out
+    }
 
     case 'assistant':
       // stream raw while open; markdown-render once closed (avoids half-parsed flicker)
