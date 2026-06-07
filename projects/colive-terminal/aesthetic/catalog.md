@@ -179,6 +179,16 @@ implement at all.
 **D-031 — Wasted vertical space when transcript is short** · **medium** · scenarios F1,F4 · related to D-029
 - When the transcript doesn't fill the terminal height, there's a large empty gap between the content and the bottom edge. Native fills this naturally because the input is bottom-pinned and the transcript grows downward from the top. This is a symptom of D-029.
 
+**D-032 — Permission prompt interaction broken (BLOCKER)** · **critical** · scenario F8 · fix: `app.tsx` (PendingPrompt + useInput handler)
+- Enter does nothing on the permission prompt. Arrow up/down don't navigate between options. The user is completely stuck — cannot approve or deny. **This blocks all further UAT.** Likely a regression from the aesthetic restyle of PendingPrompt (D-017) — the old rounded-border version worked; the new native-style layout may have broken the keyboard input routing.
+
+**D-033 — Permission options too sparse** · **medium** · scenario F7 · fix: event passthrough / `app.tsx`
+- Native (Write): 3 options — `1. Yes`, `2. Yes, allow all edits in tmp/ during this session (shift+tab)`, `3. No`. Also shows a VS Code diff preview ("Opened changes in Visual Studio Code / Save file to continue…").
+- Ours: 2 options — `1. Yes`, `2. No`. No per-scope allow, no VS Code integration. This is partly a Core/Hub limitation (the permission event carries fewer options) and partly an aesthetic gap. The option wording and granularity differ from native.
+
+**D-034 — Permission header shows wrong tool type** · **minor** · scenario F7/F8
+- Our permission for a Read tool shows `Read command` header (blue). Native shows tool-specific framing — Write shows "Opened changes in Visual Studio Code", Read shows the file path directly. The generic `<ToolName> command` header doesn't match native's per-tool framing.
+
 ---
 
 ## Scenario → entry coverage
