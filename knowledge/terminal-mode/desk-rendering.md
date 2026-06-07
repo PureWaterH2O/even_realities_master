@@ -1,7 +1,7 @@
 ---
 title: Desk TUI rendering (Co-Live M3 cockpit)
 domain: terminal-mode
-last_updated: 2026-06-06
+last_updated: 2026-06-07
 overall_confidence: 🧪
 ---
 
@@ -41,6 +41,36 @@ catalog (`projects/colive-terminal/aesthetic/catalog.md`), not here.
   must be driven through the real `App` via the preview harness's `capture()`.
   _Self-verified 2026-06-06 while building the M3.5 aesthetic preview suite._
 
+- 🧪 **Bottom-pinning the input = fixed-height outer `<Box>` + a `flexGrow` top
+  section + alt-screen.** The native look (transcript at top, input/status welded to
+  the foot of the screen, empty space ABOVE the input when content is short) is a
+  two-section column: outer `<Box flexDirection="column" height={termRows}>` (where
+  `termRows = stdout?.rows ?? 24`) wrapping a `flexGrow={1}` TOP section (transcript
+  window + scroll indicator + pending prompt + spinner — absorbs all slack at
+  `flex-start`, so the gap lands below the content) and a `flexShrink={0}` BOTTOM
+  section (dim full-width `─` rule + status + hint + menu + input). Two gotchas:
+  (a) ink/yoga does **not** vertically clip Text — the transcript must still be
+  windowed to a computed `height` and EVERY non-transcript row reserved, INCLUDING
+  the pending prompt's height (a tall permission panel lives in the top section and
+  would otherwise shove the pinned input off a fixed-height screen — reserve it via a
+  `pendingRowCount()` mirror of the prompt's structure); (b) filling the screen
+  exactly (`height === rows`) is only safe because `src/index.ts` enters the
+  alt-screen (`\x1b[?1049h`) — the alt buffer doesn't scroll, so the last row+newline
+  can't drift scrollback. _Self-verified 2026-06-07 (M3.5 D-029/D-031 fix): preview
+  frames `01-idle`/`02-simple-qa`/`09-permission` show banner/content top, gap, chrome
+  pinned at the foot; `a7c57a2`._
+
+- 🧪 **`marked` newline collapse is fixed by `new Marked({ breaks: true })` — and it
+  does NOT break prose wrapping.** The desk renders an assistant turn as raw text
+  while streaming (newlines intact) but switches to `renderMarkdown()` once the turn
+  closes; default markdown reflow collapses single `\n` into spaces, destroying
+  line-per-line output (e.g. "count 1 to 100" reflowed into a paragraph). `breaks:
+  true` (a **Marked constructor** option, not a `parse()` arg) turns a single `\n`
+  into a hard `<br>`; ordinary multi-word paragraphs (no embedded `\n`) still reflow
+  to `width` via marked-terminal's `reflowText`. Verified headings/lists/fenced-code/
+  tables unaffected. _Self-verified 2026-06-07 (M3.5 D-030 fix): `render/markdown.ts`;
+  `7997060`._
+
 ## Open questions
 
 - Does native Claude render a **textual** tool-error indicator (and how)? → to be
@@ -49,3 +79,5 @@ catalog (`projects/colive-terminal/aesthetic/catalog.md`), not here.
 ## Change log
 
 - 2026-06-06: created during M3.5 Builder Run 1 (comparison-infra build).
+- 2026-06-07: +2 facts from M3.5 UAT fixes — bottom-pin layout pattern (D-029/D-031)
+  and `marked` `breaks:true` newline preservation (D-030).

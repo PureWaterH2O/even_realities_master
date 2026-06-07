@@ -3,6 +3,18 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
+## 2026-06-07
+
+### Co-Live Terminal M3.5 — Aesthetic pass: Phase B MERGED + 4 UAT defects fixed
+
+- **Phase B merged to `main`** (after planner review: 510 tests, tsc 0, 8/10 visual parity). Hardware UAT (`m3.5-uat-runbook.md`, scenarios F1–F8) then surfaced **6 new defects**, appended to `catalog.md` as **D-029…D-034**.
+- **4 fixed this session — 3 commits on `main` (NOT pushed), one per fix; 519 tests (+9 from 510), tsc 0; every fix self-tested via `PREVIEW=1` frames:**
+  - **D-032 (BLOCKER)** `87c088f` — permission/question prompts were digit-only despite rendering a `›` selection indicator. Added `permissionIndex` state (↑/↓ move, clamped; Enter confirms via `resolvePending`; digits `[1-9]` still bypass-select) + a `selectedIndex` prop so the `›` marker/color follows the highlight (both permission **and** question). Question Enter submits typed free-text if present, else confirms the highlight. +6 app tests.
+  - **D-030 (MEDIUM)** `7997060` — closed-turn markdown collapsed single newlines (counting 1..N reflowed into a paragraph). Fix: `new Marked({ breaks: true })` in `render/markdown.ts`. Prose still wraps to width; only explicit `\n` is preserved (verified headings/lists/code-blocks/tables unaffected). +2 markdown tests.
+  - **D-029/D-031 (MAJOR)** `a7c57a2` — input not bottom-pinned (floated mid-screen with a gap below when content was short). Fix: outer `<Box height={termRows}>` split into a `flexGrow=1` TOP (transcript + scroll + pending + spinner, absorbs slack) and a `flexShrink=0` BOTTOM (dim full-width separator rule + status + `← for agents` + menu + input). New `pendingRowCount()` reserves the prompt's height so a tall permission prompt can't push the pinned input off a fixed-height screen. (Prod already enters alt-screen `\x1b[?1049h`, so full-height fill is safe.) Preview infra strengthened: 02-simple-qa now renders through the real App asserting content sits above the separator; added `streamingClosed` scenario + 03-streaming-closed frame (one-number-per-line through the App layout). +1 preview test.
+- **Still OPEN (not fixed):** **D-033** (permission options too sparse — only Yes/No, no per-scope "allow all"; partly a Core/Hub event limitation) · **D-034** (permission header shows generic `<Tool> command`, not native's per-tool framing).
+- **Next → 👤 owner hardware UAT** of the 4 fixes (re-run F1–F8; the one thing the preview harness can't exercise is real-PTY bottom-row rendering), then push + decide on D-033/D-034.
+
 ## 2026-06-06
 
 ### Co-Live Terminal M3.5 — 🟨 Aesthetic pass — STARTED (reordered before M3.4)
