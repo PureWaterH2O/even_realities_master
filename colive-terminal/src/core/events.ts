@@ -124,12 +124,29 @@ export interface PermissionResultEvent {
   decision: string
 }
 
+/** One parsed AskUserQuestion question (the SDK sends 1-4 per tool call). */
+export interface QuestionSpec {
+  question: string
+  /** Short chip/tag label (native renders it as the panel header chip). */
+  header: string
+  options: Array<{ label: string; description?: string }>
+  multiSelect: boolean
+}
+
 /** AskUserQuestion surfaced to clients. */
 export interface UserQuestionEvent {
   type: 'user_question'
+  /** The FIRST question's text (flattened — Even-app compat; see `questions`). */
   question: string
   toolUseId: string
+  /** The FIRST question's option labels (flattened — Even-app compat). */
   options: string[]
+  /**
+   * ADDITIVE: the full parsed question list (1-4, with headers + option
+   * descriptions). Rich clients step through all of them and answer with a
+   * full answers map; the Even app keeps the flattened first-question fields.
+   */
+  questions?: QuestionSpec[]
 }
 
 /** A passive notification (no response required). */

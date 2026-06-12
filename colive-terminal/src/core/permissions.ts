@@ -35,7 +35,7 @@
  */
 import type { PermissionMode, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk'
 import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
-import type { CoLiveEvent, PermissionOption } from './events'
+import type { CoLiveEvent, PermissionOption, QuestionSpec } from './events'
 
 /** Event sink — the single callback the broker emits through. */
 export type Emit = (event: CoLiveEvent) => void
@@ -172,9 +172,9 @@ interface Pending<T> {
    */
   suggestions?: PermissionUpdate[]
   /**
-   * The parsed question text — set only for question awaits. {@link
-   * PermissionBroker.resolveQuestion} needs it to build the SDK's
-   * `answers` map (question text → answer string).
+   * The parsed question text (first question) — set only for question awaits.
+   * {@link PermissionBroker.resolveQuestion} needs it to build the SDK's
+   * `answers` map (question text → answer string) on the single-answer path.
    */
   question?: string
   resolve: (value: T) => void
@@ -268,8 +268,16 @@ export class PermissionBroker {
   /**
    * Settle a pending AskUserQuestion with the client's answer. Called by the
    * manager on `/api/question-response`. No-op if unknown/already settled.
+   *
+   * `answersMap` (optional, additive) is the FULL question-text → answer map a
+   * multi-question-aware client (the desk) collected; when absent, the single
+   * `answer` string is mapped onto the first question (Even-app path).
    */
-  resolveQuestion(toolUseId: string, answer: string): void {
+  resolveQuestion(
+    toolUseId: string,
+    answer: string,
+    answersMap?: Record<string, string>,
+  ): void {
     const key = pickPendingKey(this.pendingQuestions, toolUseId)
     if (key === undefined) return
     const pending = this.pendingQuestions.get(key)!
@@ -282,8 +290,13 @@ export class PermissionBroker {
     // AskUserQuestionOutput shape is `answers` — a MAP of question text → answer
     // string — NOT a bare `answer`. A bare `answer` is an unrecognized shape: the
     // tool errors and the model falls back to asking in plain text (D-036).
-    const answers: Record<string, string> = {}
-    if (pending.question) answers[pending.question] = answer
+    let answers: Record<string, string>
+    if (answersMap !== undefined && Object.keys(answersMap).length > 0) {
+      answers = answersMap
+    } else {
+      answers = {}
+      if (pending.question) answers[pending.question] = answer
+    }
     pending.resolve({ behavior: 'allow', updatedInput: { answers } })
   }
 
@@ -397,7 +410,7 @@ export class PermissionBroker {
       const cleanup = () => opts.signal.removeEventListener('abort', onAbort)
       opts.signal.addEventListener('abort', onAbort, { once: true })
 
-      const { question, options } = parseQuestion(input)
+      const { question, options, questions } = parseQuestion(input)
       this.pendingQuestions.set(toolUseId, {
         toolName: ASK_USER_QUESTION_TOOL,
         question,
@@ -405,7 +418,13 @@ export class PermissionBroker {
         timer,
         cleanup,
       })
-      this.emit({ type: 'user_question', question, toolUseId, options })
+      this.emit({
+        type: 'user_question',
+        question,
+        toolUseId,
+        options,
+        ...(questions.length > 0 ? { questions } : {}),
+      })
     })
   }
 }
@@ -467,30 +486,44 @@ function describePermission(toolName: string, opts: CanUseToolOptions): string {
 }
 
 /**
- * Pull a human question + flat option labels out of an AskUserQuestion input.
- * The SDK shape is `{ questions: [{ question, options: [{label}|string] }] }`;
- * we flatten the first question's options to label strings for the HUD.
+ * Pull the questions out of an AskUserQuestion input. The SDK shape is
+ * `{ questions: [{ question, header, options: [{label, description?}], multiSelect }] }`
+ * (1-4 questions). Returns BOTH the flattened first-question fields (`question`
+ * + flat `options` labels — the Even-app HUD contract) and the full parsed
+ * `questions` list for rich clients.
  */
 function parseQuestion(input: Record<string, unknown>): {
   question: string
   options: string[]
+  questions: QuestionSpec[]
 } {
-  const questions = Array.isArray(input.questions) ? input.questions : []
-  const first = questions.length > 0 && isRecord(questions[0]) ? questions[0] : undefined
-  const question =
-    first !== undefined && typeof first.question === 'string'
-      ? first.question
-      : asString(input.question)
-  const rawOptions =
-    first !== undefined && Array.isArray(first.options)
-      ? first.options
-      : Array.isArray(input.options)
-        ? input.options
-        : []
-  const options = rawOptions
+  const rawQuestions = Array.isArray(input.questions) ? input.questions : []
+  const questions: QuestionSpec[] = rawQuestions.filter(isRecord).map((q) => ({
+    question: asString(q.question),
+    header: asString(q.header),
+    options: (Array.isArray(q.options) ? q.options : [])
+      .map((o) =>
+        isRecord(o)
+          ? {
+              label: asString(o.label),
+              ...(typeof o.description === 'string' && o.description.length > 0
+                ? { description: o.description }
+                : {}),
+            }
+          : { label: asString(o) },
+      )
+      .filter((o) => o.label.length > 0),
+    multiSelect: q.multiSelect === true,
+  }))
+
+  const first = questions[0]
+  // Legacy single-question input shape fallback ({question, options} at the top level).
+  const question = first !== undefined ? first.question : asString(input.question)
+  const fallbackOptions = (Array.isArray(input.options) ? input.options : [])
     .map((o) => (isRecord(o) ? asString(o.label) : asString(o)))
     .filter((s) => s.length > 0)
-  return { question, options }
+  const options = first !== undefined ? first.options.map((o) => o.label) : fallbackOptions
+  return { question, options, questions }
 }
 
 /** The structural shape of the SDK CanUseTool options arg (fields we read). */

@@ -181,10 +181,16 @@ export class SessionManager {
 
   /**
    * Route a client's AskUserQuestion answer into the owning session's broker.
+   * `answers` (optional, additive) is the full multi-question answer map.
    * No-op for an unknown session (or an unknown/already-settled toolUseId).
    */
-  respondQuestion(sessionId: string, toolUseId: string, answer: string): void {
-    this.sessions.get(sessionId)?.broker.resolveQuestion(toolUseId, answer)
+  respondQuestion(
+    sessionId: string,
+    toolUseId: string,
+    answer: string,
+    answers?: Record<string, string>,
+  ): void {
+    this.sessions.get(sessionId)?.broker.resolveQuestion(toolUseId, answer, answers)
   }
 
   /** Interrupt the in-flight turn of `sessionId`. No-op for an unknown/idle session. */

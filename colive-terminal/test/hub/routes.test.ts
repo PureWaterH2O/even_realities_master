@@ -302,7 +302,7 @@ describe('POST /api/question-response', () => {
       .set('Authorization', `Bearer ${TOKEN}`)
       .send({ sessionId: 'sess1', answer: 'a' })
       .expect(200)
-    expect(manager.respondQuestion).toHaveBeenCalledWith('sess1', '', 'a')
+    expect(manager.respondQuestion).toHaveBeenCalledWith('sess1', '', 'a', undefined)
   })
 
   it('forwards an explicit body toolUseId when present (desk-client path)', async () => {
@@ -312,7 +312,25 @@ describe('POST /api/question-response', () => {
       .set('Authorization', `Bearer ${TOKEN}`)
       .send({ sessionId: 'sess1', answer: 'b', toolUseId: 'explicit' })
       .expect(200)
-    expect(manager.respondQuestion).toHaveBeenCalledWith('sess1', 'explicit', 'b')
+    expect(manager.respondQuestion).toHaveBeenCalledWith('sess1', 'explicit', 'b', undefined)
+  })
+
+  it('forwards an optional answers MAP (multi-question desk path, additive)', async () => {
+    const { app, manager } = makeApp()
+    await request(app)
+      .post('/api/question-response')
+      .set('Authorization', `Bearer ${TOKEN}`)
+      .send({
+        sessionId: 'sess1',
+        answer: 'Python',
+        toolUseId: 'q-1',
+        answers: { 'Which language?': 'Python', 'Which editor?': 'vim' },
+      })
+      .expect(200)
+    expect(manager.respondQuestion).toHaveBeenCalledWith('sess1', 'q-1', 'Python', {
+      'Which language?': 'Python',
+      'Which editor?': 'vim',
+    })
   })
 })
 

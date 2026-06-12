@@ -477,6 +477,102 @@ describe('PermissionBroker.canUseTool — AskUserQuestion', () => {
     expect(events).toEqual([])
   })
 
+  // Multi-question support: the SDK's AskUserQuestionInput is 1-4 questions,
+  // each {question, header, options:[{label, description}], multiSelect}. The
+  // event must carry ALL of them (additive `questions` field — the flattened
+  // first-question `question`/`options` stay for Even-app compat), and the
+  // resolve path must accept a full answers map.
+  it('emits the FULL parsed questions list (headers + option descriptions) additively', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const input = {
+      questions: [
+        {
+          question: 'Which language?',
+          header: 'Language',
+          options: [
+            { label: 'Python', description: 'Data science standard' },
+            { label: 'Rust', description: 'Systems programming' },
+          ],
+          multiSelect: false,
+        },
+        {
+          question: 'Which editor?',
+          header: 'Editor',
+          options: [{ label: 'vim' }, { label: 'emacs' }],
+          multiSelect: false,
+        },
+      ],
+    }
+    const decision = broker.canUseTool('AskUserQuestion', input, makeOpts({ toolUseID: 'q-multi' }))
+    const ev = events[0]
+    expect(ev.type).toBe('user_question')
+    if (ev.type === 'user_question') {
+      // Flattened first-question fields unchanged (glasses compat).
+      expect(ev.question).toBe('Which language?')
+      expect(ev.options).toEqual(['Python', 'Rust'])
+      // Additive full list.
+      expect(ev.questions).toEqual([
+        {
+          question: 'Which language?',
+          header: 'Language',
+          options: [
+            { label: 'Python', description: 'Data science standard' },
+            { label: 'Rust', description: 'Systems programming' },
+          ],
+          multiSelect: false,
+        },
+        {
+          question: 'Which editor?',
+          header: 'Editor',
+          options: [{ label: 'vim' }, { label: 'emacs' }],
+          multiSelect: false,
+        },
+      ])
+    }
+    broker.resolveQuestion('q-multi', 'Python')
+    await decision
+  })
+
+  it('resolves with a client-provided FULL answers map (multi-question)', async () => {
+    const { emit } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const input = {
+      questions: [
+        { question: 'Which language?', options: [{ label: 'Python' }, { label: 'Rust' }] },
+        { question: 'Which editor?', options: [{ label: 'vim' }, { label: 'emacs' }] },
+      ],
+    }
+    const decision = broker.canUseTool('AskUserQuestion', input, makeOpts({ toolUseID: 'q-map2' }))
+    broker.resolveQuestion('q-map2', 'Python', {
+      'Which language?': 'Python',
+      'Which editor?': 'vim',
+    })
+    await expect(decision).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: {
+        answers: { 'Which language?': 'Python', 'Which editor?': 'vim' },
+      },
+    })
+  })
+
+  it('falls back to {firstQuestion: answer} when no answers map is provided (glasses path)', async () => {
+    const { emit } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const input = {
+      questions: [
+        { question: 'Which language?', options: [{ label: 'Python' }, { label: 'Rust' }] },
+        { question: 'Which editor?', options: [{ label: 'vim' }, { label: 'emacs' }] },
+      ],
+    }
+    const decision = broker.canUseTool('AskUserQuestion', input, makeOpts({ toolUseID: 'q-one' }))
+    broker.resolveQuestion('q-one', 'Rust')
+    await expect(decision).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: { answers: { 'Which language?': 'Rust' } },
+    })
+  })
+
   it('defaults to SKIP (deny) after 120s with no answer', async () => {
     vi.useFakeTimers()
     try {

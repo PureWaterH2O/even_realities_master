@@ -62,7 +62,12 @@ export interface StoreFacade {
 export interface ManagerFacade {
   prompt(id: string | undefined, text: string, cwd?: string): Promise<string | undefined>
   respondPermission(sessionId: string, toolUseId: string, decision: PermissionDecision): void
-  respondQuestion(sessionId: string, toolUseId: string, answer: string): void
+  respondQuestion(
+    sessionId: string,
+    toolUseId: string,
+    answer: string,
+    answers?: Record<string, string>,
+  ): void
   interrupt(sessionId: string): void
   control(sessionId: string, action: 'setModel' | 'setMode', value: string): Promise<void>
   getStatus(sessionId: string): 'busy' | 'idle' | 'unknown'
@@ -121,6 +126,16 @@ export function normalizeDecision(decision: unknown): PermissionDecision {
   if (decision === 'allowAlways') return 'allowAlways'
   // Anything that isn't an explicit allow becomes deny.
   return 'deny'
+}
+
+/** True iff `v` is a plain object whose values are all strings (an answers map). */
+function isStringMap(v: unknown): v is Record<string, string> {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    !Array.isArray(v) &&
+    Object.values(v).every((x) => typeof x === 'string')
+  )
 }
 
 /** Read a positive-integer query param, or undefined if absent / invalid. */
@@ -239,13 +254,21 @@ export function mountRoutes(deps: RouteDeps): Router {
     res.json({ ok: true })
   })
 
-  // POST /api/question-response {sessionId, answer, toolUseId?}  (same FIFO rule)
+  // POST /api/question-response {sessionId, answer, toolUseId?, answers?}  (same FIFO rule)
+  // `answers` (additive) = the full multi-question text→answer map from a
+  // multi-question-aware client; forwarded verbatim, absent for the Even app.
   router.post('/question-response', (req, res) => {
-    const body = req.body as { sessionId?: unknown; answer?: unknown; toolUseId?: unknown }
+    const body = req.body as {
+      sessionId?: unknown
+      answer?: unknown
+      toolUseId?: unknown
+      answers?: unknown
+    }
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
     const answer = typeof body.answer === 'string' ? body.answer : ''
     const toolUseId = typeof body.toolUseId === 'string' ? body.toolUseId : ''
-    manager.respondQuestion(sessionId, toolUseId, answer)
+    const answers = isStringMap(body.answers) ? body.answers : undefined
+    manager.respondQuestion(sessionId, toolUseId, answer, answers)
     res.json({ ok: true })
   })
 
