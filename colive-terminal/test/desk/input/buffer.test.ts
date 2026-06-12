@@ -146,3 +146,19 @@ describe('EditBuffer', () => {
     expect(r.col).toBe('@x.ts'.length)
   })
 })
+
+describe('moveTo (click-to-position)', () => {
+  it('moves the cursor to an exact (row, col)', async () => {
+    const B = await import('../../../src/desk/input/buffer')
+    const b = B.fromText('hello\nworld')
+    const moved = B.moveTo(b, 1, 3)
+    expect(moved.row).toBe(1)
+    expect(moved.col).toBe(3)
+  })
+  it('clamps row and col to the buffer bounds', async () => {
+    const B = await import('../../../src/desk/input/buffer')
+    const b = B.fromText('hi')
+    expect(B.moveTo(b, 5, 99)).toMatchObject({ row: 0, col: 2 })
+    expect(B.moveTo(b, -1, -7)).toMatchObject({ row: 0, col: 0 })
+  })
+})

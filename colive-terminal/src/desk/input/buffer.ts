@@ -148,3 +148,10 @@ export function replaceRange(b: EditBuffer, start: number, end: number, str: str
   lines[b.row] = line
   return { lines, row: b.row, col: start + str.length }
 }
+
+/** Move the cursor to an exact (row, col), clamped to the buffer's bounds (click-to-position). */
+export function moveTo(b: EditBuffer, row: number, col: number): EditBuffer {
+  const r = Math.max(0, Math.min(row, b.lines.length - 1))
+  const c = Math.max(0, Math.min(col, b.lines[r]!.length))
+  return { ...b, row: r, col: c }
+}

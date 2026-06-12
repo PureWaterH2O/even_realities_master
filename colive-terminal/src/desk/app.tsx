@@ -54,7 +54,7 @@ import type { ViewportState } from './render/window'
 import * as B from './input/buffer'
 import type { EditBuffer } from './input/buffer'
 import { renderInputRows } from './input/input-rows'
-import { parseSgrMouse, isMouseReport } from './input/mouse'
+import { parseSgrMouse, parseSgrClick, isMouseReport } from './input/mouse'
 import { initNav, prev as histPrev, next as histNext, memoryHistoryStore } from './input/history'
 import type { HistoryStore } from './input/history'
 import { appendFileSync } from 'node:fs'
@@ -586,6 +586,28 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   useEffect(() => { setViewport((vp) => afterContentChange(vp, rows.length, height)) }, [rows.length, height])
   const win = computeWindow(rows, height, viewport)
 
+  // Click-to-position (UAT 2026-06-12, native parity): map a left-click's
+  // 1-based screen row onto the composer's logical lines. The input block's
+  // top row = every row rendered above it — the SAME quantities the height
+  // reservation uses, summed here per render and stashed in a ref for the
+  // mouse handler. Inactive while a prompt is pending (the question prompt
+  // hides the input; a permission prompt's row count is a conservative
+  // over-estimate, so the map would drift).
+  const showBanner = transcript.blocks.length === 0 && !pending && !menuOpen
+  const clickMapRef = useRef({ top: 0, lines: 1, active: false })
+  clickMapRef.current = {
+    top:
+      (showBanner ? bannerRowCount(width) : 0) +
+      win.visible.length +
+      (rows.length > height ? 1 : 0) +
+      (busyActive ? 1 : 0) +
+      todosRows.length +
+      3 + // separator rule + status line + "← for agents"
+      menuRowCount,
+    lines: buf.lines.length,
+    active: pending === undefined,
+  }
+
   // Mouse wheel scrolls the transcript. ink re-emits every non-paste byte verbatim on its
   // internal 'input' channel, so we tap that and parse the raw SGR mouse report ourselves.
   // We read the mouse-wheel off ink's undocumented internal 'input' emitter (an ink 7
@@ -606,7 +628,19 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
       // anchored on "[<", so strip the ESC first. Non-wheel / non-mouse input → null → ignored.
       const seq = raw.startsWith('\x1b') ? raw.slice(1) : raw
       const dir = parseSgrMouse(seq)
-      if (dir !== null) setViewport((vp) => scrollLine(vp, rows.length, height, dir, WHEEL_STEP))
+      if (dir !== null) { setViewport((vp) => scrollLine(vp, rows.length, height, dir, WHEEL_STEP)); return }
+      // Left-click inside the composer: move the cursor to the clicked cell.
+      // The click map (input top row + line count) is computed per render; the
+      // 2-column "› "/"  " prefix offsets the column. Clicks outside the input
+      // block (or while a prompt is pending) are ignored.
+      const click = parseSgrClick(seq)
+      if (click !== null) {
+        const map = clickMapRef.current
+        if (!map.active) return
+        const visRow = click.row - map.top - 1 // 0-based row within the input block
+        if (visRow < 0 || visRow >= map.lines) return
+        setBuf((b) => B.moveTo(b, visRow, click.col - 1 - 2))
+      }
     }
     em.on('input', onInput)
     return () => em.removeListener('input', onInput)
@@ -830,7 +864,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   return (
     <Box flexDirection="column" height={termRows}>
       <Box flexDirection="column" flexShrink={0}>
-        {transcript.blocks.length === 0 && !pending && !menuOpen ? (
+        {showBanner ? (
           <Banner model={currentModel} mode={currentMode} cwd={fileCwd} />
         ) : null}
         <Box flexDirection="column">
@@ -1117,6 +1151,18 @@ function shortCwd(p: string): string {
  * screen reads like native Claude Code: a small robot, the product line + version,
  * the active model + permission mode, the working directory, and a feature tip.
  */
+/** The banner's feature-tip line (shared with bannerRowCount so the click map stays honest). */
+const FEATURE_TIP = 'Feature of the week: /loop — run a prompt or slash command on a recurring interval'
+
+/**
+ * Rows {@link Banner} occupies at `width`: the 3-row robot/text block + a blank
+ * line + the (possibly wrapped) feature tip + marginBottom. Mirrors Banner's
+ * structure for the click-to-position map.
+ */
+function bannerRowCount(width: number): number {
+  return 3 + 1 + Math.max(1, wrapAnsi(FEATURE_TIP, width).length) + 1
+}
+
 function Banner({ model, mode, cwd }: { model: string; mode: string; cwd: string }): React.ReactElement {
   const robot = ['▛▀▀▜', '▌●●▐', '▙▄▄▟']
   return (
@@ -1137,7 +1183,7 @@ function Banner({ model, mode, cwd }: { model: string; mode: string; cwd: string
       <Text>
         {'Feature of the week: '}
         <Text color="cyan">/loop</Text>
-        {' — run a prompt or slash command on a recurring interval'}
+        {FEATURE_TIP.slice('Feature of the week: /loop'.length)}
       </Text>
     </Box>
   )

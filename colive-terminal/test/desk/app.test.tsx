@@ -623,6 +623,25 @@ describe('desk App', () => {
     expect(fake.questions).toEqual([{ sessionId: 's1', answer: 'baz.ts', toolUseId: 'q-1' }])
   })
 
+  // UAT 2026-06-12: native Claude supports click-to-position in the composer.
+  // A left-click whose screen cell falls inside the rendered input block moves
+  // the cursor there (SGR mouse press on ink's internal input channel).
+  it('click in the composer moves the cursor to the clicked cell', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, 'hello')
+    // Derive the input row from the RENDERED frame (1-based screen row) so the
+    // test stays honest about the app's own click->row arithmetic.
+    const lines = (lastFrame() ?? '').split('\n').map((l) => stripAnsi(l))
+    const inputRow = lines.findIndex((l) => l.startsWith('\u203a hello')) + 1
+    expect(inputRow).toBeGreaterThan(0)
+    // Click on the 'e' of hello: col = 2 (prefix) + 1 (char index) + 1 (1-based).
+    await write(stdin, `\x1b[<0;4;${inputRow}M`)
+    await write(stdin, 'X')
+    expect(stripAnsi(lastFrame() ?? '')).toContain('hXello')
+  })
+
   it('sends a normal line as a prompt on Enter (and does not treat it as a command)', async () => {
     const fake = makeFakeHub()
     const { stdin } = mount(<App client={fake} sessionId="s1" />)

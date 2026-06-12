@@ -40,3 +40,19 @@ const X10_HEADER_RE = /^\x1b?\[M$/
 export function isMouseReport(seq: string): boolean {
   return SGR_REPORT_RE.test(seq) || X10_HEADER_RE.test(seq)
 }
+
+// A left-button PRESS (button 0, final byte M) with its 1-based coordinates.
+// Releases (m), wheel (64/65), and drag/motion (32+) deliberately don't match —
+// only the press positions the composer cursor (click-to-position).
+const SGR_CLICK_RE = /^\x1b?\[?<0;(\d+);(\d+)M$/
+
+/**
+ * Parse a left-click press into its 1-based terminal {col, row}, or null for
+ * anything else. Tolerates the leading ESC / optionally-missing `[` exactly
+ * like {@link isMouseReport} (the internal-channel and split-tail forms).
+ */
+export function parseSgrClick(seq: string): { col: number; row: number } | null {
+  const m = SGR_CLICK_RE.exec(seq)
+  if (!m) return null
+  return { col: Number(m[1]), row: Number(m[2]) }
+}

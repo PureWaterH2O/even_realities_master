@@ -61,3 +61,21 @@ describe('isMouseReport', () => {
     expect(isMouseReport('\x1b[Mood]')).toBe(false)
   })
 })
+
+describe('parseSgrClick (click-to-position, UAT 2026-06-12)', () => {
+  it('parses a left-button PRESS into 1-based {col, row}', async () => {
+    const { parseSgrClick } = await import('../../../src/desk/input/mouse')
+    expect(parseSgrClick('[<0;13;42M')).toEqual({ col: 13, row: 42 })
+  })
+  it('tolerates a leading ESC (the internal-channel form)', async () => {
+    const { parseSgrClick } = await import('../../../src/desk/input/mouse')
+    expect(parseSgrClick('\x1b[<0;5;6M')).toEqual({ col: 5, row: 6 })
+  })
+  it('returns null for release, wheel, drag, and plain text', async () => {
+    const { parseSgrClick } = await import('../../../src/desk/input/mouse')
+    expect(parseSgrClick('[<0;5;6m')).toBeNull() // release
+    expect(parseSgrClick('[<64;5;6M')).toBeNull() // wheel
+    expect(parseSgrClick('[<32;5;6M')).toBeNull() // drag/motion
+    expect(parseSgrClick('hello')).toBeNull()
+  })
+})
