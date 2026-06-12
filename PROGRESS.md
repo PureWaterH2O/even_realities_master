@@ -5,6 +5,10 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-12
 
+### Co-Live Terminal — ✅ SHIPPED: M3.5 + improvement pass pushed to `origin/main` (owner-authorized)
+
+- Owner authorized ship after the improvement pass. Pre-push re-verification on the exact tree: `tsc` exit 0 · **555/555 tests**. Pushed all **39 commits** (M3.5 final cleanup D-033/D-034, D-037 desk-cwd fix, the 5-task improvement pass, docs). `origin/main` now current; phase **DONE + public**. Next: direction discussion (M3.4 scope vs other; no further pixel-parity per the build-vs-adopt verdict).
+
 ### Co-Live Terminal — improvement pass (owner UAT findings): question picker, dynamic /model, click-to-position, /context
 
 - **Owner findings:** question options 4/5 (`Type something`/`Chat about this`) rendered but **unreachable** (arrows clamped, digits dead); only the FIRST of a multi-question `AskUserQuestion` ever shown (native shows up to 4); `/model` was a **stale hardcoded list** (no Fable 5); no click-to-position in the composer (native has it); `/` commands thin overall.

@@ -1,10 +1,13 @@
 # Co-Live Terminal — Status
 
-**Current state:** 🟨 **M3.5 + improvement pass — CODE COMPLETE, awaiting owner LIGHT UAT (Round 4) → ship (2026-06-12).**
-Improvement pass (owner round-3 findings) done on top of the closed catalog: multi-question AskUserQuestion
-(additive `questions[]` + answers-map wire), reachable Type-something/Chat-about-this rows, dynamic `/model` from SDK
-`supportedModels` (+ Fable 5 fallback), click-to-position composer cursor, enriched `/context`. **555 tests, tsc 0.**
-Owner runs runbook **Round-4 (R4-1..R4-5, restart serve+desk)** → push everything → then discuss direction.
+**Current state:** ✅ **M3.5 + improvement pass — SHIPPED (owner-authorized, pushed to `origin/main` 2026-06-12).**
+The full phase: aesthetic catalog CLOSED (D-001…D-037 fixed/accepted/descoped) + the improvement pass from owner UAT —
+multi-question AskUserQuestion (additive `questions[]` + answers-map wire), reachable Type-something/Chat-about-this
+rows, dynamic `/model` from SDK `supportedModels` (+ Fable 5 fallback), click-to-position composer cursor, enriched
+`/context`, D-037 desk-cwd fix, D-033 allowAlways persistence. **555 tests, tsc 0** re-verified pre-push.
+**Next:** direction discussion — M3.4 (multi-session) scope vs other priorities; per the build-vs-adopt verdict
+(2026-06-07), no further pixel-parity work. Deferred/flagged: multiSelect answer format (probe first), settingSources
+auto-CLAUDE.md context, glasses 3-button allowAlways field test.
 The difference catalog is **CLOSED**: all 36 entries (D-001…D-036 + wasted-space) are ✅ fixed, ⏭️ accepted-divergence,
 or 🟦 descoped-per-owner. Phase B (22 entries) merged; UAT rounds 1–2 surfaced 9 more defects, all fixed; final cleanup
 2026-06-12 closed the last two (D-033 `allowAlways` from SDK suggestions `f3d7a54`; D-034 per-tool permission header
