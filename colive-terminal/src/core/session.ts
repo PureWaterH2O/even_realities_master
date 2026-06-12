@@ -48,9 +48,17 @@ export type Emit = (event: CoLiveEvent) => void
  * than against the heavyweight SDK Beta types: at runtime we only read string
  * discriminator fields off each message.
  */
+/** A model the live Query reports as selectable (SDK ModelInfo essentials). */
+export interface SupportedModel {
+  value: string
+  displayName: string
+  description: string
+}
+
 export interface QueryLike extends AsyncIterable<unknown> {
   interrupt(): Promise<void>
   setModel?(model?: string): Promise<void>
+  supportedModels?(): Promise<SupportedModel[]>
   setPermissionMode?(mode: PermissionMode): Promise<void>
 }
 
@@ -312,6 +320,20 @@ export class ClaudeSession {
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.config = { ...this.config, permissionMode: mode }
     try { await this.q?.setPermissionMode?.(mode) } catch { /* best-effort */ }
+  }
+
+  /**
+   * The live Query's selectable-model list (SDK `supportedModels()`), feeding
+   * the desk's dynamic /model picker. Best-effort: [] with no live query, a
+   * query without the method, or a rejection — clients fall back to a curated
+   * list, so this must never throw.
+   */
+  async supportedModels(): Promise<SupportedModel[]> {
+    try {
+      return (await this.q?.supportedModels?.()) ?? []
+    } catch {
+      return []
+    }
   }
 
   /** Begin a turn: per-turn resets, ensure the query is open, push the prompt. */

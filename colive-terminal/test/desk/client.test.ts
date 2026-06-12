@@ -179,6 +179,27 @@ describe('createHubClient — setControl + getInfo (injected fetch)', () => {
     expect(calls[0].body).toEqual({ sessionId: 's1', action: 'setMode', value: 'plan' })
   })
 
+  it('fetchModels GETs /api/models?sessionId= and returns the model list', async () => {
+    const { fetchImpl, calls } = makeFakeFetch(() => ({
+      status: 200,
+      json: { models: [{ value: 'claude-fable-5', displayName: 'Fable 5', description: 'Most intelligent' }] },
+    }))
+    const client = createHubClient({ baseUrl: 'http://hub.local', token: TOKEN, fetch: fetchImpl })
+    const models = await client.fetchModels('s1')
+    expect(models).toEqual([{ value: 'claude-fable-5', displayName: 'Fable 5', description: 'Most intelligent' }])
+    expect(calls[0].method).toBe('GET')
+    const url = new URL(calls[0].url)
+    expect(url.pathname).toBe('/api/models')
+    expect(url.searchParams.get('sessionId')).toBe('s1')
+    expect(calls[0].headers['authorization']).toBe(`Bearer ${TOKEN}`)
+  })
+
+  it('fetchModels returns [] on a non-OK response (curated fallback path)', async () => {
+    const { fetchImpl } = makeFakeFetch(() => ({ status: 500, json: {} }))
+    const client = createHubClient({ baseUrl: 'http://hub.local', token: TOKEN, fetch: fetchImpl })
+    await expect(client.fetchModels('s1')).resolves.toEqual([])
+  })
+
   it('getInfo GETs /api/info and returns the model', async () => {
     const { fetchImpl, calls } = makeFakeFetch(() => ({ status: 200, json: { model: 'claude-opus-4-8', version: '1', provider: 'claude' } }))
     const client = createHubClient({ baseUrl: 'http://hub.local', token: TOKEN, fetch: fetchImpl })

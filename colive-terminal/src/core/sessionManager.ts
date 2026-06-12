@@ -32,6 +32,7 @@ import { realpathSync } from 'node:fs'
 import type { PermissionMode, SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import type { CoLiveEvent } from './events'
 import { ClaudeSession } from './session'
+import type { SupportedModel } from './session'
 import type { Clock, QueryFn } from './session'
 import { PermissionBroker, rejectIfSlash } from './permissions'
 import type { PermissionDecision } from './permissions'
@@ -207,6 +208,15 @@ export class SessionManager {
     if (entry === undefined) return
     if (action === 'setModel') await entry.session.setModel(value)
     else if (action === 'setMode') await entry.session.setPermissionMode(value as PermissionMode)
+  }
+
+  /**
+   * The selectable-model list of `sessionId`'s live Query (dynamic /model
+   * picker). [] for an unknown session — clients fall back to a curated list.
+   */
+  async listModels(sessionId: string): Promise<SupportedModel[]> {
+    const entry = this.sessions.get(sessionId)
+    return entry !== undefined ? entry.session.supportedModels() : []
   }
 
   /** Coarse status of `sessionId`: 'busy' while a turn runs, else 'idle'; 'unknown' if absent. */

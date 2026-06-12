@@ -70,6 +70,7 @@ export interface ManagerFacade {
   ): void
   interrupt(sessionId: string): void
   control(sessionId: string, action: 'setModel' | 'setMode', value: string): Promise<void>
+  listModels(sessionId: string): Promise<Array<{ value: string; displayName: string; description: string }>>
   getStatus(sessionId: string): 'busy' | 'idle' | 'unknown'
   subscribe(cb: (tagged: { sessionId: string; event: CoLiveEvent }) => void): () => void
 }
@@ -270,6 +271,20 @@ export function mountRoutes(deps: RouteDeps): Router {
     const answers = isStringMap(body.answers) ? body.answers : undefined
     manager.respondQuestion(sessionId, toolUseId, answer, answers)
     res.json({ ok: true })
+  })
+
+  // GET /api/models?sessionId=  (additive) — the live session's selectable-model
+  // list (SDK supportedModels), feeding the desk's dynamic /model picker.
+  // Empty list when no sessionId / no live session: clients fall back to a
+  // curated list, so this never errors.
+  router.get('/models', async (req, res, next) => {
+    try {
+      const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : ''
+      const models = sessionId !== '' ? await manager.listModels(sessionId) : []
+      res.json({ models })
+    } catch (err) {
+      next(err)
+    }
   })
 
   // POST /api/interrupt {sessionId}

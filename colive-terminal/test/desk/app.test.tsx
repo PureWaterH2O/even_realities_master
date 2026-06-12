@@ -37,6 +37,8 @@ interface FakeHub extends HubClient {
   interrupts: string[]
   /** Recorded setControl calls. */
   controls: Array<{ action: string; value: string }>
+  /** Live model list served by fetchModels (default [] -> curated fallback). */
+  models: Array<{ value: string; displayName: string; description: string }>
   subscribeCalls: Array<{ sessionId: string; opts?: SubscribeOptions }>
   closeCount: number
   /** How many times fetchTranscript was called and with what id. */
@@ -50,6 +52,7 @@ function makeFakeHub(opts?: {
   let onEvent: ((e: CoLiveEvent) => void) | undefined
   const fake: FakeHub = {
     prompts: [],
+    models: [],
     permissions: [],
     questions: [],
     interrupts: [],
@@ -75,6 +78,9 @@ function makeFakeHub(opts?: {
     },
     async respondPermission(sessionId, decision, toolUseId) {
       fake.permissions.push({ sessionId, decision, toolUseId })
+    },
+    async fetchModels() {
+      return fake.models
     },
     async respondQuestion(sessionId, answer, toolUseId, answers) {
       fake.questions.push({ sessionId, answer, toolUseId, ...(answers ? { answers } : {}) })
@@ -1489,13 +1495,14 @@ describe('!bash delegation', () => {
 })
 
 describe('runtime control pickers (/model, /mode)', () => {
-  it('/model opens the model picker; ↓ + Tab sends setModel Sonnet and shows a note', async () => {
+  it('/model opens the model picker; ↓↓ + Tab sends setModel Sonnet and shows a note', async () => {
     const fake = makeFakeHub()
     const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
     await flush()
     await write(stdin, '/model')
     expect(lastFrame()).toContain('Opus 4.8')        // value picker open
     expect(lastFrame()).toContain('Sonnet 4.6')
+    await write(stdin, '\x1b[B')                      // ↓ -> Opus (Fable 5 heads the list now)
     await write(stdin, '\x1b[B')                      // ↓ -> Sonnet
     await write(stdin, '\t')                          // Tab accept
     expect(fake.controls.at(-1)).toMatchObject({ action: 'setModel', value: 'claude-sonnet-4-6' })
@@ -1512,6 +1519,36 @@ describe('runtime control pickers (/model, /mode)', () => {
     await write(stdin, '\x1b[B'); await write(stdin, '\x1b[B') // ↓↓ -> Plan
     await write(stdin, '\r')                                    // Enter accept
     expect(fake.controls.at(-1)).toMatchObject({ action: 'setMode', value: 'plan' })
+    cleanup()
+  })
+
+  // UAT 2026-06-12: the /model picker was a stale hardcoded list (no Fable 5).
+  // It now prefers the LIVE list from GET /api/models (SDK supportedModels),
+  // falling back to the curated list when the fetch is empty/unavailable.
+  it('/model lists the LIVE model list from the Hub when available', async () => {
+    const fake = makeFakeHub()
+    fake.models = [
+      { value: 'claude-fable-5', displayName: 'Fable 5', description: 'Most intelligent model' },
+      { value: 'claude-opus-4-8', displayName: 'Opus 4.8', description: 'Capable' },
+    ]
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/model')
+    await flush() // let the async fetch land
+    expect(lastFrame()).toContain('Fable 5')
+    await write(stdin, '\r') // Enter accepts the first (highlighted) choice = Fable 5
+    expect(fake.controls.at(-1)).toMatchObject({ action: 'setModel', value: 'claude-fable-5' })
+    cleanup()
+  })
+
+  it('/model falls back to the curated list when the live fetch returns nothing', async () => {
+    const fake = makeFakeHub() // fake.models stays [] -> fallback
+    const { stdin, lastFrame, cleanup } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    await write(stdin, '/model')
+    await flush()
+    expect(lastFrame()).toContain('Opus 4.8')
+    expect(lastFrame()).toContain('Fable 5') // curated list is fresh too
     cleanup()
   })
 

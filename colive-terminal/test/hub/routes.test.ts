@@ -17,6 +17,9 @@ function makeFakeManager() {
     respondQuestion: vi.fn(),
     interrupt: vi.fn(),
     control: vi.fn(async (_sessionId?: string, _action?: string, _value?: string) => {}),
+    listModels: vi.fn(async (_sessionId?: string) => [
+      { value: 'claude-fable-5', displayName: 'Fable 5', description: 'Most intelligent' },
+    ]),
     getStatus: vi.fn(() => 'idle' as const),
     subscribe(cb: (t: TaggedEvent) => void): () => void {
       subscribers.add(cb)
@@ -364,6 +367,28 @@ describe('POST /api/control (additive)', () => {
     expect(bad.status).toBe(400)
     const noAuth = await request(app).post('/api/control').send({ sessionId: 's1', action: 'setModel', value: 'x' })
     expect(noAuth.status).toBe(401)
+  })
+})
+
+describe('GET /api/models (additive)', () => {
+  it('returns the live-session model list via manager.listModels', async () => {
+    const { app, manager } = makeApp()
+    const res = await request(app)
+      .get('/api/models?sessionId=s1')
+      .set('authorization', `Bearer ${TOKEN}`)
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({
+      models: [{ value: 'claude-fable-5', displayName: 'Fable 5', description: 'Most intelligent' }],
+    })
+    expect(manager.listModels).toHaveBeenCalledWith('s1')
+  })
+
+  it('returns an empty list for a missing sessionId (clients fall back to the curated list)', async () => {
+    const { app, manager } = makeApp()
+    const res = await request(app).get('/api/models').set('authorization', `Bearer ${TOKEN}`)
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ models: [] })
+    expect(manager.listModels).not.toHaveBeenCalled()
   })
 })
 

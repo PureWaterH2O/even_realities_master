@@ -27,6 +27,7 @@ describe('M3.3b control pickers preview', () => {
   it('/model value picker', async () => {
     const frames = await capture([key('/model'), snap('m33b-model-picker')])
     dump(frames)
+    expect(frames[0]!.plain).toContain('Fable 5') // curated fallback refreshed (UAT 2026-06-12)
     expect(frames[0]!.plain).toContain('Opus 4.8')
     expect(frames[0]!.plain).toContain('Sonnet 4.6')
     expect(frames[0]!.plain).toContain('Haiku 4.5')

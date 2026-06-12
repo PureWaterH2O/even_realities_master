@@ -24,6 +24,7 @@ function fakeClient(): HubClient & { emit(e: CoLiveEvent): void; lastInterrupt?:
     async fetchTranscript() { return [] },
     async setControl() {},
     async getInfo() { return { model: 'claude-opus-4-8' } },
+    async fetchModels() { return [] },
   }
   return c
 }

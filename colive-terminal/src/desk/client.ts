@@ -77,6 +77,11 @@ export interface HubClient {
   /** POST /api/prompt; resolves with the Hub-resolved sessionId. */
   sendPrompt(args: SendPromptArgs): Promise<SendPromptResult>
 
+  /**
+   * GET /api/models?sessionId= -> the live session's selectable models (SDK
+   * supportedModels). [] on any failure — callers fall back to a curated list.
+   */
+  fetchModels(sessionId: string): Promise<Array<{ value: string; displayName: string; description: string }>>
   /** POST /api/permission-response {sessionId, decision, toolUseId?}. */
   respondPermission(sessionId: string, decision: string, toolUseId?: string): Promise<void>
 
@@ -286,6 +291,27 @@ export function createHubClient(options: HubClientOptions): HubClient {
     return { model: typeof info?.model === 'string' ? info.model : '' }
   }
 
+  async function fetchModels(
+    sessionId: string,
+  ): Promise<Array<{ value: string; displayName: string; description: string }>> {
+    try {
+      const json = (await getJson(`/api/models?sessionId=${encodeURIComponent(sessionId)}`)) as
+        | { models?: unknown }
+        | undefined
+      const models = json?.models
+      if (!Array.isArray(models)) return []
+      return models.filter(
+        (m): m is { value: string; displayName: string; description: string } =>
+          typeof m === 'object' &&
+          m !== null &&
+          typeof (m as { value?: unknown }).value === 'string' &&
+          typeof (m as { displayName?: unknown }).displayName === 'string',
+      )
+    } catch {
+      return []
+    }
+  }
+
   async function fetchTranscript(sessionId: string): Promise<TranscriptEntry[]> {
     const json = (await getJson(`/api/sessions/${encodeURIComponent(sessionId)}/transcript`)) as
       | { transcript?: unknown }
@@ -302,6 +328,7 @@ export function createHubClient(options: HubClientOptions): HubClient {
     interrupt,
     setControl,
     getInfo,
+    fetchModels,
     fetchTranscript,
   }
 }

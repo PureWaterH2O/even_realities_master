@@ -1551,6 +1551,41 @@ describe('ClaudeSession — runtime controls', () => {
     await expect(session.setModel('x')).resolves.toBeUndefined() // no throw
   })
 
+  it('supportedModels returns the live Query list (dynamic /model picker source)', async () => {
+    const models = [
+      { value: 'claude-fable-5', displayName: 'Fable 5', description: 'Most intelligent' },
+      { value: 'claude-opus-4-8', displayName: 'Opus 4.8', description: 'Capable' },
+    ]
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage> }) => {
+      const gen = (async function* () { for await (const _ of args.prompt) yield { type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} } })()
+      const q = gen as unknown as QueryLike & { supportedModels?: () => Promise<unknown[]> }
+      q.interrupt = async () => {}
+      q.supportedModels = async () => models
+      return q
+    }) as unknown as QueryFn
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    await session.start(undefined, process.cwd())
+    await session.run('open it')
+    await expect(session.supportedModels()).resolves.toEqual(models)
+  })
+
+  it('supportedModels is [] when the query lacks the method or rejects (never throws)', async () => {
+    const fn = ((args: { prompt: AsyncIterable<SDKUserMessage> }) => {
+      const gen = (async function* () { for await (const _ of args.prompt) yield { type: 'result', subtype: 'success', session_id: 's', result: '', usage: {} } })()
+      const q = gen as unknown as QueryLike & { supportedModels?: () => Promise<unknown[]> }
+      q.interrupt = async () => {}
+      q.supportedModels = async () => { throw new Error('nope') }
+      return q
+    }) as unknown as QueryFn
+    const session = new ClaudeSession({ config: makeConfig(), emit: () => {}, canUseTool: stubCanUseTool, query: fn })
+    // Before any run there is no live query at all -> [].
+    await session.start(undefined, process.cwd())
+    await expect(session.supportedModels()).resolves.toEqual([])
+    // A rejecting live query also degrades to [].
+    await session.run('go')
+    await expect(session.supportedModels()).resolves.toEqual([])
+  })
+
   it('with no live query, updates config only; the next lazy open carries the chosen model', async () => {
     // Spec §3.1: a control applied BEFORE the first run (no live query yet) updates
     // config only; the lazily-opened query then carries the chosen model.

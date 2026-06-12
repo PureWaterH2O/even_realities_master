@@ -5,6 +5,8 @@ describe('controls', () => {
   it('MODEL_CHOICES carry friendly labels + real ids', () => {
     expect(MODEL_CHOICES.map((c) => c.value)).toContain('claude-opus-4-8')
     expect(MODEL_CHOICES.map((c) => c.value)).toContain('claude-sonnet-4-6')
+    // UAT 2026-06-12: the curated fallback list was stale — no Fable 5.
+    expect(MODEL_CHOICES.map((c) => c.value)).toContain('claude-fable-5')
     expect(MODEL_CHOICES.find((c) => c.value === 'claude-opus-4-8')?.name).toMatch(/opus/i)
   })
   it('MODE_CHOICES are exactly default/acceptEdits/plan', () => {

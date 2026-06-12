@@ -216,7 +216,36 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // first; only look for an "@" context when the slash menu is closed — they can never both open.
   // M3.3b: an EXACT picker command (/model, /mode) opens a second-level value menu that takes
   // precedence over — and is mutually exclusive with — the slash and @ menus.
-  const pickerChoices = menuForCommand(B.toText(buf).trim())
+  // Dynamic /model list (UAT 2026-06-12: the curated list was stale — no Fable 5).
+  // When the /model picker opens, fetch the LIVE list from GET /api/models (the
+  // SDK's Query.supportedModels) once per open; a non-empty result replaces the
+  // curated fallback so new models appear without a desk release.
+  const [liveModels, setLiveModels] = useState<ControlChoice[] | null>(null)
+  const modelsFetchedRef = useRef(false)
+  const staticPicker = menuForCommand(B.toText(buf).trim())
+  const bufActionCmd = actionForCommand(B.toText(buf).trim())
+  const pickerChoices =
+    bufActionCmd === 'setModel' && liveModels !== null && liveModels.length > 0
+      ? liveModels
+      : staticPicker
+  useEffect(() => {
+    if (bufActionCmd !== 'setModel') {
+      modelsFetchedRef.current = false
+      return
+    }
+    if (modelsFetchedRef.current) return
+    modelsFetchedRef.current = true
+    const sid = sessionIdRef.current
+    if (sid === undefined) return
+    void client
+      .fetchModels(sid)
+      .then((models) => {
+        if (models.length > 0) {
+          setLiveModels(models.map((m) => ({ name: m.displayName, desc: m.description, value: m.value })))
+        }
+      })
+      .catch(() => {})
+  }, [bufActionCmd, client])
   const slashMenu = pickerChoices === null ? filterSlash(B.toText(buf), menuItems) : null
   const atCtx = pickerChoices === null && slashMenu === null && !menuDismissed ? atContext(buf.lines[buf.row]!, buf.col) : null
   const atMatches = atCtx ? fuzzyFilter(ensureFiles(), atCtx.query, MENU_LIMIT) : []
