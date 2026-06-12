@@ -873,7 +873,7 @@ function pendingRowCount(pending: Pending, input: string, width: number): number
   if (pending.kind === 'permission') {
     const e = pending.event
     // rule + header + blank + [detail] + [description] + blank + "proceed?" + options + blank + footer
-    let n = 1 + wrapped(`${e.toolName} command`) + 1
+    let n = 1 + wrapped(permissionHeader(e.toolName)) + 1
     if (e.detail) n += wrapped(`  ${e.detail}`)
     if (e.description) n += wrapped(`  ${e.description}`)
     n += 1 + 1 + e.options.length + 1 + 1
@@ -884,6 +884,35 @@ function pendingRowCount(pending: Pending, input: string, width: number): number
   let n = 1 + 1 + 1 + wrapped(e.question) + e.options.length + 1 + 1 + 1 + 1
   if (input) n += 1
   return n
+}
+
+/**
+ * D-034: native frames the permission header per tool ("Bash command",
+ * "Read file", "Edit file", …), not a generic "<Tool> command". Unknown tools
+ * keep the generic framing.
+ */
+function permissionHeader(toolName: string): string {
+  switch (toolName) {
+    case 'Bash':
+    case 'BashOutput':
+    case 'KillShell':
+      return 'Bash command'
+    case 'Read':
+      return 'Read file'
+    case 'Write':
+      return 'Create file'
+    case 'Edit':
+    case 'MultiEdit':
+      return 'Edit file'
+    case 'NotebookEdit':
+      return 'Edit notebook'
+    case 'WebFetch':
+      return 'Fetch'
+    case 'WebSearch':
+      return 'Web search'
+    default:
+      return `${toolName} command`
+  }
 }
 
 /**
@@ -898,7 +927,7 @@ function PendingPrompt({ pending, input, width, selectedIndex }: { pending: Pend
     return (
       <Box flexDirection="column">
         <Text color="blue" dimColor>{rule}</Text>
-        <Text color="blue" bold>{`${e.toolName} command`}</Text>
+        <Text color="blue" bold>{permissionHeader(e.toolName)}</Text>
         <Text> </Text>
         {e.detail ? <Text>{`  ${e.detail}`}</Text> : null}
         {e.description ? <Text dimColor>{`  ${e.description}`}</Text> : null}

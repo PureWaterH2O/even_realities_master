@@ -414,6 +414,56 @@ describe('desk App', () => {
     expect(fake.permissions).toEqual([{ sessionId: 's1', decision: 'deny', toolUseId: 'tu-9' }])
   })
 
+  // D-034: native frames the permission header per tool (Read -> "Read file"),
+  // not a generic "<Tool> command".
+  it('renders a per-tool permission header instead of the generic "<Tool> command"', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'permission_request',
+      toolName: 'Read',
+      description: 'Claude wants to read foo.txt',
+      detail: 'foo.txt',
+      toolUseId: 'tu-h1',
+      options: [
+        { text: 'Yes', key: 'allow' },
+        { text: 'No', key: 'deny' },
+      ],
+      suggestions: [],
+    })
+    await flush()
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).toContain('Read file')
+    expect(frame).not.toContain('Read command')
+    await write(stdin, '1') // settle the prompt
+  })
+
+  it('posts allowAlways when the suggestion-derived option is chosen by digit (D-033)', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'permission_request',
+      toolName: 'Bash',
+      description: 'Run a shell command',
+      detail: 'rm /tmp/x',
+      toolUseId: 'tu-a1',
+      options: [
+        { text: 'Yes', key: 'allow' },
+        { text: 'Yes, and always allow access to tmp/ from this project', key: 'allowAlways' },
+        { text: 'No', key: 'deny' },
+      ],
+      suggestions: [],
+    })
+    await flush()
+    expect(stripAnsi(lastFrame() ?? '')).toContain('2. Yes, and always allow access to tmp/')
+    await write(stdin, '2')
+    expect(fake.permissions).toEqual([
+      { sessionId: 's1', decision: 'allowAlways', toolUseId: 'tu-a1' },
+    ])
+  })
+
   it('arrow-navigates question options and confirms the selection with Enter (no typed text)', async () => {
     const fake = makeFakeHub()
     const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
