@@ -22,9 +22,10 @@
  *      concurrent requests, and a Hub-side queue desyncs when an explicit id
  *      resolves out of order. The broker owns its pending set, so it is the one
  *      correct place to do the FIFO resolve.)
- *   2. Wire decision values are allow|allowAlways|deny. `allowAlways` is a
- *      client-side "remember + allow"; the broker only knows allow/deny, so it is
- *      normalized to 'allow' before respondPermission.
+ *   2. Wire decision values are allow|allowAlways|deny, forwarded verbatim.
+ *      The broker owns `allowAlways` (D-033): it allows AND returns the
+ *      request's SDK suggestions as `updatedPermissions` so the choice
+ *      persists. (Before D-033 the Hub flattened it to plain 'allow'.)
  *   4. The auth middleware and handlers never depend on the SSE fan-out not
  *      throwing — that safety lives in the hub. Here, handlers are plain request
  *      /response and Express owns error handling.
@@ -114,11 +115,11 @@ export function makeAuthMiddleware(token: string) {
   }
 }
 
-/** Map a wire decision (allow|allowAlways|deny) to the broker's allow|deny. */
+/** Map a wire decision to the broker's allow|allowAlways|deny (note 2). */
 export function normalizeDecision(decision: unknown): PermissionDecision {
-  // allowAlways is a client-side "remember + allow"; the broker only knows
-  // allow/deny (note 2). Anything that isn't an explicit allow becomes deny.
-  if (decision === 'allow' || decision === 'allowAlways') return 'allow'
+  if (decision === 'allow') return 'allow'
+  if (decision === 'allowAlways') return 'allowAlways'
+  // Anything that isn't an explicit allow becomes deny.
   return 'deny'
 }
 

@@ -33,15 +33,20 @@
  * `/api/permission-response` / `/api/question-response` decisions into
  * `resolvePermission` / `resolveQuestion`.
  */
-import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
+import type { PermissionMode, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk'
 import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import type { CoLiveEvent, PermissionOption } from './events'
 
 /** Event sink — the single callback the broker emits through. */
 export type Emit = (event: CoLiveEvent) => void
 
-/** A permission decision from a client (the strings clients send). */
-export type PermissionDecision = 'allow' | 'deny'
+/**
+ * A permission decision from a client (the strings clients send).
+ * `allowAlways` = allow AND persist the request's SDK suggestions as
+ * `updatedPermissions` (D-033) — only offered when the request carried
+ * suggestions.
+ */
+export type PermissionDecision = 'allow' | 'allowAlways' | 'deny'
 
 /** Default-deny timeout for an unanswered permission request (60s). */
 export const PERMISSION_TIMEOUT_MS = 60_000
@@ -66,13 +71,64 @@ const EDIT_TOOLS: ReadonlySet<string> = new Set([
  * `{text, key}` objects (label + the `decision` it POSTs back). Bare strings
  * render nothing — the request silently times out. Matches native
  * even-terminal's `buildClaudePermissionOptions` minimal (no-suggestion) case;
- * `text` is the HUD label, `key` is the wire decision. (`allowAlways` parity —
- * an extra button derived from `opts.suggestions` — is a tracked follow-up.)
+ * `text` is the HUD label, `key` is the wire decision. When the SDK sends
+ * permission `suggestions`, {@link permissionOptions} inserts a derived
+ * `allowAlways` button between these two (D-033).
  */
 const PERMISSION_OPTIONS: readonly PermissionOption[] = [
   { text: 'Yes', key: 'allow' },
   { text: 'No', key: 'deny' },
 ]
+
+/** Human scope phrase for a PermissionUpdate destination (allowAlways label). */
+function scopePhrase(destination: PermissionUpdate['destination']): string {
+  switch (destination) {
+    case 'projectSettings':
+    case 'localSettings':
+      return 'from this project'
+    case 'userSettings':
+      return 'for this user'
+    case 'session':
+    case 'cliArg':
+    default:
+      return 'during this session'
+  }
+}
+
+/**
+ * Native-style "Yes, and …" label for the first labelable suggestion (native
+ * ref 09-permission.png: "Yes, and always allow access to tmp/ from this
+ * project"). Generic fallback when no suggestion is labelable.
+ */
+function allowAlwaysLabel(suggestions: PermissionUpdate[]): string {
+  for (const s of suggestions) {
+    if (s.type === 'addDirectories' && s.directories.length > 0) {
+      return `Yes, and always allow access to ${s.directories.join(', ')} ${scopePhrase(s.destination)}`
+    }
+    if (s.type === 'addRules' && s.behavior === 'allow' && s.rules.length > 0) {
+      const summary = s.rules
+        .map((r) => (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName))
+        .join(', ')
+      return `Yes, and don't ask again for ${summary} ${scopePhrase(s.destination)}`
+    }
+  }
+  return "Yes, and don't ask again"
+}
+
+/**
+ * The option buttons for a permission_request: plain Yes/No, plus a derived
+ * `allowAlways` option (between them, native position 2) when the SDK sent
+ * suggestions. Choosing it returns the FULL suggestion set as
+ * `updatedPermissions` (the sdk.d.ts contract for "allow always").
+ */
+function permissionOptions(suggestions: PermissionUpdate[]): PermissionOption[] {
+  if (suggestions.length === 0) return [...PERMISSION_OPTIONS]
+  return [
+    { text: 'Yes', key: 'allow' },
+    { text: allowAlwaysLabel(suggestions), key: 'allowAlways' },
+    { text: 'No', key: 'deny' },
+  ]
+}
 
 /** Tool-input keys (in priority order) whose value summarizes a permission. */
 const DETAIL_KEYS = ['command', 'file_path', 'url', 'prompt', 'query', 'content'] as const
@@ -109,6 +165,12 @@ interface Pending<T> {
    * Only set for permission awaits; questions resolve their own updatedInput.
    */
   input?: Record<string, unknown>
+  /**
+   * The SDK's permission suggestions for this request — set only for
+   * permission awaits. An `allowAlways` decision returns them verbatim as
+   * `updatedPermissions` so the SDK persists the choice (D-033).
+   */
+  suggestions?: PermissionUpdate[]
   /**
    * The parsed question text — set only for question awaits. {@link
    * PermissionBroker.resolveQuestion} needs it to build the SDK's
@@ -191,8 +253,15 @@ export class PermissionBroker {
     this.pendingPermissions.delete(key)
     pending.cleanup()
     clearTimeout(pending.timer)
-    const result = toDecisionResult(decision, 'denied by client', pending.input ?? {})
-    this.emitResult(pending.toolName, decision === 'allow' ? 'allow' : 'deny')
+    const result = toDecisionResult(
+      decision,
+      'denied by client',
+      pending.input ?? {},
+      pending.suggestions,
+    )
+    // allowAlways stays "allow" on the wire — the terminal permission_result
+    // vocab existing clients (Even app) dismiss on is unchanged.
+    this.emitResult(pending.toolName, decision === 'deny' ? 'deny' : 'allow')
     pending.resolve(result)
   }
 
@@ -279,15 +348,23 @@ export class PermissionBroker {
       const cleanup = () => opts.signal.removeEventListener('abort', onAbort)
       opts.signal.addEventListener('abort', onAbort, { once: true })
 
-      this.pendingPermissions.set(toolUseId, { toolName, input, resolve, timer, cleanup })
+      const suggestions = opts.suggestions ?? []
+      this.pendingPermissions.set(toolUseId, {
+        toolName,
+        input,
+        suggestions,
+        resolve,
+        timer,
+        cleanup,
+      })
       this.emit({
         type: 'permission_request',
         toolName,
         description: describePermission(toolName, opts),
         detail: detailFromInput(input),
         toolUseId,
-        options: [...PERMISSION_OPTIONS],
-        suggestions: opts.suggestions ?? [],
+        options: permissionOptions(suggestions),
+        suggestions,
       })
     })
   }
@@ -360,15 +437,21 @@ function pickPendingKey<T>(pendings: Map<string, T>, toolUseId: string): string 
  * (`ZodError … path:["updatedInput"], expected:"record"`), failing the tool —
  * even though the TS type marks `updatedInput` optional. We echo the original
  * tool input back unchanged, mirroring native even-terminal.
+ *
+ * `allowAlways` additionally returns the request's full suggestion set as
+ * `updatedPermissions` — the sdk.d.ts contract for persisting the choice.
  */
 function toDecisionResult(
   decision: PermissionDecision,
   denyMessage: string,
   updatedInput: Record<string, unknown>,
+  suggestions?: PermissionUpdate[],
 ): PermissionResult {
-  return decision === 'allow'
-    ? { behavior: 'allow', updatedInput }
-    : { behavior: 'deny', message: denyMessage }
+  if (decision === 'deny') return { behavior: 'deny', message: denyMessage }
+  if (decision === 'allowAlways' && suggestions !== undefined && suggestions.length > 0) {
+    return { behavior: 'allow', updatedInput, updatedPermissions: suggestions }
+  }
+  return { behavior: 'allow', updatedInput }
 }
 
 /**

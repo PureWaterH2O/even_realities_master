@@ -248,7 +248,8 @@ export const permission: CoLiveEvent[] = [
   {
     // Matches the real broker (src/core/permissions.ts): detail = the command
     // string (DETAIL_KEYS cascade), description = the human summary, options =
-    // PERMISSION_OPTIONS (Yes/No).
+    // Yes / allowAlways-from-suggestion / No (D-033, mirroring the native ref
+    // 09-permission.png which shows the 3-option prompt).
     type: 'permission_request',
     toolName: 'Bash',
     toolUseId: 'b1',
@@ -256,9 +257,12 @@ export const permission: CoLiveEvent[] = [
     detail: 'rm /tmp/m35-test.txt',
     options: [
       { key: 'allow', text: 'Yes' },
+      { key: 'allowAlways', text: 'Yes, and always allow access to tmp/ from this project' },
       { key: 'deny', text: 'No' },
     ],
-    suggestions: [],
+    suggestions: [
+      { type: 'addDirectories', directories: ['tmp/'], destination: 'projectSettings' },
+    ],
   } as CoLiveEvent,
 ]
 

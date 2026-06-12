@@ -259,14 +259,18 @@ describe('POST /api/permission-response', () => {
     expect(manager.respondPermission).toHaveBeenCalledWith('sess1', '', 'allow')
   })
 
-  it('normalizes allowAlways -> allow', async () => {
+  it('forwards allowAlways through to the broker (D-033: the broker persists the suggestions)', async () => {
+    // Was "normalizes allowAlways -> allow": that flattening dropped the
+    // remember-this-choice intent. The broker now owns allowAlways (allow +
+    // updatedPermissions from the request's SDK suggestions), so the Hub
+    // forwards it verbatim.
     const { app, manager } = makeApp()
     await request(app)
       .post('/api/permission-response')
       .set('Authorization', `Bearer ${TOKEN}`)
       .send({ sessionId: 'sess1', decision: 'allowAlways' })
       .expect(200)
-    expect(manager.respondPermission).toHaveBeenCalledWith('sess1', '', 'allow')
+    expect(manager.respondPermission).toHaveBeenCalledWith('sess1', '', 'allowAlways')
   })
 
   it('normalizes a deny/unknown decision to deny', async () => {

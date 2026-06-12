@@ -151,6 +151,125 @@ describe('PermissionBroker.canUseTool — normal tool', () => {
   })
 })
 
+describe('PermissionBroker — allowAlways option from SDK suggestions (D-033)', () => {
+  it('adds a labeled allowAlways option (between Yes and No) for an addDirectories suggestion', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const suggestion = {
+      type: 'addDirectories',
+      directories: ['tmp/'],
+      destination: 'projectSettings',
+    }
+    const decision = broker.canUseTool(
+      'Bash',
+      { command: 'rm /tmp/x' },
+      makeOpts({ toolUseID: 'tu-s1', suggestions: [suggestion] }),
+    )
+    const req = events[0]
+    expect(req.type).toBe('permission_request')
+    if (req.type === 'permission_request') {
+      // Native ref (09-permission.png): "2. Yes, and always allow access to tmp/ from this project"
+      expect(req.options).toEqual([
+        { text: 'Yes', key: 'allow' },
+        { text: 'Yes, and always allow access to tmp/ from this project', key: 'allowAlways' },
+        { text: 'No', key: 'deny' },
+      ])
+    }
+    broker.resolvePermission('tu-s1', 'deny')
+    await decision
+  })
+
+  it('labels an addRules session suggestion with the rule summary + session scope', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const suggestion = {
+      type: 'addRules',
+      rules: [{ toolName: 'Bash', ruleContent: 'rm *' }],
+      behavior: 'allow',
+      destination: 'session',
+    }
+    const decision = broker.canUseTool(
+      'Bash',
+      { command: 'rm x' },
+      makeOpts({ toolUseID: 'tu-s2', suggestions: [suggestion] }),
+    )
+    const req = events[0]
+    expect(req.type).toBe('permission_request')
+    if (req.type === 'permission_request') {
+      const allowAlways = req.options.find((o) => o.key === 'allowAlways')
+      expect(allowAlways?.text).toBe(
+        "Yes, and don't ask again for Bash(rm *) during this session",
+      )
+    }
+    broker.resolvePermission('tu-s2', 'deny')
+    await decision
+  })
+
+  it('resolves allowAlways as allow + the FULL suggestion set as updatedPermissions (SDK contract)', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const suggestions = [
+      { type: 'addDirectories', directories: ['tmp/'], destination: 'session' },
+      {
+        type: 'addRules',
+        rules: [{ toolName: 'Bash' }],
+        behavior: 'allow',
+        destination: 'session',
+      },
+    ]
+    const decision = broker.canUseTool(
+      'Bash',
+      { command: 'ls tmp/' },
+      makeOpts({ toolUseID: 'tu-s3', suggestions }),
+    )
+    broker.resolvePermission('tu-s3', 'allowAlways')
+    // The SDK persists the suggestions via updatedPermissions on an allow.
+    await expect(decision).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: { command: 'ls tmp/' },
+      updatedPermissions: suggestions,
+    })
+    // The terminal permission_result keeps the existing client vocab ("allow").
+    const resultEvent = events.find((e) => e.type === 'permission_result')
+    expect(resultEvent?.type === 'permission_result' && resultEvent.decision).toBe('allow')
+  })
+
+  it('keeps the plain Yes/No options when there are no suggestions (no phantom option)', async () => {
+    const { emit, events } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const decision = broker.canUseTool(
+      'Bash',
+      { command: 'ls' },
+      makeOpts({ toolUseID: 'tu-s4', suggestions: [] }),
+    )
+    const req = events[0]
+    expect(req.type).toBe('permission_request')
+    if (req.type === 'permission_request') {
+      expect(req.options.map((o) => o.key)).toEqual(['allow', 'deny'])
+    }
+    broker.resolvePermission('tu-s4', 'allow')
+    await decision
+  })
+
+  it('a plain allow on a suggestion-carrying request does NOT persist (no updatedPermissions)', async () => {
+    const { emit } = makeEmit()
+    const broker = new PermissionBroker({ emit, permissionMode: 'default' })
+    const decision = broker.canUseTool(
+      'Bash',
+      { command: 'ls' },
+      makeOpts({
+        toolUseID: 'tu-s5',
+        suggestions: [{ type: 'addDirectories', directories: ['tmp/'], destination: 'session' }],
+      }),
+    )
+    broker.resolvePermission('tu-s5', 'allow')
+    await expect(decision).resolves.toEqual({
+      behavior: 'allow',
+      updatedInput: { command: 'ls' },
+    })
+  })
+})
+
 describe('PermissionBroker — concurrent permissions resolve FIFO on a sessionId-only response', () => {
   it('an empty toolUseId settles the OLDEST pending request, in order (native shift())', async () => {
     const { emit, events } = makeEmit()
