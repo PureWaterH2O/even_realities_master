@@ -642,6 +642,31 @@ describe('desk App', () => {
     expect(stripAnsi(lastFrame() ?? '')).toContain('hXello')
   })
 
+  // UAT 2026-06-12: /context was thin (status only). It now reports the
+  // session's identity: model, mode, session id, cwd, and token totals.
+  it('/context reports model, mode, session id, cwd, and tokens', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(
+      <App client={fake} sessionId="s-ctx" config={{ cwd: '/repo/here' }} />,
+    )
+    await flush()
+    fake.emit({ type: 'running_stats', inputTokens: 100, outputTokens: 42, durationMs: 1000 })
+    await flush()
+    await write(stdin, '/context')
+    await write(stdin, '\r')
+    const frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).toContain('model:')
+    expect(frame).toContain('Opus 4.8')
+    expect(frame).toContain('mode:')
+    expect(frame).toContain('default')
+    expect(frame).toContain('session:')
+    expect(frame).toContain('s-ctx')
+    expect(frame).toContain('cwd:')
+    expect(frame).toContain('/repo/here')
+    expect(frame).toContain('tokens:')
+    expect(frame).toContain('142')
+  })
+
   it('sends a normal line as a prompt on Enter (and does not treat it as a command)', async () => {
     const fake = makeFakeHub()
     const { stdin } = mount(<App client={fake} sessionId="s1" />)

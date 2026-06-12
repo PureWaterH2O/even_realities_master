@@ -453,7 +453,15 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
           dispatch({ type: 'note', text: result.message })
           return
         case 'view':
-          dispatch({ type: 'note', text: renderView(result.view, status) })
+          dispatch({
+            type: 'note',
+            text: renderView(result.view, status, {
+              model: currentModel,
+              mode: currentMode,
+              sessionId: sessionIdRef.current,
+              cwd: fileCwd,
+            }),
+          })
           return
         case 'mouse_mode':
           // Emit the DECSET toggle at runtime. These set terminal MODES (not screen
@@ -467,7 +475,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
           return
       }
     },
-    [client, config?.cwd, setSessionId, status, stdout],
+    [client, config?.cwd, currentMode, currentModel, fileCwd, setSessionId, status, stdout],
   )
 
   // Answer the ACTIVE question of a pending user_question with `answerText`
@@ -1199,7 +1207,11 @@ function trimTrailingBackslash(b: EditBuffer): EditBuffer {
 }
 
 /** Build a local view string for /context and /usage from current state. */
-function renderView(view: 'context' | 'usage', status: StatusInfo): string {
+function renderView(
+  view: 'context' | 'usage',
+  status: StatusInfo,
+  ctx: { model: string; mode: string; sessionId: string | undefined; cwd: string },
+): string {
   if (view === 'usage') {
     return [
       'Usage:',
@@ -1208,8 +1220,16 @@ function renderView(view: 'context' | 'usage', status: StatusInfo): string {
       `  last turn:     ${status.durationMs ?? 0} ms`,
     ].join('\n')
   }
+  // UAT 2026-06-12: was status-only. Report the session's working identity —
+  // everything the desk knows locally (no extra round-trips).
+  const totalTokens = (status.inputTokens ?? 0) + (status.outputTokens ?? 0)
   return [
     'Context:',
-    `  status: ${STATUS_LABEL[status.state]}`,
+    `  model:   ${ctx.model ? modelDisplayName(ctx.model) : '(default)'}`,
+    `  mode:    ${ctx.mode}`,
+    `  session: ${ctx.sessionId ?? '(none — starts on first prompt)'}`,
+    `  cwd:     ${ctx.cwd}`,
+    `  tokens:  ${totalTokens} (${status.inputTokens ?? 0} in / ${status.outputTokens ?? 0} out)`,
+    `  status:  ${STATUS_LABEL[status.state]}`,
   ].join('\n')
 }
