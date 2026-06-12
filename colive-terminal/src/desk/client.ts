@@ -81,7 +81,12 @@ export interface HubClient {
   respondPermission(sessionId: string, decision: string, toolUseId?: string): Promise<void>
 
   /** POST /api/question-response {sessionId, answer, toolUseId?}. */
-  respondQuestion(sessionId: string, answer: string, toolUseId?: string): Promise<void>
+  respondQuestion(
+    sessionId: string,
+    answer: string,
+    toolUseId?: string,
+    answers?: Record<string, string>,
+  ): Promise<void>
 
   /** POST /api/interrupt {sessionId}. */
   interrupt(sessionId: string): Promise<void>
@@ -252,8 +257,16 @@ export function createHubClient(options: HubClientOptions): HubClient {
     sessionId: string,
     answer: string,
     toolUseId?: string,
+    answers?: Record<string, string>,
   ): Promise<void> {
-    await postJson('/api/question-response', { sessionId, answer, toolUseId: toolUseId ?? '' })
+    // `answers` (additive): the full multi-question text->answer map; omitted
+    // for single questions so the wire stays byte-identical to the M1 shape.
+    await postJson('/api/question-response', {
+      sessionId,
+      answer,
+      toolUseId: toolUseId ?? '',
+      ...(answers !== undefined ? { answers } : {}),
+    })
   }
 
   async function interrupt(sessionId: string): Promise<void> {

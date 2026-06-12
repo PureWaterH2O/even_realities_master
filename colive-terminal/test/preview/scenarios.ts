@@ -292,10 +292,25 @@ export const question: CoLiveEvent[] = [
   { type: 'text_delta', text: "I'd like to understand your preferences better." },
   toolStart('AskUserQuestion', 'q1'),
   {
+    // Mirrors the real broker: flattened first-question fields (Even-app
+    // compat) + the additive full `questions` list (header chip + option
+    // descriptions, multi-question capable).
     type: 'user_question',
     question: 'Which programming language do you prefer?',
     toolUseId: 'q1',
     options: ['TypeScript', 'Python', 'Rust'],
+    questions: [
+      {
+        question: 'Which programming language do you prefer?',
+        header: 'Language',
+        options: [
+          { label: 'TypeScript', description: 'Typed JavaScript — front/back end' },
+          { label: 'Python', description: 'Data science and scripting standard' },
+          { label: 'Rust', description: 'Fast, memory-safe systems language' },
+        ],
+        multiSelect: false,
+      },
+    ],
   } as CoLiveEvent,
 ]
 

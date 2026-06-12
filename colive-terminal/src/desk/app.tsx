@@ -35,6 +35,7 @@ import type {
   PermissionRequestEvent,
   StatusState,
   UserQuestionEvent,
+  QuestionSpec,
 } from '../core/events'
 import { interpretInput } from './slash'
 import type { MouseMode } from './slash'
@@ -156,6 +157,11 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // ↑/↓ move it, Enter confirms it, digit keys bypass it. Reset to the first
   // option whenever a new prompt appears (effect below).
   const [permissionIndex, setPermissionIndex] = useState(0)
+  // Multi-question AskUserQuestion: which question of the event's `questions`
+  // list is active, and the answers collected so far (question text → answer).
+  // One POST with the full map happens when the LAST question is answered.
+  const [qIndex, setQIndex] = useState(0)
+  const qAnswersRef = useRef<Record<string, string>>({})
   const [buf, setBuf] = useState<EditBuffer>(B.empty)
   // UAT A6 — runtime mouse-reporting mode. Defaults to 'scroll' (mouse ON, wheel
   // scrolls the transcript) to match the alt-screen enter sequence in src/index.ts.
@@ -222,8 +228,13 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // Reset the highlight + un-dismiss whenever the composer text changes (a re-filter).
   useEffect(() => { setMenuIndex(0); setMenuDismissed(false) }, [B.toText(buf)])
   // D-032: reset the permission/question highlight to the first option whenever the
-  // pending prompt changes (a new prompt, or it clears).
-  useEffect(() => { setPermissionIndex(0) }, [pending])
+  // pending prompt changes (a new prompt, or it clears). Multi-question state
+  // (step index + collected answers) resets with it.
+  useEffect(() => {
+    setPermissionIndex(0)
+    setQIndex(0)
+    qAnswersRef.current = {}
+  }, [pending])
 
   // Reserve lines for the chrome (scroll indicator + status line + 1 line of headroom)
   // PLUS the composer's own rows, which grow as the buffer gains lines. The headroom is
@@ -250,7 +261,7 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
   // pendingRows is reserved too — a tall permission prompt lives in the top section and
   // would otherwise push the pinned input off a fixed-height screen.
   const termRows = stdout?.rows ?? 24
-  const pendingRows = pending ? pendingRowCount(pending, B.toText(buf), width) : 0
+  const pendingRows = pending ? pendingRowCount(pending, B.toText(buf), width, qIndex) : 0
   // D-035: the todos/tasks panel is PINNED — it renders as a fixed section just
   // above the bottom chrome, OUTSIDE the scrollable transcript, so it stays
   // visible while tool output scrolls past (native keeps it as a persistent
@@ -430,6 +441,40 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     [client, config?.cwd, setSessionId, status, stdout],
   )
 
+  // Answer the ACTIVE question of a pending user_question with `answerText`
+  // (an option label or typed free text). Intermediate questions advance the
+  // step; the LAST one posts the response — with the full answers map when
+  // there was more than one question (the broker maps a bare answer onto the
+  // first question only).
+  const answerQuestion = useCallback(
+    (answerText: string) => {
+      const p = pending
+      if (!p || p.kind !== 'question' || answerText === '') return
+      const sid = sessionIdRef.current
+      if (sid === undefined) return
+      const specs = questionSpecs(p.event)
+      const active = specs[Math.min(qIndex, specs.length - 1)]!
+      const collected = { ...qAnswersRef.current, [active.question]: answerText }
+      if (qIndex + 1 < specs.length) {
+        qAnswersRef.current = collected
+        setQIndex(qIndex + 1)
+        setPermissionIndex(0)
+        setBuf(B.empty())
+        return
+      }
+      setPending(undefined)
+      void client
+        .respondQuestion(
+          sid,
+          answerText,
+          p.event.toolUseId,
+          specs.length > 1 ? collected : undefined,
+        )
+        .catch(() => {})
+    },
+    [client, pending, qIndex],
+  )
+
   const resolvePending = useCallback(
     (choiceIndex: number) => {
       const p = pending
@@ -442,25 +487,22 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
         setPending(undefined)
         void client.respondPermission(sid, opt.key, p.event.toolUseId).catch(() => {})
       } else {
-        const answer = p.event.options[choiceIndex]
-        if (answer === undefined) return
-        setPending(undefined)
-        void client.respondQuestion(sid, answer, p.event.toolUseId).catch(() => {})
+        const specs = questionSpecs(p.event)
+        const active = specs[Math.min(qIndex, specs.length - 1)]!
+        const opt = active.options[choiceIndex]
+        if (opt === undefined) return
+        answerQuestion(opt.label)
       }
     },
-    [client, pending],
+    [answerQuestion, client, pending, qIndex],
   )
 
   const submitQuestionText = useCallback(
     (text: string) => {
-      const p = pending
-      if (!p || p.kind !== 'question') return
-      const sid = sessionIdRef.current
-      if (sid === undefined || text === '') return
-      setPending(undefined)
-      void client.respondQuestion(sid, text, p.event.toolUseId).catch(() => {})
+      if (text === '') return
+      answerQuestion(text)
     },
-    [client, pending],
+    [answerQuestion],
   )
 
   // Apply ONE plain-arrow nav (used by the deferred batch flush below). Mirrors the old inline
@@ -617,19 +659,37 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
     }
 
     if (pending) {
-      // D-032: ↑/↓ move the highlight (clamped to the option list); digit keys still
-      // select an option directly, bypassing the highlight.
-      const optionCount = pending.event.options.length
+      // D-032: ↑/↓ move the highlight; digit keys still select an option
+      // directly, bypassing the highlight. For questions the navigable range
+      // extends past the options onto "Type something" and "Chat about this"
+      // (UAT 2026-06-12: those two rows were rendered but unreachable).
+      const realOptions =
+        pending.kind === 'question'
+          ? questionSpecs(pending.event)[Math.min(qIndex, questionSpecs(pending.event).length - 1)]!.options.length
+          : pending.event.options.length
+      const navCount = pending.kind === 'question' ? realOptions + 2 : realOptions
       if (key.upArrow)   { setPermissionIndex((i) => Math.max(0, i - 1)); return }
-      if (key.downArrow) { setPermissionIndex((i) => Math.min(optionCount - 1, i + 1)); return }
-      if (/^[1-9]$/.test(ch)) { resolvePending(Number.parseInt(ch, 10) - 1); return }
+      if (key.downArrow) { setPermissionIndex((i) => Math.min(navCount - 1, i + 1)); return }
+      if (/^[1-9]$/.test(ch)) {
+        const idx = Number.parseInt(ch, 10) - 1
+        if (pending.kind === 'question' && idx >= realOptions && idx < navCount) {
+          // Digit on "Type something" / "Chat about this": focus it (the user
+          // types next), never a dead key and never a literal digit insert.
+          setPermissionIndex(idx)
+          return
+        }
+        resolvePending(idx)
+        return
+      }
       if (pending.kind === 'question') {
-        // Enter submits typed free text when present (the "Type something" path);
-        // with no typed text it confirms the highlighted option (arrow-select).
+        // Enter submits typed free text when present (the "Type something" /
+        // "Chat about this" path); with no typed text it confirms the
+        // highlighted option (no-op on the two free-text rows — type first).
         if (key.return) {
           const typed = B.toText(buf)
           if (typed !== '') { submitQuestionText(typed); setBuf(B.empty()); return }
-          resolvePending(permissionIndex); return
+          if (permissionIndex < realOptions) resolvePending(permissionIndex)
+          return
         }
         if (key.backspace || key.delete) { setBuf(B.deleteBackward); return }
         if (ch && !key.ctrl && !key.meta) setBuf((b) => B.insertText(b, ch))
@@ -762,7 +822,13 @@ export function App({ client, sessionId: initialSessionId, config }: AppProps): 
             pending={pending}
             input={B.toText(buf)}
             width={width}
-            selectedIndex={Math.min(permissionIndex, pending.event.options.length - 1)}
+            selectedIndex={Math.min(
+              permissionIndex,
+              pending.kind === 'question'
+                ? questionSpecs(pending.event)[Math.min(qIndex, questionSpecs(pending.event).length - 1)]!.options.length + 1
+                : pending.event.options.length - 1,
+            )}
+            questionIndex={qIndex}
           />
         ) : null}
 
@@ -863,12 +929,29 @@ function buildPickerPanel(
 }
 
 /**
+ * The full question list for a user_question event. Falls back to a single
+ * spec built from the flattened first-question fields (events from an older
+ * Core, or Even-app-shaped fixtures, carry no `questions`).
+ */
+function questionSpecs(e: UserQuestionEvent): QuestionSpec[] {
+  if (e.questions !== undefined && e.questions.length > 0) return e.questions
+  return [
+    {
+      question: e.question,
+      header: '',
+      options: e.options.map((label) => ({ label })),
+      multiSelect: false,
+    },
+  ]
+}
+
+/**
  * D-029: count the rows {@link PendingPrompt} will occupy at `width`, mirroring its
  * structure so the layout can RESERVE that height in the top section (the pending
  * prompt would otherwise push the bottom-pinned input off a fixed-height screen).
  * Over-counting is safe — it only trims the transcript window a little further.
  */
-function pendingRowCount(pending: Pending, input: string, width: number): number {
+function pendingRowCount(pending: Pending, input: string, width: number, qIdx: number): number {
   const wrapped = (s: string): number => Math.max(1, wrapAnsi(s, width).length)
   if (pending.kind === 'permission') {
     const e = pending.event
@@ -880,8 +963,11 @@ function pendingRowCount(pending: Pending, input: string, width: number): number
     return n
   }
   const e = pending.event
-  // rule + badge + blank + question + options + "Type something" + rule + "Chat about this" + [input echo] + footer
-  let n = 1 + 1 + 1 + wrapped(e.question) + e.options.length + 1 + 1 + 1 + 1
+  const specs = questionSpecs(e)
+  const active = specs[Math.min(qIdx, specs.length - 1)]!
+  // rule + badge + blank + question + options + [desc line] + "Type something" + rule + "Chat about this" + [input echo] + footer
+  let n = 1 + 1 + 1 + wrapped(active.question) + active.options.length + 1 + 1 + 1 + 1
+  if (active.options.some((o) => o.description !== undefined)) n += 1
   if (input) n += 1
   return n
 }
@@ -920,7 +1006,7 @@ function permissionHeader(toolName: string): string {
  * D-018): no rounded box, a leading rule, a header, the body, numbered options
  * (the highlighted option marked with "›"), and a key-hint footer.
  */
-function PendingPrompt({ pending, input, width, selectedIndex }: { pending: Pending; input: string; width: number; selectedIndex: number }): React.ReactElement {
+function PendingPrompt({ pending, input, width, selectedIndex, questionIndex }: { pending: Pending; input: string; width: number; selectedIndex: number; questionIndex: number }): React.ReactElement {
   const rule = '─'.repeat(Math.max(1, width))
   if (pending.kind === 'permission') {
     const e = pending.event
@@ -946,23 +1032,42 @@ function PendingPrompt({ pending, input, width, selectedIndex }: { pending: Pend
     )
   }
   const e = pending.event
-  const extras = e.options.length
+  const specs = questionSpecs(e)
+  const active = specs[Math.min(questionIndex, specs.length - 1)]!
+  const total = specs.length
+  const extras = active.options.length
   return (
     <Box flexDirection="column">
       <Text dimColor>{rule}</Text>
-      <Text backgroundColor="#c4b5fd" color="black">{' □ Question '}</Text>
+      <Text>
+        <Text backgroundColor="#c4b5fd" color="black">{` □ ${active.header || 'Question'} `}</Text>
+        {total > 1 ? <Text dimColor>{`  ${questionIndex + 1}/${total}`}</Text> : null}
+      </Text>
       <Text> </Text>
-      <Text bold>{e.question}</Text>
-      {e.options.map((opt, i) => (
-        <Text key={opt + String(i)}>
-          {i === selectedIndex ? <Text color="#a78bfa">{'› '}</Text> : '  '}
-          {`${i + 1}. `}
-          {i === selectedIndex ? <Text color="#a78bfa">{opt}</Text> : opt}
-        </Text>
+      <Text bold>{active.question}</Text>
+      {active.options.map((opt, i) => (
+        <Box key={opt.label + String(i)} flexDirection="column">
+          <Text>
+            {i === selectedIndex ? <Text color="#a78bfa">{'› '}</Text> : '  '}
+            {`${i + 1}. `}
+            {i === selectedIndex ? <Text color="#a78bfa">{opt.label}</Text> : opt.label}
+          </Text>
+          {i === selectedIndex && opt.description !== undefined ? (
+            <Text dimColor>{`     ${opt.description}`}</Text>
+          ) : null}
+        </Box>
       ))}
-      <Text>{`  ${extras + 1}. Type something`}</Text>
+      <Text>
+        {selectedIndex === extras ? <Text color="#a78bfa">{'› '}</Text> : '  '}
+        {`${extras + 1}. `}
+        {selectedIndex === extras ? <Text color="#a78bfa">Type something</Text> : 'Type something'}
+      </Text>
       <Text dimColor>{rule}</Text>
-      <Text>{`  ${extras + 2}. Chat about this`}</Text>
+      <Text>
+        {selectedIndex === extras + 1 ? <Text color="#a78bfa">{'› '}</Text> : '  '}
+        {`${extras + 2}. `}
+        {selectedIndex === extras + 1 ? <Text color="#a78bfa">Chat about this</Text> : 'Chat about this'}
+      </Text>
       {input ? <Text dimColor>{`  › ${input}`}</Text> : null}
       <Text dimColor>Enter to select · ↑/↓ to navigate · Esc to cancel</Text>
     </Box>

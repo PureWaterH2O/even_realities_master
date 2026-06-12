@@ -33,7 +33,7 @@ interface FakeHub extends HubClient {
   /** Recorded calls. */
   prompts: SendPromptArgs[]
   permissions: Array<{ sessionId: string; decision: string; toolUseId?: string }>
-  questions: Array<{ sessionId: string; answer: string; toolUseId?: string }>
+  questions: Array<{ sessionId: string; answer: string; toolUseId?: string; answers?: Record<string, string> }>
   interrupts: string[]
   /** Recorded setControl calls. */
   controls: Array<{ action: string; value: string }>
@@ -76,8 +76,8 @@ function makeFakeHub(opts?: {
     async respondPermission(sessionId, decision, toolUseId) {
       fake.permissions.push({ sessionId, decision, toolUseId })
     },
-    async respondQuestion(sessionId, answer, toolUseId) {
-      fake.questions.push({ sessionId, answer, toolUseId })
+    async respondQuestion(sessionId, answer, toolUseId, answers) {
+      fake.questions.push({ sessionId, answer, toolUseId, ...(answers ? { answers } : {}) })
     },
     async interrupt(sessionId) {
       fake.interrupts.push(sessionId)
@@ -462,6 +462,126 @@ describe('desk App', () => {
     expect(fake.permissions).toEqual([
       { sessionId: 's1', decision: 'allowAlways', toolUseId: 'tu-a1' },
     ])
+  })
+
+  // UAT 2026-06-12: options 4/5 ("Type something" / "Chat about this") were
+  // rendered but unreachable — arrows clamped at the option list and digits
+  // 4/5 were dead. They are now navigable; Enter on them submits typed text.
+  it('arrow-navigates past the options onto "Type something" and "Chat about this"', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'user_question',
+      question: 'Which language?',
+      toolUseId: 'q-45',
+      options: ['Python', 'C++', 'PHP'],
+    })
+    await flush()
+    await write(stdin, '\x1b[B') // -> 2
+    await write(stdin, '\x1b[B') // -> 3
+    await write(stdin, '\x1b[B') // -> 4. Type something
+    expect(stripAnsi(lastFrame() ?? '')).toContain('› 4. Type something')
+    await write(stdin, '\x1b[B') // -> 5. Chat about this
+    expect(stripAnsi(lastFrame() ?? '')).toContain('› 5. Chat about this')
+    // Enter on "Chat about this" with typed text submits the text.
+    await write(stdin, 'let us discuss')
+    await write(stdin, '\r')
+    expect(fake.questions).toEqual([{ sessionId: 's1', answer: 'let us discuss', toolUseId: 'q-45' }])
+  })
+
+  it('digit 4 focuses "Type something" (no dead keys); Enter then submits the typed text', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'user_question',
+      question: 'Which language?',
+      toolUseId: 'q-d4',
+      options: ['Python', 'C++', 'PHP'],
+    })
+    await flush()
+    await write(stdin, '4')
+    expect(stripAnsi(lastFrame() ?? '')).toContain('› 4. Type something')
+    expect(fake.questions).toHaveLength(0) // focus, not a submit
+    await write(stdin, 'Zig')
+    await write(stdin, '\r')
+    expect(fake.questions).toEqual([{ sessionId: 's1', answer: 'Zig', toolUseId: 'q-d4' }])
+  })
+
+  it('steps through MULTIPLE questions and posts ONE full answers map at the end', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'user_question',
+      question: 'Which language?',
+      toolUseId: 'q-mq',
+      options: ['Python', 'Rust'],
+      questions: [
+        {
+          question: 'Which language?',
+          header: 'Language',
+          options: [
+            { label: 'Python', description: 'Data science standard' },
+            { label: 'Rust', description: 'Systems programming' },
+          ],
+          multiSelect: false,
+        },
+        {
+          question: 'Which editor?',
+          header: 'Editor',
+          options: [{ label: 'vim' }, { label: 'emacs' }],
+          multiSelect: false,
+        },
+      ],
+    })
+    await flush()
+    // Native-style header chip + progress for the first question.
+    let frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).toContain('Language')
+    expect(frame).toContain('1/2')
+    await write(stdin, '1') // answer Q1 = Python
+    // No POST yet — the second question renders.
+    expect(fake.questions).toHaveLength(0)
+    frame = stripAnsi(lastFrame() ?? '')
+    expect(frame).toContain('Which editor?')
+    expect(frame).toContain('2/2')
+    await write(stdin, '2') // answer Q2 = emacs
+    expect(fake.questions).toEqual([
+      {
+        sessionId: 's1',
+        answer: 'emacs',
+        toolUseId: 'q-mq',
+        answers: { 'Which language?': 'Python', 'Which editor?': 'emacs' },
+      },
+    ])
+  })
+
+  it('shows the highlighted option description (dim) when the event carries one', async () => {
+    const fake = makeFakeHub()
+    const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)
+    await flush()
+    fake.emit({
+      type: 'user_question',
+      question: 'Which language?',
+      toolUseId: 'q-desc',
+      options: ['Python', 'Rust'],
+      questions: [
+        {
+          question: 'Which language?',
+          header: 'Language',
+          options: [
+            { label: 'Python', description: 'Data science standard' },
+            { label: 'Rust', description: 'Systems programming' },
+          ],
+          multiSelect: false,
+        },
+      ],
+    })
+    await flush()
+    expect(stripAnsi(lastFrame() ?? '')).toContain('Data science standard')
+    await write(stdin, '1')
   })
 
   it('arrow-navigates question options and confirms the selection with Enter (no typed text)', async () => {
