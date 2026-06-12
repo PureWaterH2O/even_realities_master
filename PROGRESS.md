@@ -5,6 +5,18 @@ built, what we decided. Newest entries on top.
 
 ## 2026-06-12
 
+### Co-Live Terminal — improvement pass (owner UAT findings): question picker, dynamic /model, click-to-position, /context
+
+- **Owner findings:** question options 4/5 (`Type something`/`Chat about this`) rendered but **unreachable** (arrows clamped, digits dead); only the FIRST of a multi-question `AskUserQuestion` ever shown (native shows up to 4); `/model` was a **stale hardcoded list** (no Fable 5); no click-to-position in the composer (native has it); `/` commands thin overall.
+- **5 TDD tasks, one commit each (`e403d64`, `0072042`, `fdfb4b8`, `e19e0ff`, `b0ecdbc`):**
+  1. **Core multi-question wire (additive):** `user_question` gains `questions[]` (full SDK parse — headers, option descriptions, multiSelect flag); flattened `question`/`options` unchanged (Even-app compat). `resolveQuestion` accepts a full `answers` map; Hub forwards an additive `answers` object.
+  2. **Desk question UX:** ↑/↓ + digits reach all rows incl. Type-something/Chat-about-this (digit = focus, Enter submits typed text); multi-question steps 1/N..N/N with the native **header chip** (also closes the D-018 generic-chip divergence) + highlighted-option description; ONE POST with the full answers map at the end.
+  3. **Dynamic /model:** the "SDK has no list-models call" premise was WRONG — `Query.supportedModels()` exists. New `ClaudeSession.supportedModels()` (best-effort) → `SessionManager.listModels` → additive `GET /api/models?sessionId=` → the desk fetches the live list when the picker opens; curated fallback refreshed (+ **Fable 5**).
+  4. **Click-to-position:** `parseSgrClick` (left-press only) + `EditBuffer.moveTo` + a per-render click map (input-block top row mirrors the height-reservation sums, incl. a new `bannerRowCount`); app test derives the input row from the rendered frame as a cross-check.
+  5. **/context enriched:** model/mode/session/cwd/tokens/status (was status-only).
+- **Gates:** `tsc` 0 · **555 tests** (540→+15 net; every fix red-first) · all preview frames regenerated; question + model-picker frames eyeballed (chip, description-under-highlight, reachable 4/5, Fable 5 listed). One observed **unrelated flake** (`routes — control 400/401` failed once in a full parallel run, passes alone + in two subsequent full runs).
+- **Next → 👤 owner LIGHT UAT (runbook Round-4 R4-1..R4-5; restart serve + desk first) → ship the phase** (push all of `main`), then discuss direction.
+
 ### Co-Live Terminal — UAT round-3 BLOCKER triaged + fixed: D-037 desk sessions ran in SERVE's cwd, not the desk's
 
 - **Owner UAT symptom:** "Read the file CLAUDE.md" → Claude found nothing, then declared the project root was `…/random-claude-stuff/even-realities/` (**hyphens** — real path has underscores) and that it was **empty**. "Our desk does not see the repo we are in."

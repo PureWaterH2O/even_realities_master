@@ -1,6 +1,10 @@
 # Co-Live Terminal — Status
 
-**Current state:** 🟨 **M3.5 "Aesthetic pass" — CODE COMPLETE, awaiting hardware UAT round 3 + push (2026-06-12).**
+**Current state:** 🟨 **M3.5 + improvement pass — CODE COMPLETE, awaiting owner LIGHT UAT (Round 4) → ship (2026-06-12).**
+Improvement pass (owner round-3 findings) done on top of the closed catalog: multi-question AskUserQuestion
+(additive `questions[]` + answers-map wire), reachable Type-something/Chat-about-this rows, dynamic `/model` from SDK
+`supportedModels` (+ Fable 5 fallback), click-to-position composer cursor, enriched `/context`. **555 tests, tsc 0.**
+Owner runs runbook **Round-4 (R4-1..R4-5, restart serve+desk)** → push everything → then discuss direction.
 The difference catalog is **CLOSED**: all 36 entries (D-001…D-036 + wasted-space) are ✅ fixed, ⏭️ accepted-divergence,
 or 🟦 descoped-per-owner. Phase B (22 entries) merged; UAT rounds 1–2 surfaced 9 more defects, all fixed; final cleanup
 2026-06-12 closed the last two (D-033 `allowAlways` from SDK suggestions `f3d7a54`; D-034 per-tool permission header
