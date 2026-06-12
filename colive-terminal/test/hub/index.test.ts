@@ -203,6 +203,21 @@ describe('runDesk (injected renderer — no real TTY)', () => {
     expect(rendered[0]?.sessionId).toBe('s-42')
   })
 
+  it("passes the desk's own cwd so NEW sessions run where the user launched the desk", () => {
+    // Without this, config.cwd stays undefined -> sendPrompt sends no cwd ->
+    // the Core falls back to the SERVE process's projectDir. The desk is the
+    // user's terminal: a new session must run in the directory the desk was
+    // launched from (like native `claude`), not wherever serve was started.
+    const captured: Array<{ cwd?: string }> = []
+    const fakeRender: RenderFn = (element) => {
+      const props = (element as { props: { config?: { cwd?: string } } }).props
+      captured.push({ cwd: props.config?.cwd })
+      return { unmount() {}, waitUntilExit: () => Promise.resolve() }
+    }
+    runDesk([], { BRIDGE_TOKEN: 'tok' }, fakeRender)
+    expect(captured[0]?.cwd).toBe(process.cwd())
+  })
+
   it('throws (no silent no-op) when no token is available', () => {
     const fakeRender: RenderFn = () => ({ unmount() {}, waitUntilExit: () => Promise.resolve() })
     expect(() => runDesk([], {}, fakeRender)).toThrow(/token/i)

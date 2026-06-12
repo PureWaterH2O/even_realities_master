@@ -508,6 +508,18 @@ describe('desk App', () => {
     expect(fake.prompts[0]?.sessionId).toBe('s1')
   })
 
+  it('starts a NEW session with config.cwd so it runs where the desk was launched', async () => {
+    // Pins the contract the runDesk cwd wiring depends on: with no sessionId,
+    // the first submit must carry config.cwd to /api/prompt (the Core would
+    // otherwise fall back to the SERVE process's projectDir).
+    const fake = makeFakeHub({ promptResult: { sessionId: 'fresh-1' } })
+    const { stdin } = mount(<App client={fake} config={{ cwd: '/repo/here' }} />)
+    await flush()
+    await write(stdin, 'hello')
+    await write(stdin, '\r')
+    expect(fake.prompts).toEqual([{ text: 'hello', cwd: '/repo/here' }])
+  })
+
   it('renders a desk-sent prompt ONCE despite the Hub broadcasting it back (UAT B1)', async () => {
     const fake = makeFakeHub()
     const { lastFrame, stdin } = mount(<App client={fake} sessionId="s1" />)

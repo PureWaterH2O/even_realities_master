@@ -228,7 +228,11 @@ export function runDesk(
     createElement(App, {
       client,
       sessionId: conn.sessionId,
-      config: { historyStore: fileHistoryStore(), historyKey: conn.baseUrl },
+      // cwd: NEW sessions must run where the USER launched the desk (like
+      // native `claude`), not wherever serve was started — without it the
+      // Core falls back to serve's projectDir and the desk silently works in
+      // the wrong directory (while the banner shows the desk's own cwd).
+      config: { historyStore: fileHistoryStore(), historyKey: conn.baseUrl, cwd: process.cwd() },
     }),
   )
 
