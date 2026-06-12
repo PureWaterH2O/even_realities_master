@@ -3,6 +3,15 @@
 Overarching, dated changelog for the whole workspace: what we learned, what we
 built, what we decided. Newest entries on top.
 
+## 2026-06-12
+
+### Co-Live Terminal — M3.5 final cleanup: D-033 + D-034 fixed → catalog CLOSED (no open entries)
+
+- **D-033 (medium):** the "permission options too sparse" gap was **NOT a Core/Hub data limitation** — the SDK's permission `suggestions` already flowed through the `permission_request` event; the broker hard-coded Yes/No and the Hub flattened the `allowAlways` wire decision to plain `allow` (dropping the persist intent). Fix `f3d7a54`: broker inserts a labeled `allowAlways` option (native position 2, label derived from the first `addDirectories`/`addRules` suggestion — matches the native ref 09-permission.png "Yes, and always allow access to tmp/ from this project"); an `allowAlways` decision resolves allow + the **full suggestion set** as `updatedPermissions` (the sdk.d.ts contract); the Hub forwards `allowAlways` verbatim. Wire compat preserved: terminal `permission_result` still says `allow`; the third option is an additive `{text,key}` button for the Even app. Knowledge: 5th broker wire-fact in `knowledge/terminal-mode/overview.md`.
+- **D-034 (minor):** generic `<Tool> command` permission header → desk-only `permissionHeader()` per-tool map (`Bash command` / `Read file` / `Edit file` / `Create file` / `Fetch` / …, generic fallback), used by both `PendingPrompt` and the `pendingRowCount` layout mirror. `8e0cdb6`.
+- **Verify:** TDD (5 new tests watched fail first) · `tsc` 0 · `vitest` **530** (+7 from 523) · preview scenario 09 updated to the 3-option prompt and frame eyeballed vs the native reference (structural match). One pre-existing routes test legitimately re-pointed (`normalizes allowAlways -> allow` → `forwards allowAlways through`, the flattening WAS the D-033 bug).
+- **Catalog status: every entry is now ✅ fixed, ⏭️ accepted-divergence, or 🟦 descoped.** Runbook gained a Round-3 section (R3-1..R3-3: allowAlways persist, per-tool header, glasses 3-button regression). **NOT pushed** (29 commits ahead) — per "done = UAT", push awaits owner hardware UAT of round-2 fixes + round-3.
+
 ## 2026-06-07
 
 ### Co-Live Terminal — M3.5 UAT round-2 fixes (D-035, D-036, wasted-space)

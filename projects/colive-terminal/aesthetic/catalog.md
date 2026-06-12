@@ -208,6 +208,20 @@ implement at all.
 
 ---
 
+## Final cleanup (2026-06-12) — last two open entries fixed; catalog CLOSED
+
+**D-033 — Permission options too sparse** · **medium** · ✅ FIXED `f3d7a54`
+- The gap was NOT a Core/Hub data limitation after all: the SDK's permission `suggestions` already flowed through the `permission_request` event, but (a) the broker hard-coded the Yes/No options, and (b) the Hub flattened the `allowAlways` wire decision to plain `allow`, dropping the remember-this-choice intent.
+- Fix: the broker inserts a labeled `allowAlways` option (native position 2) derived from the first `addDirectories`/`addRules` suggestion — e.g. `Yes, and always allow access to tmp/ from this project` (matches the native ref 09-permission.png) — and an `allowAlways` decision resolves allow + the **full suggestion set** as `updatedPermissions` (the sdk.d.ts contract for persisting the choice). The Hub forwards `allowAlways` verbatim. Wire compat: the terminal `permission_result` still says `allow`; the third option is additive `{text,key}` — the Even app renders it as a third tappable button.
+- NOT implemented (still divergent, accepted): native's VS Code diff preview ("Opened changes in Visual Studio Code") — an IDE integration, out of M3.5 rendering scope.
+
+**D-034 — Permission header shows wrong tool type** · **minor** · ✅ FIXED `8e0cdb6`
+- Fix: desk-only `permissionHeader()` map — `Bash command` / `Read file` / `Edit file` / `Create file` / `Edit notebook` / `Fetch` / `Web search`; unknown tools keep the generic `<Tool> command`. Used by both `PendingPrompt` and the `pendingRowCount` layout mirror.
+
+_With these, every catalog entry is ✅ fixed, ⏭️ accepted-divergence, or 🟦 descoped — no open entries remain. Awaits round-3 hardware UAT (F7/F8 re-run) before push._
+
+---
+
 ## Scenario → entry coverage
 
 01→D-001,D-002,D-009 · 02→D-003,D-010 · 03→D-011 · 04→D-007,D-012 · 05/06/08→D-004,D-005,D-006,D-007 ·

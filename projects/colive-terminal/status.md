@@ -1,12 +1,16 @@
 # Co-Live Terminal — Status
 
-**Current state:** 🟨 **M3.5 "Aesthetic pass" — IN PROGRESS (reordered before M3.4, 2026-06-06).** Systematic
-native-parity rendering pass: reference-frame comparison system (25 scenarios, snap.sh capture helper, replay harness
-extension) → difference catalog → element-by-element rendering fixes → UAT → customization brainstorm. Fidelity target:
-"indistinguishable at a glance" from native Claude Code in the same VS Code terminal. Builder Run 1 (comparison
-infrastructure, Tasks 1-5) in progress. M3.4 deferred — scope to be revisited after M3.5 ships.
+**Current state:** 🟨 **M3.5 "Aesthetic pass" — CODE COMPLETE, awaiting hardware UAT round 3 + push (2026-06-12).**
+The difference catalog is **CLOSED**: all 36 entries (D-001…D-036 + wasted-space) are ✅ fixed, ⏭️ accepted-divergence,
+or 🟦 descoped-per-owner. Phase B (22 entries) merged; UAT rounds 1–2 surfaced 9 more defects, all fixed; final cleanup
+2026-06-12 closed the last two (D-033 `allowAlways` from SDK suggestions `f3d7a54`; D-034 per-tool permission header
+`8e0cdb6`). Gates: `tsc` 0 · **530 tests** · preview frames eyeballed vs native refs. **29 commits ahead of
+`origin/main`, NOT pushed** — per "done = UAT": owner runs `m3.5-uat-runbook.md` (rounds 2 fixes via F1–F20 spot-check
++ new Round-3 R3-1..R3-3), then push. After M3.5: revisit M3.4 (multi-session) scope; build-vs-adopt verdict
+(2026-06-07) recommends no further pixel-parity beyond this.
 - **Spec:** `docs/superpowers/specs/2026-06-06-colive-terminal-m3.5-aesthetic-pass-design.md`
 - **Plan:** `docs/superpowers/plans/2026-06-06-colive-terminal-m3.5-aesthetic-pass.md`
+- **Catalog:** `projects/colive-terminal/aesthetic/catalog.md` · **Runbook:** `projects/colive-terminal/m3.5-uat-runbook.md`
 
 ---
 
