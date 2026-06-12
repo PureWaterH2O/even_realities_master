@@ -222,6 +222,17 @@ _With these, every catalog entry is ✅ fixed, ⏭️ accepted-divergence, or �
 
 ---
 
+## UAT round-3 findings (2026-06-12) — owner hardware run
+
+**D-037 — Desk sessions run in the SERVE process's directory, not the desk's (functional, major)** · ✅ FIXED
+- Symptom: "Read the file CLAUDE.md" → `Glob **/CLAUDE.md` found nothing; the model then guessed a "project root" of `/Users/thomasneal/Documents/random-claude-stuff/even-realities/` (HYPHENS — the real path has underscores) and an `ls` there *succeeded* on an empty dir → "the project is empty".
+- Root cause (verified via `lsof` on the live serve + SDK child): the session's actual cwd was **correct but wrong-by-design** — `…/even_realities/colive-terminal`, i.e. wherever `colive serve` was started (the runbook cd's there), NOT where the user/desk is. `runDesk` never populated `AppConfig.cwd` (designed for exactly this, never wired), so `sendPrompt` carried no cwd and the Core fell back to serve's `projectDir`. The banner meanwhile displayed the **desk's** `process.cwd()` — lying about where the session ran. CLAUDE.md lives at the repo root, one level above → correctly not found.
+- The spooky hyphenated path was the **model** reverse-engineering a "project root" from the lossy encoded store-dir name in its context (`_` and `/` both encode to `-`), "confirmed" by a phantom empty dir at exactly that path (created Jun 1 by an earlier session making the same guess). Phantom dir `rmdir`'d; the real `random-claude-stuff/claude_stuff` sibling untouched.
+- Fix: `runDesk` passes `cwd: process.cwd()` via `AppConfig.cwd` → new sessions run where the desk was launched, like native `claude`; banner now truthful. Runbook setup updated (desk + native launched from the SAME dir, repo root) + R3-4 scenario. TDD: runDesk test red→green + app-level contract pin; 532 tests, tsc 0.
+- **Known remaining divergence (owner decision, NOT fixed):** `settingSources: []` (M0 anti-hook-leak / anti-20s-latency) means the desk's Claude never auto-loads CLAUDE.md into context the way native does — and it is not CLI-togglable today. Explicit reads work now that the cwd is right.
+
+---
+
 ## Scenario → entry coverage
 
 01→D-001,D-002,D-009 · 02→D-003,D-010 · 03→D-011 · 04→D-007,D-012 · 05/06/08→D-004,D-005,D-006,D-007 ·
